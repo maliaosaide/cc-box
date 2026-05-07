@@ -198,17 +198,14 @@ func runGC(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// 1. 收集所有可达的 object 哈希（从快照链中）
 	fmt.Println("扫描快照链...")
 	reachableObjects := make(map[string]bool)
 
-	// 读取远程 HEAD
 	headData, _, err := client.GET("HEAD")
 	if err != nil {
 		return fmt.Errorf("读取远程 HEAD 失败: %w", err)
 	}
 
-	// 沿快照链遍历，收集所有引用的 object 哈希
 	snapID := string(headData)
 	snapCount := 0
 	for snapID != "" && snapCount < 50 {
@@ -217,7 +214,6 @@ func runGC(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  跳过快照 %s: %v\n", snapID, err)
 			break
 		}
-
 		for _, entry := range snap.Files {
 			reachableObjects[entry.Hash] = true
 		}
@@ -226,12 +222,19 @@ func runGC(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("  扫描了 %d 个快照，%d 个可达 object\n", snapCount, len(reachableObjects))
 
-	// 2. 列出远程所有 objects
 	fmt.Println("扫描远程 objects...")
-	// 遍历 objects/ 下的哈希前缀目录
 	prefixFiles, err := client.PROPFIND("objects/", 1)
 	if err != nil {
 		return fmt.Errorf("列出 objects 失败: %w", err)
+	}
+
+	// 辅助函数：从 PROPFIND 返回路径中提取最后一段
+	extractName := func(p string) string {
+		p = strings.TrimSuffix(p, "/")
+		if idx := strings.LastIndex(p, "/"); idx >= 0 {
+			return p[idx+1:]
+		}
+		return p
 	}
 
 	var orphanObjects []string
@@ -239,8 +242,9 @@ func runGC(cmd *cobra.Command, args []string) error {
 		if !dir.IsDir {
 			continue
 		}
+		dirName := extractName(dir.Path)
 
-		objFiles, err := client.PROPFIND("objects/"+dir.Path, 1)
+		objFiles, err := client.PROPFIND("objects/"+dirName+"/", 1)
 		if err != nil {
 			continue
 		}
@@ -249,14 +253,12 @@ func runGC(cmd *cobra.Command, args []string) error {
 			if f.IsDir || !strings.HasSuffix(f.Path, ".enc") {
 				continue
 			}
-
-			// 从文件名提取哈希: ab/c1234def.enc → sha256:abc1234def
-			fileName := strings.TrimSuffix(filepath.Base(f.Path), ".enc")
-			prefix := filepath.Base(filepath.Dir(f.Path))
-			hash := prefix + fileName
+			encFileName := extractName(f.Path)
+			fileName := strings.TrimSuffix(encFileName, ".enc")
+			hash := dirName + fileName
 
 			if !reachableObjects[hash] {
-				orphanObjects = append(orphanObjects, "objects/"+dir.Path+f.Path)
+				orphanObjects = append(orphanObjects, "objects/"+dirName+"/"+encFileName)
 			}
 		}
 	}

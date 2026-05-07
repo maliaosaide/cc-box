@@ -76,7 +76,13 @@ func runDeviceList(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		data, _, err := client.GET("devices/" + f.Path)
+		// f.Path 可能包含完整路径前缀，提取文件名
+		fileName := f.Path
+		if idx := strings.LastIndex(fileName, "/"); idx >= 0 {
+			fileName = fileName[idx+1:]
+		}
+
+		data, _, err := client.GET("devices/" + fileName)
 		if err != nil {
 			continue
 		}
