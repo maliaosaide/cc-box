@@ -150,45 +150,52 @@ cc-box pull --dry-run
 ## 命令一览
 
 ```
-# 同步操作（已实现）
+# 同步操作
 cc-box init                     # 初始化（交互式向导）
 cc-box push [-m MSG] [--dry-run] # 推送到 WebDAV
 cc-box pull [--dry-run]         # 从 WebDAV 拉取
 cc-box sync                     # pull + push 一步完成
 cc-box status                   # 查看本地/远程差异
+cc-box diff [FILE]              # 查看文件内容差异
 
-# 版本历史（已实现）
+# 版本历史
 cc-box log [--oneline] [-n N]   # 查看快照历史
 cc-box show <snapshot-id>       # 查看快照详情
 cc-box revert <snapshot-id>     # 回滚到指定快照
 
-# 冲突处理（已实现）
+# 冲突处理
 cc-box conflicts                # 列出未解决的冲突文件
 cc-box resolve <file>           # 交互式解决文件冲突
 
-# 二进制管理（已实现）
+# 项目配置
+cc-box project list             # 列出已追踪项目
+cc-box project push [PATH]      # 推送 .claude.json
+cc-box project pull             # 拉取项目配置
+cc-box project orphans          # 列出未匹配的远程项目
+
+# 设备管理
+cc-box device list              # 列出已注册设备
+cc-box device rename <name>     # 重命名当前设备
+cc-box device forget <id>       # 移除设备注册信息
+
+# 二进制管理
 cc-box binary list              # 列出云端已有版本
 cc-box binary push              # 上传本地二进制到 WebDAV
 cc-box binary pull [VERSION]    # 从 WebDAV 下载版本
 cc-box binary switch <VERSION>  # 切换 Claude 版本
 cc-box binary prune             # 清理云端旧版本
 
-# 配置（已实现）
+# 配置
 cc-box config get <key>         # 查看配置
 cc-box config set <key> <val>   # 修改配置
 cc-box config webdav            # 重新配置 WebDAV 连接
 cc-box config rekey             # 更改加密密码（密钥轮转）
 
-# 维护（已实现）
+# 维护
 cc-box backup                   # 创建本地完整备份
 cc-box restore                  # 从备份恢复
 cc-box verify                   # 校验本地/远程完整性
 cc-box gc                       # 清理云端过期数据
-
-# 项目配置（Phase 3）
-cc-box project list             # 列出已追踪项目
-cc-box project push [PATH]      # 推送 .claude.json
-cc-box project pull             # 拉取项目配置
 ```
 
 ## 技术栈
@@ -205,7 +212,7 @@ cc-box project pull             # 拉取项目配置
 cc-box/
 ├── cmd/cc-box/main.go           # 入口
 ├── internal/
-│   ├── cli/                     # CLI 命令（init/push/pull/status/log/revert/binary/config...）
+│   ├── cli/                     # CLI 命令（init/push/pull/status/log/revert/binary/config/diff/device/project...）
 │   ├── config/                  # 配置管理 + 密钥环
 │   ├── webdav/                  # WebDAV 客户端（ETag 乐观锁）
 │   ├── snapshot/                # 快照管理 + 文件扫描器 + Diff
@@ -213,7 +220,8 @@ cc-box/
 │   ├── crypto/                  # 端到端加密（Argon2id + AES-256-GCM）
 │   ├── object/                  # Object 存储管理（哈希去重）
 │   ├── sync/                    # 三方合并引擎（文本/JSON/history.jsonl）
-│   └── binary/                  # 二进制分块上传/下载 + 版本索引
+│   ├── binary/                  # 二进制分块上传/下载 + 版本索引
+│   └── project/                 # 项目配置同步（git remote 匹配 + orphan 管理）
 ├── go.mod
 ├── Makefile
 └── DESIGN.md                    # 详细设计文档
@@ -230,15 +238,17 @@ go test ./internal/...
 go test ./internal/ -run TestWebDAV -v
 go test ./internal/ -run TestFullSyncFlow -v
 go test ./internal/ -run TestPhase2 -v
+go test ./internal/ -run TestPhase3 -v
 ```
 
-当前 37 个测试通过：8 crypto + 6 normalize + 6 object + 7 snapshot + 9 sync + 7 集成。
+当前 50 个测试通过：8 crypto + 6 normalize + 6 object + 7 snapshot + 9 sync + 6 project + 13 集成。
 
 ## 项目状态
 
 - [x] **Phase 1** — MVP：init → push → pull → status 完整流程
 - [x] **Phase 2** — 三方合并引擎、二进制版本管理、密钥轮转、log/revert/conflicts 等命令
-- [ ] **Phase 3** — GUI (Wails + Svelte)、项目配置同步
+- [x] **Phase 3a** — CLI 补齐：diff、device、project、gc 完善、binary prune 完善
+- [ ] **Phase 3b** — GUI (Wails + Svelte)
 - [ ] **Phase 4** — 测试覆盖、多平台发布、打磨
 
 详细设计文档见 [DESIGN.md](./DESIGN.md)。
