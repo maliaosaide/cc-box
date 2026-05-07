@@ -31,32 +31,27 @@ func runPush(cmd *cobra.Command, args []string) error {
 	msg, _ := cmd.Flags().GetString("message")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 
-	// 加载配置
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("请先运行 cc-box init")
 	}
 
-	// 加载密钥
 	key, err := crypto.LoadKey(config.KeyPath())
 	if err != nil {
 		return fmt.Errorf("加载密钥失败，请重新运行 cc-box init")
 	}
 
-	// 创建 WebDAV 客户端
 	pass, err := config.LoadWebDAVPassword()
 	if err != nil {
 		return err
 	}
 	client := webdav.NewClient(cfg.WebDAV.URL, cfg.WebDAV.Username, pass)
 
-	// 加载本地 HEAD
 	localHead, err := loadLocalHEAD()
 	if err != nil {
 		return fmt.Errorf("读取本地 HEAD 失败: %w", err)
 	}
 
-	// 加载本地最新快照
 	var localSnap *snapshot.Snapshot
 	if localHead != "" {
 		localSnap, err = loadRemoteSnapshot(client, key, localHead)
@@ -65,21 +60,17 @@ func runPush(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// 扫描当前文件
 	scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
 	scanResult, err := scanner.Scan()
 	if err != nil {
 		return fmt.Errorf("扫描失败: %w", err)
 	}
 
-	// 对比差异
 	var changes []snapshot.Change
 	if localSnap != nil {
-		// 创建临时快照用于对比
 		currentSnap := snapshot.CreateSnapshot("", cfg.Device.ID, "", scanResult.Files)
 		changes = localSnap.Diff(currentSnap)
 	} else {
-		// 首次，所有文件都是新增
 		for path, entry := range scanResult.Files {
 			changes = append(changes, snapshot.Change{
 				Path:    path,
@@ -95,7 +86,6 @@ func runPush(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// 显示变更
 	fmt.Printf("发现 %d 个变更:\n", len(changes))
 	for _, c := range changes {
 		switch c.Type {
@@ -113,7 +103,6 @@ func runPush(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// 上传变更的文件 objects
 	store := object.NewStore(client, key, "")
 	uploaded := 0
 	for _, c := range changes {
@@ -137,26 +126,26 @@ func runPush(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("已上传 %d 个文件\n", uploaded)
 
-	// 创建新快照
 	newSnap := snapshot.CreateSnapshot(localHead, cfg.Device.ID, msg, scanResult.Files)
 
-	// 上传快照
 	if err := uploadSnapshot(client, store, newSnap); err != nil {
 		return fmt.Errorf("上传快照失败: %w", err)
 	}
 
-	// 乐观锁更新远程 HEAD
 	if err := pushUpdateHEAD(client, cfg, newSnap.ID); err != nil {
 		return err
 	}
 
-	// 更新本地 HEAD
 	if err := updateLocalHEAD(newSnap.ID); err != nil {
 		return err
 	}
 
-	// 保存快照到本地缓存
 	saveLocalSnapshot(newSnap)
+
+	// 注册/更新设备信息
+	if err := registerDevice(client, cfg); err != nil {
+		fmt.Printf("警告：更新设备信息失败: %v\n", err)
+	}
 
 	fmt.Printf("已推送快照 %s（%d 个变更）\n", newSnap.ID, len(changes))
 	return nil
@@ -165,13 +154,12 @@ func runPush(cmd *cobra.Command, args []string) error {
 // pushUpdateHEAD 带重试的乐观锁更新远程 HEAD
 func pushUpdateHEAD(client *webdav.Client, cfg *config.Config, newID string) error {
 	for attempt := 0; attempt < cfg.Sync.MergeRetryMax; attempt++ {
-		// 读取当前远程 HEAD
 		currentData, currentETag, err := client.GET("HEAD")
 		if err != nil && err != webdav.ErrNotFound {
 			return fmt.Errorf("读取远程 HEAD 失败: %w", err)
 		}
 
-		_ = currentData // 当前远程快照 ID
+		_ = currentData
 		result, err := client.CompareAndSwapHEAD("HEAD", newID, currentETag)
 		if err != nil {
 			return fmt.Errorf("更新 HEAD 失败: %w", err)
@@ -190,7 +178,6 @@ func pushUpdateHEAD(client *webdav.Client, cfg *config.Config, newID string) err
 
 // loadRemoteSnapshot 从 WebDAV 下载并解密快照
 func loadRemoteSnapshot(client *webdav.Client, key []byte, id string) (*snapshot.Snapshot, error) {
-	// 先尝试本地缓存
 	if snap, err := loadLocalSnapshot(id); err == nil {
 		return snap, nil
 	}
