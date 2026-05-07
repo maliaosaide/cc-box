@@ -150,37 +150,45 @@ cc-box pull --dry-run
 ## 命令一览
 
 ```
-# 同步操作（Phase 1 已实现）
+# 同步操作（已实现）
 cc-box init                     # 初始化（交互式向导）
 cc-box push [-m MSG] [--dry-run] # 推送到 WebDAV
 cc-box pull [--dry-run]         # 从 WebDAV 拉取
+cc-box sync                     # pull + push 一步完成
 cc-box status                   # 查看本地/远程差异
 
-# 版本历史（Phase 2）
+# 版本历史（已实现）
 cc-box log [--oneline] [-n N]   # 查看快照历史
 cc-box show <snapshot-id>       # 查看快照详情
-cc-box diff [FILE]              # 查看文件差异
 cc-box revert <snapshot-id>     # 回滚到指定快照
 
-# 二进制管理（Phase 2）
+# 冲突处理（已实现）
+cc-box conflicts                # 列出未解决的冲突文件
+cc-box resolve <file>           # 交互式解决文件冲突
+
+# 二进制管理（已实现）
 cc-box binary list              # 列出云端已有版本
 cc-box binary push              # 上传本地二进制到 WebDAV
 cc-box binary pull [VERSION]    # 从 WebDAV 下载版本
 cc-box binary switch <VERSION>  # 切换 Claude 版本
 cc-box binary prune             # 清理云端旧版本
 
+# 配置（已实现）
+cc-box config get <key>         # 查看配置
+cc-box config set <key> <val>   # 修改配置
+cc-box config webdav            # 重新配置 WebDAV 连接
+cc-box config rekey             # 更改加密密码（密钥轮转）
+
+# 维护（已实现）
+cc-box backup                   # 创建本地完整备份
+cc-box restore                  # 从备份恢复
+cc-box verify                   # 校验本地/远程完整性
+cc-box gc                       # 清理云端过期数据
+
 # 项目配置（Phase 3）
 cc-box project list             # 列出已追踪项目
 cc-box project push [PATH]      # 推送 .claude.json
 cc-box project pull             # 拉取项目配置
-
-# 配置
-cc-box config get <key>         # 查看配置
-cc-box config set <key> <val>   # 修改配置
-
-# 维护
-cc-box gc                       # 清理云端过期数据
-cc-box verify                   # 校验完整性
 ```
 
 ## 技术栈
@@ -197,22 +205,39 @@ cc-box verify                   # 校验完整性
 cc-box/
 ├── cmd/cc-box/main.go           # 入口
 ├── internal/
-│   ├── cli/                     # CLI 命令（init/push/pull/status）
+│   ├── cli/                     # CLI 命令（init/push/pull/status/log/revert/binary/config...）
 │   ├── config/                  # 配置管理 + 密钥环
 │   ├── webdav/                  # WebDAV 客户端（ETag 乐观锁）
-│   ├── snapshot/                # 快照管理 + 文件扫描器
+│   ├── snapshot/                # 快照管理 + 文件扫描器 + Diff
 │   ├── normalize/               # 跨平台规范化
-│   ├── crypto/                  # 端到端加密
-│   └── object/                  # Object 存储管理
+│   ├── crypto/                  # 端到端加密（Argon2id + AES-256-GCM）
+│   ├── object/                  # Object 存储管理（哈希去重）
+│   ├── sync/                    # 三方合并引擎（文本/JSON/history.jsonl）
+│   └── binary/                  # 二进制分块上传/下载 + 版本索引
 ├── go.mod
 ├── Makefile
 └── DESIGN.md                    # 详细设计文档
 ```
 
+## 测试
+
+```bash
+# 单元测试
+go test ./internal/...
+
+# 集成测试（需要 WebDAV 服务）
+# 修改 internal/integration_test.go 中的连接信息后运行
+go test ./internal/ -run TestWebDAV -v
+go test ./internal/ -run TestFullSyncFlow -v
+go test ./internal/ -run TestPhase2 -v
+```
+
+当前 37 个测试通过：8 crypto + 6 normalize + 6 object + 7 snapshot + 9 sync + 7 集成。
+
 ## 项目状态
 
 - [x] **Phase 1** — MVP：init → push → pull → status 完整流程
-- [ ] **Phase 2** — 三方合并、端到端加密完善、二进制版本管理
+- [x] **Phase 2** — 三方合并引擎、二进制版本管理、密钥轮转、log/revert/conflicts 等命令
 - [ ] **Phase 3** — GUI (Wails + Svelte)、项目配置同步
 - [ ] **Phase 4** — 测试覆盖、多平台发布、打磨
 
