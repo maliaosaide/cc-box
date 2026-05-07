@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 	"time"
@@ -15,22 +16,28 @@ import (
 
 // Client WebDAV 客户端
 type Client struct {
-	baseURL  string
-	username string
-	password string
-	http     *http.Client
+	baseURL      string
+	baseURLPath  string // URL 路径部分，用于 PROPFIND href 匹配
+	username     string
+	password     string
+	http         *http.Client
 }
 
 // NewClient 创建 WebDAV 客户端
-func NewClient(url, username, password string) *Client {
+func NewClient(rawURL, username, password string) *Client {
 	// 确保 URL 以 / 结尾
-	if !strings.HasSuffix(url, "/") {
-		url += "/"
+	if !strings.HasSuffix(rawURL, "/") {
+		rawURL += "/"
 	}
+	// 提取路径部分
+	parsed, _ := url.Parse(rawURL)
+	basePath := parsed.Path
+
 	return &Client{
-		baseURL:  url,
-		username: username,
-		password: password,
+		baseURL:     rawURL,
+		baseURLPath: basePath,
+		username:    username,
+		password:    password,
 		http: &http.Client{
 			Timeout: 60 * time.Second,
 		},
@@ -147,7 +154,7 @@ func (c *Client) HEAD(remotePath string) (*FileInfo, error) {
 	return info, nil
 }
 
-// MKCOL 创建目录（幂等，已存在不报错）
+// MKCOL 创建目录（幂等，已存在不报错，父目录不存在时自动创建）
 func (c *Client) MKCOL(remotePath string) error {
 	req, err := c.newRequest("MKCOL", c.url(remotePath), nil)
 	if err != nil {
@@ -164,10 +171,20 @@ func (c *Client) MKCOL(remotePath string) error {
 	if resp.StatusCode == http.StatusMethodNotAllowed || resp.StatusCode == http.StatusMovedPermanently {
 		return nil
 	}
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("MKCOL %s 返回 %d", remotePath, resp.StatusCode)
+	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
+		return nil
 	}
-	return nil
+	// 409 = 父目录不存在，递归创建
+	if resp.StatusCode == http.StatusConflict {
+		parent := path.Dir(remotePath)
+		if parent != "" && parent != "/" && parent != "." {
+			if err := c.MKCOL(parent); err != nil {
+				return fmt.Errorf("MKCOL 父目录 %s 失败: %w", parent, err)
+			}
+			return c.MKCOL(remotePath)
+		}
+	}
+	return fmt.Errorf("MKCOL %s 返回 %d", remotePath, resp.StatusCode)
 }
 
 // DELETE 删除文件或目录
@@ -234,7 +251,7 @@ func (c *Client) PROPFIND(remotePath string, depth int) ([]FileInfo, error) {
 		return nil, fmt.Errorf("读取 PROPFIND 响应失败: %w", err)
 	}
 
-	return parseMultiStatus(body, c.url(remotePath))
+	return parseMultiStatus(body, c)
 }
 
 // Exists 检查文件或目录是否存在
@@ -267,7 +284,7 @@ func (c *Client) EnsureDir(remotePath string) error {
 }
 
 // parseMultiStatus 解析 WebDAV PROPFIND 多状态响应
-func parseMultiStatus(data []byte, baseURL string) ([]FileInfo, error) {
+func parseMultiStatus(data []byte, c *Client) ([]FileInfo, error) {
 	var ms multistatus
 	if err := xml.Unmarshal(data, &ms); err != nil {
 		return nil, fmt.Errorf("解析 PROPFIND XML 失败: %w", err)
@@ -275,22 +292,34 @@ func parseMultiStatus(data []byte, baseURL string) ([]FileInfo, error) {
 
 	var files []FileInfo
 	for _, resp := range ms.Responses {
-		href, err := decodeHref(resp.Href)
-		if err != nil {
-			continue
-		}
+		href := resp.Href
 
 		// 跳过根路径自身
-		if strings.TrimSuffix(href, "/") == strings.TrimSuffix(baseURL, "/") {
+		trimmedHref := strings.TrimSuffix(href, "/")
+		trimmedBase := strings.TrimSuffix(c.baseURLPath, "/")
+		if trimmedHref == trimmedBase || trimmedHref == strings.TrimSuffix(c.baseURL, "/") {
 			continue
 		}
 
 		prop := resp.PropStat[0].Prop
 		isDir := prop.ResourceType.Collection != ""
 
-		// 从完整 URL 中提取相对路径
-		relPath := strings.TrimPrefix(href, baseURL)
+		// 从 href 中提取相对路径
+		// href 可能是完整路径如 /alist/dav/webdav-test/cc-box-test/propfind-test/
+		// 也可能只是 /cc-box-test/propfind-test/
+		relPath := href
+		// 尝试用 baseURLPath 去掉前缀
+		relPath = strings.TrimPrefix(relPath, c.baseURLPath)
+		// 如果没匹配上，尝试用完整 baseURL 去掉 scheme+host
 		relPath = strings.TrimPrefix(relPath, "/")
+		// 如果 href 包含 scheme+host，去掉
+		if strings.Contains(relPath, "://") {
+			parsed, err := url.Parse(relPath)
+			if err == nil {
+				relPath = strings.TrimPrefix(parsed.Path, c.baseURLPath)
+				relPath = strings.TrimPrefix(relPath, "/")
+			}
+		}
 
 		files = append(files, FileInfo{
 			Path:  relPath,
