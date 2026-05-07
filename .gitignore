@@ -1,1 +1,5 @@
 cc-box.exe
+gui.exe
+gui/frontend/dist/
+gui/frontend/node_modules/
+gui/frontend/.svelte-kit/
