@@ -38,12 +38,12 @@
 ```
 
 CC-Box 的二进制管理策略：
-- **版本备份**：将 `~/.local/bin/claude` 和历史版本上传到 WebDAV（压缩加密）
-- **按哈希去重**：相同版本只存一份，不同设备共享
+- **版本备份**：将 `~/.local/bin/claude` 和历史版本分块上传到 WebDAV（压缩加密）
+- **按哈希去重**：相同版本（同平台）只存一份，多设备共享
 - **版本切换**：`cc-box binary switch 2.1.84` 一键切换 Claude 版本
 - **新设备恢复**：pull 时自动下载当前版本到 `~/.local/bin/`，无需重新安装
-- **平台感知**：Windows 下载 `.exe`，macOS/Linux 下载对应二进制
-- **版本清理**：`cc-box binary prune` 清理不需要的历史版本
+- **平台感知**：Windows 下载 `.exe`，macOS/Linux 下载对应二进制。不同平台的同名版本各自独立存储
+- **版本清理**：`cc-box binary prune` 清理不再被任何设备引用的历史版本
 
 ### 配置文件同步
 
@@ -64,7 +64,7 @@ CC-Box 的二进制管理策略：
 │   ├── installed_plugins.json # 已安装插件列表
 │   ├── known_marketplaces.json
 │   └── blocklist.json
-└── history.jsonl              # 命令历史（追加合并）
+└── history.jsonl              # 命令历史（内容追加合并，详见合并策略）
 ```
 
 ### 项目级配置（按项目独立同步）
@@ -77,7 +77,7 @@ CC-Box 的二进制管理策略：
 ### 预留但暂不同步
 
 ```
-projects/                      # 会话数据 - 预留接口，Phase 3 实现
+projects/                      # 会话数据 - 预留接口，Phase 4 实现
 memory/                        # 持久化记忆 - 同上
 ```
 
@@ -124,16 +124,21 @@ stats-cache.json               # 统计缓存
 ### 核心依赖
 
 ```
-cobra          # CLI 框架（kubectl/docker 同款）
-viper          # 配置管理（TOML/JSON/环境变量）
-reqwest        # HTTP 客户端（WebDAV 操作）
-quick-xml      # WebDAV XML 解析
-age            # 端到端加密（与 age 工具兼容）
-argon2id       # 密码派生密钥
-sha256         # 文件指纹
+cobra            # CLI 框架（kubectl/docker 同款）
+viper            # 配置管理（TOML/JSON/环境变量）
+reqwest          # HTTP 客户端（WebDAV 操作，支持 ETag/条件请求）
+quick-xml        # WebDAV XML 解析
+age              # 端到端加密（与 age 工具兼容）
+argon2id         # 密码派生密钥
+sha256           # 文件指纹
 gosoft/gkeyring  # 系统密钥环（macOS Keychain / Linux Secret Service / Windows Credential Manager）
-fsnotify       # 文件变更监听
-bubbletea      # TUI 界面（交互式向导、状态面板）
+bubbletea        # TUI 界面（仅 init 交互式向导使用，非运行时依赖）
+```
+
+以下依赖仅在 GUI 模式使用（Phase 3 引入）：
+```
+Wails v2         # GUI 框架（Go 后端 + Web 前端）
+fsnotify         # 文件变更监听（仅 GUI 自动同步模式使用）
 ```
 
 ## 核心设计：Git 式同步模型
@@ -149,6 +154,19 @@ bubbletea      # TUI 界面（交互式向导、状态面板）
 | ref/HEAD | latest | 当前最新快照指针 |
 | remote | WebDAV | 远程存储后端 |
 | .gitignore | exclude | 排除规则 |
+
+### 跨平台规范化
+
+在计算文件哈希和执行差异比较前，先对文件内容和路径做规范化，避免因平台差异产生虚假变更：
+
+| 维度 | 问题 | 规范化规则 |
+|------|------|-----------|
+| 换行符 | Windows CRLF vs Unix LF | 文本文件统一计算 LF 换行的哈希 |
+| 路径分隔符 | `\` vs `/` | 快照中统一使用 `/` |
+| 大小写 | Windows 不区分大小写 | 快照中文件路径统一小写存储 |
+| 文件权限 | Unix 有执行位，Windows 无 | 快照中不记录权限位，只记录可执行标志 |
+
+规范化仅影响哈希计算和差异比较——不会修改用户本地文件的实际内容。换行符统一通过扫描时做 `\r\n` → `\n` 转换后计算哈希。
 
 ### 快照（Snapshot）结构
 
@@ -167,18 +185,55 @@ bubbletea      # TUI 界面（交互式向导、状态面板）
       "size": 2048,
       "modified": "2026-05-07T14:00:00Z"
     },
-    "CLAUDE.md": {
+    "claude.md": {
       "hash": "sha256:def456...",
       "size": 4096,
       "modified": "2026-05-07T13:00:00Z"
+    }
+  },
+  "binary": {
+    "windows-amd64": {
+      "claude": "2.1.126",
+      "uv": "0.6.14"
+    },
+    "darwin-arm64": {
+      "claude": "2.1.126"
     }
   }
 }
 ```
 
+**`binary` 字段说明**：记录该快照产生时各平台的当前二进制版本。此字段不强制上传二进制文件到云端，只是建立快照与二进制版本的关联，使得 log/history 中能展示"这次同步时使用了哪个版本"。
+
 快照链：`snap_001 → snap_002 → snap_003 → ... → snap_latest`
 
 每次 push 产生新快照，链接到上一个。支持沿链回溯任意历史版本。
+
+### WebDAV 并发控制（乐观锁）
+
+WebDAV 的 PUT 操作不提供原子 compare-and-swap。两台设备同时 push 时，后到的 PUT 会静默覆盖先到的 HEAD 指针，导致快照丢失。解决方案：**基于 ETag 的乐观锁**。
+
+```
+HEAD 指针格式：
+  文件内容: snap_a1b2c3d4
+  HTTP 响应头: ETag: "abc123..."
+
+push 时更新 HEAD 的流程:
+  1. GET /cc-box/HEAD → 获取当前 ID + ETag 值
+  2. 创建新快照，上传 objects + snapshot
+  3. PUT /cc-box/HEAD, 带上 If-Match: "abc123..."
+     - 200 → 成功，更新本地 latest
+     - 412 Precondition Failed → 远程已被其他设备更新
+       4a. 重新下载远程最新快照
+       4b. 将本地刚上传的快照 parent 指向远程最新（重写快照元数据）
+       4c. 再次尝试 PUT HEAD（重复步骤 1-3），最多重试 3 次
+
+并发安全保证：
+  - WebDAV 服务端支持 ETag 和 If-Match 时：完全保证不丢失
+  - 部分 WebDAV 服务端不支持 ETag（如 rclone serve 简化模式）：
+    降级为无保护模式，记录警告日志。对于个人工具场景可接受。
+  - 坚果云、NextCloud、Synology 均支持 ETag，覆盖主流场景
+```
 
 ### 同步流程
 
@@ -187,18 +242,20 @@ bubbletea      # TUI 界面（交互式向导、状态面板）
 ```
 cc-box push [-m "message"] [--dry-run]
 
-1. 扫描本地文件（应用排除规则）
-2. 计算每个文件的 sha256 哈希
+1. 扫描本地文件（应用排除规则 + 跨平台规范化）
+2. 计算每个文件的规范化 sha256 哈希
 3. 与本地最新快照对比，找出变更文件:
    - 新增 (A)  - 本地有，快照无
    - 修改 (M)  - 哈希不同
    - 删除 (D)  - 快照有，本地无
 4. 如无变更，提示 "nothing to push"
-5. 加密变更文件内容 → 生成 object
-6. 创建新快照，parent 指向当前最新
-7. 上传 objects + 新快照到 WebDAV
-8. 更新远程 latest 指针
-9. 更新本地 latest 指针
+5. 加密变更文件内容 → 生成 object，上传到 WebDAV
+6. 读取当前各平台二进制版本 → 写入快照 binary 字段
+7. 创建新快照，parent 指向本地最新
+8. 上传新快照到 WebDAV
+9. 乐观锁更新远程 HEAD（GET HEAD → ETag → PUT with If-Match）
+   - 冲突时合并重试（最多 3 次）
+10. 更新本地 HEAD 指针
 ```
 
 #### pull（拉取）
@@ -206,25 +263,74 @@ cc-box push [-m "message"] [--dry-run]
 ```
 cc-box pull [--dry-run] [--force]
 
-1. 从 WebDAV 下载远程 latest 指针
-2. 与本地 latest 对比:
+1. 从 WebDAV 下载远程 HEAD 指针
+2. 与本地 HEAD 对比:
    - 相同 → "already up to date"
    - 不同 → 需要同步
 3. 找出本地和远程的分叉点（共同祖先快照）
-4. 三方差异计算:
+4. 如果找不到共同祖先（见降级策略），降级处理
+5. 三方差异计算:
    ancestor = 分叉点快照
    local    = 本地当前文件状态
    remote   = 远程最新快照的文件状态
-5. 对每个文件执行三方合并:
+6. 对每个文件执行三方合并（按文件类型）:
    - 仅本地变 → 保留本地
    - 仅远程变 → 采纳远程
    - 双方都变 → 冲突，需解决
    - 双方都删 → 删除
-6. 下载需要的 objects，解密
-7. 直接覆盖本地文件（云端已有备份，不做本地额外备份）
-8. 应用合并结果
+7. 下载需要的 objects，解密后应用合并结果
+8. 直接覆盖本地文件（云端已有备份，不做本地额外备份）
 9. 创建合并快照，parent 指向远程最新
-10. 上传合并快照 + 更新 latest
+10. 上传合并快照 + 乐观锁更新 HEAD
+```
+
+#### 三方合并策略（按文件类型）
+
+不同文件类型采用不同的合并策略：
+
+**文本文件（CLAUDE.md、SKILL.md 等）**：
+- 行级 diff 合并，类似于 `git merge-file`
+- 冲突时插入 `<<<<<<< local` / `=======` / `>>>>>>> remote` 标记
+- 用户通过 `cc-box resolve <file>` 交互式解决
+
+**JSON 文件（settings.json、keybindings.json）**：
+- 字段级结构化合并（详见 cc-switch 兼容设计）
+- 普通 JSON 文件（非 settings.json）：同名 key 远程优先，新增 key 并集
+
+**目录（skills/、commands/、agents/ 等）**：
+- 递归到目录内每个文件做三方合并
+- 仅一方新增的文件：直接采纳
+- 仅一方删除的文件：标记删除
+- 双方都修改的文件：进入文件级合并
+
+**history.jsonl**（特殊处理）：
+- 不做标准三方合并。按行内容去重追加：
+  1. 取 ancestor → local 的新增行（本地独有的历史）
+  2. 取 ancestor → remote 的新增行（远程独有的历史）
+  3. 合并去重后追加到本地文件末尾
+  4. 去重依据：`command + timestamp` 组合键。相同命令且同一分钟内执行的视为重复
+
+#### 祖先不可达降级策略
+
+当 GC 或其他原因导致本地和远程找不到共同祖先快照时：
+
+```
+降级判断:
+  遍历本地快照链和远程快照链，查找第一个公共快照 ID
+  如果遍历深度超过 50 个快照仍未找到 → 视为祖先不可达
+
+降级行为:
+  1. 提示用户: "无法找到共同祖先，将使用文件级双向合并"
+  2. 不对单个文件做三方合并，改为：
+     - 逐一比较本地和远程文件哈希
+     - 哈希相同 → 跳过
+     - 仅远程有 → 下载远程版本
+     - 仅本地有 → 保留本地版本
+     - 双方都有但不同 → 标记为冲突，同时打印双方修改时间
+  3. 冲突文件：将远程版本另存为 <filename>.remote（不覆盖本地）
+     提示用户手动选择
+  4. 合并后的本地状态作为新快照的基线，parent 指向远程 HEAD
+  5. warning 日志: "祖先不可达合并，建议尽快 push 以建立新的共同基线"
 ```
 
 #### log（历史）
@@ -235,8 +341,10 @@ cc-box log [--oneline] [-n 10]
 输出:
 a1b2c3d4  2026-05-07 14:30  win-pc      auto sync
 e5f6g7h8  2026-05-07 10:15  mac-book    added new skill
-k9l0m1n2  2026-05-06 22:00  win-pc      updated CLAUDE.md
+k9l0m1n2  2026-05-06 22:00  win-pc      binary updated to 2.1.126
 ```
+
+`show <snapshot-id>` 展开显示文件变更列表和该快照记录的各平台二进制版本。
 
 #### revert（回滚）
 
@@ -245,41 +353,43 @@ cc-box revert <snapshot-id>
 
 1. 下载目标快照的文件索引
 2. 对比当前状态，列出将要恢复的文件
-3. 确认后恢复文件（备份当前版本）
-4. 创建新的 revert 快照
+3. 确认后从 WebDAV 下载对应 objects → 解密 → 写入本地
+4. 创建新的 revert 快照（message 自动生成为 "revert to <snapshot-id>"）
 ```
 
 ### WebDAV 远程存储结构
 
 ```
 /cc-box/
-├── HEAD                          # 当前最新快照 ID
+├── HEAD                          # 当前最新快照 ID（支持 ETag 乐观锁）
+├── salt.bin                      # Argon2id salt（明文，用于多设备密钥派生）
 ├── snapshots/
 │   ├── snap_a1b2c3d4.json.enc    # 快照元数据（加密）
 │   ├── snap_e5f6g7h8.json.enc
 │   └── ...
 ├── objects/
 │   ├── ab/
-│   │   └── c1234def...enc        # 配置文件内容对象（按哈希前缀分目录）
+│   │   └── c1234def...enc        # 配置文件内容对象（按哈希前缀 2 字符分目录）
 │   └── ...
-├── binaries/                     # 二进制文件存储（核心）
-│   ├── index.json                # 版本索引
+├── binaries/                     # 二进制文件存储
+│   ├── index.json                # 版本索引（含引用计数，不加密）
+│   ├── parts/                    # 分块存储（大文件断点续传）
+│   │   ├── sha256:abc123/
+│   │   │   ├── part-000.enc      # 10MB 分块（加密压缩）
+│   │   │   ├── part-001.enc
+│   │   │   └── manifest.json     # 分块清单（总数、每块哈希、总大小）
+│   │   └── ...
 │   ├── windows-amd64/
-│   │   ├── claude-2.1.126.exe.enc
-│   │   ├── claude-2.1.84.exe.enc
-│   │   ├── uv.exe.enc
+│   │   ├── claude-2.1.126.exe.enc  # 完整文件（对于小文件或合并后的）
 │   │   └── ...
 │   ├── darwin-arm64/
-│   │   ├── claude-2.1.126.enc
-│   │   └── ...
 │   └── linux-amd64/
-│       ├── claude-2.1.126.enc
-│       └── ...
 ├── devices/
-│   ├── win-pc-abc123.json        # 设备注册信息
+│   ├── win-pc-abc123.json        # 设备注册信息（含当前 HEAD、最后活跃时间）
 │   └── mac-book-xyz789.json
-└── projects/                     # 项目级配置（预留）
-    └── ...
+└── projects/                     # 项目级配置
+    └── <encoded-remote>/
+        └── .claude.json.enc
 ```
 
 ### 本地同步仓库结构
@@ -289,7 +399,7 @@ cc-box revert <snapshot-id>
 ├── config.toml                   # 本地配置
 ├── HEAD                          # 本地最新快照 ID
 ├── cache/
-│   ├── latest-remote             # 远程 latest 缓存
+│   ├── latest-remote             # 远程 HEAD 缓存（含最后 ETag）
 │   └── objects/                  # 已下载的配置文件 objects 缓存（小文件）
 ├── snapshots/
 │   ├── snap_a1b2c3d4.json       # 本地快照缓存
@@ -343,10 +453,15 @@ settings.json 合并时的特殊处理:
 用户密码 → Argon2id(密码, salt) → 256-bit key → AES-256-GCM 加密
 ```
 
-- 同一密码在所有设备上生成相同的密钥（salt 固定存储在 WebDAV）
+- 同一密码在所有设备上生成相同的密钥（salt 固定存储在 WebDAV `/cc-box/salt.bin`）
+- salt 明文存储：威胁模型针对的是存储服务提供商，不是网络监听者
 - 所有上传到 WebDAV 的 objects 和 snapshots 都经过加密
-- 密码不存储在本地，只存储派生后的密钥到 `~/.cc-box/key.bin`
+- 密码不存储在本地，只存储派生后的密钥到 `~/.cc-box/key.bin`（权限 0600）
 - 加密格式与 [age](https://github.com/FiloSottile/age) 兼容，可用 age 工具手动解密验证
+
+### 安全边界说明
+
+**`key.bin` 被盗即数据泄露**：如果攻击者获取了设备文件系统访问权并读取 `key.bin`，则可以解密 WebDAV 上所有数据。这是设计上的取舍——便利性（不用每次都输密码）vs 安全性（本地密钥文件保护）。对于大多数用户的威胁模型（防止云存储提供商窥探数据），此方案足够。
 
 ### 加密范围
 
@@ -356,18 +471,51 @@ settings.json 合并时的特殊处理:
 | snapshots | 是 | 含文件路径和哈希 |
 | HEAD 指针 | 否 | 只是一个快照 ID |
 | devices/*.json | 否 | 只含设备名和平台信息 |
+| salt.bin | 否 | 需要新设备 init 时读取 |
+| binaries 分块文件 | 是 | AES-256-GCM，同 objects |
+| binary index.json | 否 | 版本号/哈希/平台等元数据 |
 | config.toml（本地） | 否 | 本地文件，含 WebDAV 地址和用户名 |
 
 ### 密钥管理
 
 ```
-init 阶段:
-  输入密码 → Argon2id 派生 → key.bin 写入本地
-  同时将 salt 上传到 WebDAV /cc-box/salt.bin
+首次 init:
+  1. 用户输入密码
+  2. 生成 16 字节随机 salt
+  3. Argon2id(password, salt) → 256-bit key
+  4. key 写入 ~/.cc-box/key.bin (0600)
+  5. salt 上传 WebDAV /cc-box/salt.bin
+  6. 用 key 加密并上传首个快照 → 验证加解密链路正常
 
 新设备 init:
-  输入相同密码 → 下载 salt → 派生相同密钥
-  尝试解密 HEAD 指向的 snapshot → 验证密码正确性
+  1. 用户输入密码
+  2. 从 WebDAV 下载 salt
+  3. 相同 Argon2id 参数派生密钥 → 写入 key.bin
+  4. 尝试用 key 解密 HEAD 指向的 snapshot
+     - 成功 → 密码正确，继续 normal pull
+     - 失败 → 提示密码错误，重新输入（最多 3 次）
+```
+
+### 密钥轮转（Rekey）
+
+用户修改密码时需要重新加密所有已存储数据：
+
+```
+cc-box config rekey
+
+流程:
+  1. 提示输入当前密码，验证（解密 HEAD snapshot 确认）
+  2. 提示输入新密码
+  3. 生成新 salt，Argon2id 派生新 key
+  4. 从 WebDAV 下载所有 objects + snapshots（流式，逐个处理）
+  5. 旧 key 解密 → 新 key 加密 → 上传回 WebDAV（覆盖写入）
+  6. 上传新 salt.bin
+  7. 本地更新 key.bin
+
+安全保证：
+  - 轮转过程中断：已上传的文件已完成加密切换，未上传的仍是旧加密
+  - 中断后重试：先完成剩余文件，保证全部切换完成
+  - 旧 key 不保留：轮转完成后旧 key 无法解密任何云端数据
 ```
 
 ## 项目级 .claude.json 同步
@@ -382,14 +530,22 @@ init 阶段:
 push 时:
 1. 扫描 ~/.claude/projects/ 下所有项目目录
 2. 读取每个项目对应的 .claude.json（从实际项目目录读取）
-3. 按 git remote URL 作为项目唯一标识（而非路径）
-4. 上传到 /cc-box/projects/<encoded-remote>/.claude.json.enc
+3. 获取项目的所有 git remote URL，选择优先级：
+   - 有 "origin" remote → 使用 origin URL
+   - 无 origin → 使用第一个 remote URL
+   - 无任何 remote → 使用项目目录名的 SHA256 作为后备 ID
+4. 按 URL 编码后作为项目唯一标识
+5. 上传到 /cc-box/projects/<encoded-remote>/.claude.json.enc
 
 pull 时:
 1. 下载 /cc-box/projects/ 下所有项目配置
 2. 按 git remote 匹配本地项目
 3. 合并 MCP server 配置到本地 .claude.json
-4. 对于找不到匹配 remote 的配置 → 存储为 "orphan"，提示用户
+4. 对于找不到匹配 remote 的配置 → 存储为 "orphan"
+   - 记录在 ~/.cc-box/orphan_projects.json 中
+   - 每次 pull 后提醒用户有 N 个 orphan 项目
+   - orphan 项目手动确认后可关联到本地目录或删除
+5. 本地已删除但云端仍有的项目配置 → 软删除（标记过期，30 天后 GC 清理）
 ```
 
 ### .claude.json 合并策略
@@ -406,7 +562,7 @@ pull 时:
 }
 ```
 
-## 二进制版本管理（核心）
+## 二进制版本管理
 
 ### 设计目标
 
@@ -419,7 +575,7 @@ Claude Code 的二进制文件（`~/.local/bin/claude`）约 242MB，加上历�
 ### 版本索引
 
 ```json
-// 存储在 WebDAV /cc-box/binaries/index.json
+// 存储在 WebDAV /cc-box/binaries/index.json（不加密）
 {
   "platforms": {
     "windows-amd64": {
@@ -429,12 +585,14 @@ Claude Code 的二进制文件（`~/.local/bin/claude`）约 242MB，加上历�
           "2.1.126": {
             "hash": "sha256:abc123...",
             "size": 254053024,
+            "refs": 2,
             "uploaded": "2026-05-03T21:34:00Z",
             "uploaded_by": "win-pc-abc123"
           },
           "2.1.84": {
             "hash": "sha256:def456...",
             "size": 245000000,
+            "refs": 1,
             "uploaded": "2026-04-28T10:00:00Z",
             "uploaded_by": "win-pc-abc123"
           }
@@ -455,59 +613,93 @@ Claude Code 的二进制文件（`~/.local/bin/claude`）约 242MB，加上历�
 }
 ```
 
+**`refs` 字段**：引用计数，表示有多少个设备将该版本标记为 current。prune 时用于判断是否可以安全删除。
+
+### 大文件分块上传与断点续传
+
+二进制文件（~243MB）通过 WebDAV 上传，需要考虑网络中断和 WebDAV 服务端的限制：
+
+```
+分块策略:
+  - 块大小: 10MB（chunk_size = 10 * 1024 * 1024）
+  - 每块独立压缩（zstd） + 加密（AES-256-GCM）
+  - 压缩在加密之前，充分利用二进制文件的压缩比
+
+上传流程 (cc-box binary push):
+1. 读取本地二进制文件
+2. 计算整体 sha256 哈希（用于最终校验和去重）
+3. 查询 WebDAV binaries/index.json，同哈希->跳过
+4. 将文件按 10MB 分块:
+   chunk_i = zstd_compress(file[offset : offset+10MB])
+   enc_chunk_i = AES-256-GCM(chunk_i, key, nonce_i)
+5. 上传 manifest.json 到 /cc-box/binaries/parts/<hash>/manifest.json
+6. 逐个上传 part-000.enc, part-001.enc, ...
+   - 上传前检查该 part 是否已存在（HEAD 请求）→ 跳过已上传的块
+   - 上传失败时记录已完成的块索引
+7. 所有 part 上传完成后，验证完整性
+8. 更新 index.json
+
+下载流程 (cc-box binary pull [VERSION]):
+1. 下载 index.json → 找到目标版本的哈希
+2. 下载 /cc-box/binaries/parts/<hash>/manifest.json
+3. 检查本地是否已有部分分块（断点续传）:
+   - 扫描目标目录下的 .cc-box-download/ 缓存
+   - 已完成的块跳过下载
+4. 逐个下载 part-NNN.enc
+   - 每下载完一块即解密+解压写入临时文件
+   - 记录已完成的块索引到 .cc-box-download/progress.json
+5. 所有块完成后，校验整体 sha256
+6. 将临时文件 move 到最终位置
+7. 清理 .cc-box-download/ 临时目录
+
+断点续传状态文件 (.cc-box-download/progress.json):
+{
+  "hash": "sha256:abc123...",
+  "total_parts": 25,
+  "completed_parts": [0,1,2,3,4,5],
+  "started": "2026-05-07T14:30:00Z"
+}
+```
+
+完整文件（小文件如 uvx.exe ~340KB）不进行分块，直接上传到 `/cc-box/binaries/<platform>/<name>.enc`。分块阈值：文件 > 50MB 时使用分块上传。
+
 ### 版本切换流程
 
 ```
 cc-box binary switch 2.1.84
 
 1. 将当前 ~/.local/bin/claude.exe 移动到 ~/.local/share/claude/versions/{当前版本号}
-2. 从 WebDAV 直接下载目标版本到 ~/.local/bin/claude.exe（流式写入，不占额外空间）
+2. 从 WebDAV 分块下载目标版本到 ~/.local/bin/claude.exe（支持断点续传）
 3. 验证 sha256 哈希
-4. 更新 index.json 中的 current 指针
+4. 更新 index.json 中的 current 指针 + refs 引用计数
 ```
 
-### 上传流程
+### 清理（Prune）—— 引用安全检查
 
 ```
-cc-box binary push
-
-1. 读取当前 ~/.local/bin/claude 的版本号
-2. 计算 sha256 哈希
-3. 对比 WebDAV index.json，检查是否已存在相同哈希
-   - 已存在 → 跳过（去重）
-   - 不存在 → 压缩 + 加密 → 流式上传到 WebDAV
-4. 扫描 ~/.local/share/claude/versions/ 下的历史版本
-   - 同样按哈希去重上传
-5. 更新 index.json
-```
-
-### 下载流程（新设备或版本恢复）
-
-```
-cc-box binary pull [VERSION]
-
-# 不指定版本：下载云端标记的 current 版本
-cc-box binary pull
-
-# 指定版本：下载特定版本
-cc-box binary pull 2.1.84
+cc-box binary prune
 
 流程:
-1. 从 WebDAV 下载 index.json
-2. 读取当前平台（windows-amd64 / darwin-arm64 / linux-amd64）
-3. 如果本地已有 claude 且版本不同 → 将当前版本移入 ~/.local/share/claude/versions/
-4. 从 WebDAV 流式下载 + 解密 + 解压 → 直接写入 ~/.local/bin/claude[.exe]
-5. 验证 sha256 哈希
-6. 同时处理 uv/uvx/uvw 等配套工具
-```
+  1. 计算每个版本的最小 safe_refs：
+     - 遍历所有设备的 device.json，获取其 HEAD 指向的快照
+     - 检查每个快照的 binary 字段，统计各版本被哪些设备引用
+  2. 同时检查本地 ~/.local/share/claude/versions/ 目录中的版本
+  3. 标记 refs 为 0 且不在任何设备快照中的版本为 "可清理"
+  4. 列出可清理的版本，确认后删除
+  5. 同时清理对应的 parts/ 分块文件
 
-**核心原则：不做本地额外备份。** WebDAV 云端就是备份源。二进制文件通过流式传输直接从 WebDAV 写入目标位置，不在 ~/.cc-box/ 中保留副本。本地只存元数据（config、snapshots），不存大文件。
+安全规则：
+  - 绝不删除任何设备 HEAD 关联的快照中引用的版本
+  - 绝不删除 index.json 中 refs > 0 的版本
+  - 绝不删除本地 versions/ 中存在的版本
+```
 
 ## CLI 命令完整设计
 
 ```
 # 初始化
 cc-box init                     # 交互式向导（WebDAV 配置 + 加密设置 + 首次快照）
+                                #   使用 bubbletea TUI 实现
 
 # 日常同步
 cc-box push [-m MSG] [--dry-run] [-q]
@@ -520,7 +712,7 @@ cc-box diff [FILE]              # 查看具体文件差异内容
 
 # 版本历史
 cc-box log [--oneline] [-n N]   # 查看快照历史
-cc-box show <snapshot-id>       # 查看指定快照详情
+cc-box show <snapshot-id>       # 查看指定快照详情（含文件变更列表和二进制版本）
 cc-box revert <snapshot-id>     # 回滚到指定快照
 
 # 冲突处理
@@ -531,23 +723,32 @@ cc-box resolve <file>           # 交互式解决文件冲突
 cc-box project list             # 列出已追踪的项目
 cc-box project push [PATH]      # 推送指定项目的 .claude.json
 cc-box project pull             # 拉取所有项目配置
+cc-box project orphans          # 列出未匹配的 orphan 项目
 
 # 配置管理
 cc-box config get <key>         # 查看配置项
 cc-box config set <key> <val>   # 修改配置项
 cc-box config webdav            # 重新配置 WebDAV 连接
-cc-box config encryption        # 重新配置加密
+cc-box config encryption        # 重新配置加密（rekey）
+cc-box config rekey             # 密钥轮转
+
+# 二进制管理
+cc-box binary list              # 列出所有已备份的版本
+cc-box binary push              # 上传当前二进制到云端
+cc-box binary pull [VERSION]    # 从云端下载二进制
+cc-box binary switch <VERSION>  # 切换二进制版本
+cc-box binary prune             # 清理不再被引用的版本
 
 # 设备管理
 cc-box device list              # 列出已注册设备
 cc-box device rename <name>     # 重命名当前设备
-cc-box device forget <id>       # 移除设备（清理其快照）
+cc-box device forget <id>       # 移除设备（清理其快照引用）
 
 # 维护
 cc-box backup                   # 创建本地完整备份
 cc-box restore [snapshot-id]    # 从备份/快照恢复
-cc-box gc                       # 清理过期的 objects 和备份
-cc-box verify                   # 验证本地文件完整性
+cc-box gc                       # 清理过期 objects 和快照（引用安全）
+cc-box verify                   # 验证本地文件完整性 + 远程可达性
 
 # 通用
 cc-box --help
@@ -556,30 +757,37 @@ cc-box --version
 
 ## WebDAV 兼容性矩阵
 
-| 服务 | 基础 URL | 认证 | 备注 |
-|------|----------|------|------|
-| 坚果云 | `dav.jianguoyun.com/dav/` | Basic（应用密码） | 免费用户有 API 频率限制 |
-| NextCloud | `/remote.php/dav/files/<user>/` | Basic | 完整 WebDAV 支持 |
-| Synology | `:<port>/webdav/` | Basic/Digest | 需启用 WebDAV 服务 |
-| Alist | `/dav/` | Basic | 支持多种后端存储 |
-| OwnCloud | `/remote.php/dav/` | Basic | 与 NextCloud 类似 |
-| IIS WebDAV | `/webdav/` | NTLM/Basic | Windows 原生支持 |
-| rclone serve | `localhost:<port>/` | Basic | 本地测试用 |
-| Box | `/dav/` | OAuth2 | 企业用户 |
-| 海康威视 NAS | `/webdav/` | Basic | 部分型号支持 |
+| 服务 | 基础 URL | 认证 | ETag 支持 | 备注 |
+|------|----------|------|-----------|------|
+| 坚果云 | `dav.jianguoyun.com/dav/` | Basic（应用密码） | 是 | 免费用户约 300 次/月 API，2GB 空间 |
+| NextCloud | `/remote.php/dav/files/<user>/` | Basic | 是 | 完整 WebDAV + ETag |
+| Synology | `:<port>/webdav/` | Basic/Digest | 是 | 需启用 WebDAV 服务 |
+| Alist | `/dav/` | Basic | 是 | 支持多种后端存储 |
+| OwnCloud | `/remote.php/dav/` | Basic | 是 | 与 NextCloud 类似 |
+| IIS WebDAV | `/webdav/` | NTLM/Basic | 是 | Windows 原生支持 |
+| rclone serve | `localhost:<port>/` | Basic | 视后端而定 | 本地测试用 |
+| Box | `/dav/` | OAuth2 | 是 | 企业用户 |
+| 海康威视 NAS | `/webdav/` | Basic | 部分 | 部分型号支持 |
 
 ### WebDAV 操作需求
 
-| 操作 | 用途 | 必需 |
-|------|------|------|
-| `PROPFIND` (depth 0/1) | 检查文件/目录存在、列目录 | 是 |
-| `GET` | 下载文件 | 是 |
-| `PUT` | 上传文件 | 是 |
-| `MKCOL` | 创建目录 | 是 |
-| `DELETE` | 删除文件/目录 | 是 |
-| `HEAD` | 检查文件元信息（大小/修改时间） | 否（优化用） |
+| 操作 | 用途 | 必需 | ETag 相关 |
+|------|------|------|-----------|
+| `PROPFIND` (depth 0/1) | 检查文件/目录存在、列目录、获取 ETag | 是 | 获取 `getetag` 属性 |
+| `GET` | 下载文件，附带 `ETag` 响应头 | 是 | 存储 ETag |
+| `PUT` | 上传文件，支持 `If-Match` 条件请求 | 是 | 乐观锁 |
+| `MKCOL` | 创建目录 | 是 | — |
+| `DELETE` | 删除文件/目录 | 是 | — |
+| `HEAD` | 检查文件元信息（大小/修改时间/ETag） | 否（优化用） | 快速获取 ETag |
 
-坚果云适配注意：免费用户每月有请求次数限制（约 300 次/月），需要做本地缓存减少请求。
+### 坚果云优化策略
+
+免费用户约 300 次 API 调用/月，需严格控制请求数：
+- 本地缓存远程 HEAD ETag，未变化时跳过 pull
+- 合并多个 PROPFIND 为单次 depth=1 请求
+- 二进制文件采用分块上传避免重复上传整个文件
+- 每次 push/pull 请求数预估：~10-30 次（含 objects 上传/下载）
+- 建议用户使用付费版或自建 WebDAV 以获得更好的体验
 
 ## 安全设计
 
@@ -592,12 +800,85 @@ cc-box --version
 - 端到端加密：Argon2id 派生 + AES-256-GCM
 - 密码不存储，只存派生密钥
 - 敏感文件排除（.credentials.json 永远不同步）
-- settings.json 中 env.ANTHROPIC_AUTH_TOKEN 等敏感字段在快照中加密存储
+- settings.json 中 env.ANTHROPIC_AUTH_TOKEN 等敏感字段在快照中与整个文件一并加密
 
 ### 本地
 - `~/.cc-box/key.bin` 权限 0600（仅当前用户可读）
 - 备份文件 7 天自动清理
-- gc 命令清理过期 objects（默认保留最近 20 个快照）
+- gc 命令清理过期 objects（基于引用可达性，不是简单计数）
+
+## 错误恢复与边界情况
+
+### init 阶段
+
+| 场景 | 处理 |
+|------|------|
+| WebDAV 已有数据（salt.bin 存在） | 提示用户选择：加入已有同步组 / 覆盖（清空后重新初始化） |
+| salt.bin 存在但 HEAD 不存在 | 视为不完整状态，提示重新初始化或联系管理员 |
+| HEAD 指向已删除的快照 | 提示数据损坏，建议从其他设备重新 push |
+| 密码验证失败 | 最多重试 3 次，然后退出。不锁定密钥 |
+
+### push 阶段
+
+| 场景 | 处理 |
+|------|------|
+| WebDAV 不可达 | 报错退出，不做任何本地修改 |
+| 上传 object 失败（网络中断） | 重试 3 次（指数退避），仍失败则报错。已上传的 objects 保留 |
+| HEAD 乐观锁冲突（3 次都失败） | 提示用户手动 pull 后再 push |
+| 磁盘空间不足（加密临时文件） | 清理临时文件后报错 |
+
+### pull 阶段
+
+| 场景 | 处理 |
+|------|------|
+| WebDAV 不可达 | 报错退出，不做任何本地修改 |
+| 下载 object 失败 | 重试 3 次，仍失败则跳过该文件，记录到冲突列表 |
+| 共同祖先不可达 | 降级为文件级双向合并（见降级策略） |
+| 合并后文件与预期不符 | 用户可 revert 到合并前的快照 |
+
+### 二进制下载
+
+| 场景 | 处理 |
+|------|------|
+| 下载中断 | 保留已完成的分块，下次从断点继续 |
+| 哈希校验失败 | 删除损坏的分块，重新下载 |
+| 分块 manifest 与 index.json 不一致 | 以 index.json 为准，重新获取 manifest |
+| 目标路径无写入权限 | 报错并提示手动修改权限 |
+
+## 测试策略
+
+### 单元测试（每个模块）
+
+```
+- config: TOML 解析、密钥环读写、默认值填充
+- webdav: PROPFIND/GET/PUT/MKCOL/DELETE 请求构造与 XML 解析
+- snapshot: 快照创建、序列化、链式遍历、祖先查找
+- sync/merger: 三方合并（文本、JSON、目录）每种类型至少 5 个测试用例
+- sync/json_merge: settings.json 字段级合并（覆盖 cc-switch 场景）
+- crypto: 加解密往返测试、age 兼容性验证、keygen 确定性
+- object: SHA256 计算、规范化哈希（CRLF/LF）
+- binary: 分块/合并、断点续传状态文件读写
+- normalizer: 路径、换行符、大小写规范化
+```
+
+### 集成测试
+
+```
+- WebDAV 往返测试: init → push → pull → status（使用 rclone serve 本地 WebDAV）
+- 多设备模拟: 两个独立 ~/.cc-box/ 目录同时 push（验证乐观锁）
+- GC 安全测试: 创建 30 个快照后 GC，验证不被引用的 objects 不被删除
+- 加密测试: 验证加密后的 objects 确实不可读（无 key 时）
+- 跨平台规范化: 同一文件 CRLF 和 LF 版本产生相同哈希
+- 大文件分块: 模拟网络中断后断点续传
+- 密钥轮转: rekey 后所有 objects 可用新密码解密
+- 坚果云兼容: 针对坚果云特有行为测试（如有条件）
+```
+
+### 测试基础设施
+
+- CI (GitHub Actions): 每个 PR 运行单元测试 + 集成测试
+- WebDAV mock server: 内嵌测试用 WebDAV 服务，模拟各种异常场景
+- 覆盖率目标: > 80%（核心 sync/merge/crypto 模块 > 90%）
 
 ## 项目结构
 
@@ -605,54 +886,69 @@ cc-box --version
 cc-box/
 ├── cmd/
 │   └── cc-box/
-│       └── main.go               # 入口
+│       └── main.go               # 入口（CLI 或 GUI 模式判断）
 ├── internal/
 │   ├── cli/
 │   │   ├── root.go               # 根命令
-│   │   ├── init.go               # init 命令
+│   │   ├── init.go               # init 命令（bubbletea TUI 向导）
 │   │   ├── push.go               # push 命令
 │   │   ├── pull.go               # pull 命令
 │   │   ├── sync.go               # sync 命令
 │   │   ├── status.go             # status 命令
 │   │   ├── diff.go               # diff 命令
-│   │   ├── log.go                # log 命令
+│   │   ├── log.go                # log/show 命令
 │   │   ├── revert.go             # revert 命令
 │   │   ├── conflicts.go          # conflicts/resolve 命令
 │   │   ├── project.go            # project 子命令
-│   │   ├── config_cmd.go         # config 子命令
-│   │   └── device.go             # device 子命令
+│   │   ├── config_cmd.go         # config + config rekey 子命令
+│   │   ├── device.go             # device 子命令
+│   │   ├── binary.go             # binary 子命令
+│   │   └── maintenance.go        # gc/verify/backup/restore
 │   ├── config/
-│   │   ├── config.go             # 配置结构体 + 读写
+│   │   ├── config.go             # 配置结构体 + TOML 读写
 │   │   └── keyring.go            # 系统密钥环操作
 │   ├── webdav/
-│   │   ├── client.go             # WebDAV HTTP 客户端
+│   │   ├── client.go             # WebDAV HTTP 客户端（支持 ETag/条件请求）
 │   │   ├── operations.go         # PROPFIND/GET/PUT/MKCOL/DELETE
+│   │   ├── lock.go               # 乐观锁（GET HEAD + ETag + PUT If-Match）
 │   │   ├── auth.go               # Basic/Digest 认证
 │   │   └── xml.go                # WebDAV XML 解析
 │   ├── snapshot/
-│   │   ├── snapshot.go           # 快照结构与管理
-│   │   ├── scanner.go            # 本地文件扫描
+│   │   ├── snapshot.go           # 快照结构定义 + 序列化
+│   │   ├── chain.go              # 快照链遍历、祖先查找
+│   │   ├── scanner.go            # 本地文件扫描 + 排除规则
 │   │   └── differ.go             # 快照差异计算
+│   ├── normalize/
+│   │   └── normalize.go          # 跨平台规范化（路径/换行/大小写）
 │   ├── sync/
 │   │   ├── engine.go             # 同步引擎（push/pull 核心逻辑）
-│   │   ├── merger.go             # 三方合并
+│   │   ├── merger.go             # 三方合并主逻辑（按文件类型分发）
+│   │   ├── text_merge.go         # 文本文件行级合并
 │   │   ├── json_merge.go         # JSON 字段级合并（cc-switch 兼容）
+│   │   ├── dir_merge.go          # 目录级合并（递归）
+│   │   ├── history_merge.go      # history.jsonl 去重追加合并
 │   │   └── conflict.go           # 冲突检测与解决
 │   ├── crypto/
 │   │   ├── encrypt.go            # AES-256-GCM 加解密
 │   │   ├── keygen.go             # Argon2id 密钥派生
+│   │   ├── rekey.go              # 密钥轮转
 │   │   └── age_compat.go         # age 格式兼容
 │   ├── object/
 │   │   ├── store.go              # Object 存储管理（上传/下载/缓存）
-│   │   └── hash.go               # SHA-256 文件指纹
+│   │   └── hash.go               # SHA-256 文件指纹（含规范化）
+│   ├── binary/
+│   │   ├── index.go              # 版本索引管理（上传/下载/更新)
+│   │   ├── chunker.go            # 大文件分块/合并
+│   │   ├── upload.go             # 二进制上传（含断点续传）
+│   │   ├── download.go           # 二进制下载（含断点续传）
+│   │   └── prune.go              # 引用安全清理
 │   ├── project/
-│   │   ├── tracker.go            # 项目发现与追踪
-│   │   └── config_merge.go       # .claude.json 合并
-│   ├── version/
-│   │   └── tracker.go            # 二进制版本追踪
+│   │   ├── tracker.go            # 项目发现与 git remote 匹配
+│   │   ├── config_merge.go       # .claude.json 合并
+│   │   └── orphans.go            # orphan 项目管理
 │   └── tui/
-│       ├── wizard.go             # init 交互式向导
-│       └── status_panel.go       # 状态面板渲染
+│       ├── wizard.go             # init 交互式向导（bubbletea）
+│       └── widgets.go            # 通用 TUI 组件
 ├── go.mod
 ├── go.sum
 ├── Makefile
@@ -676,15 +972,20 @@ enabled = true
 # 密钥存在 ~/.cc-box/key.bin
 
 [sync]
-snapshot_limit = 20     # 保留最近 N 个快照
+snapshot_limit = 50     # 本地保留的最近快照数（用于祖先查找）
 conflict_strategy = "ask"  # ask / local / remote
+merge_retry_max = 3     # HEAD 乐观锁冲突最大重试次数
 
 [device]
-id = "win-pc-abc123"    # 自动生成的设备 ID
+id = "win-pc-abc123"    # 自动生成的设备 ID（hostname + 随机 6 字符）
 name = "办公室电脑"      # 可自定义
 
 [claude]
 path = ""               # 留空自动检测 ~/.claude/
+
+[binary]
+chunk_size_mb = 10      # 大文件分块大小
+auto_upload = false     # push 时是否自动上传二进制
 
 [exclude]
 patterns = [
@@ -713,7 +1014,7 @@ patterns = [
 
 | 选项 | 优势 | 劣势 |
 |------|------|------|
-| **Wails** (Go + Web) | 单二进制、Go 后端复用、体积小 (~15MB)、跨平台 | 需要前端开发 |
+| **Wails** (Go + Web) | 单二进制、Go 后端复用、体积小 (~15MB)、跨平台 | 需要前端开发，Windows 需要 WebView2 |
 | Fyne (纯 Go) | 纯 Go、单二进制 | UI 不够精致、自定义能力弱 |
 | Electron | 生态成熟 | 体积大 (~100MB+)、内存占用高 |
 | Qt (Go 绑定) | 原生体验 | CGO 依赖、编译复杂 |
@@ -721,9 +1022,35 @@ patterns = [
 选 Wails 的理由：
 - Go 后端与 CLI 完全复用（同一个 `internal/` 包）
 - Web 前端可以用 Svelte + Tailwind 做出现代 UI
-- 编译出单个可执行文件，无运行时依赖
+- 编译出单个可执行文件，无运行时依赖（Windows 需系统自带 WebView2）
 - 打包体积约 10-15MB（vs Electron 的 100MB+）
 - 原生系统托盘、文件对话框支持
+
+**与 CLI/TUI 的边界**：
+- `bubbletea` 仅用于 CLI 的 `init` 交互式向导（非 GUI 模式下需要）
+- `fsnotify` 仅用于 GUI 自动同步模式（监听 `~/.claude/` 变更）
+- GUI 模式下所有长耗时操作（二进制下载/上传）通过 goroutine 执行，通过 Wails EventsEmit 推送进度
+
+### GUI 模式下长耗时操作的非阻塞处理
+
+Go 后端绑定方法在 Wails 中默认是同步的，会阻塞 UI。长操作需要异步模式：
+
+```go
+// 异步启动二进制下载，通过事件推送进度
+func (a *App) PullBinaryAsync(version string) {
+    go func() {
+        // 进度回调 → runtime.EventsEmit(ctx, "binary:download-progress", progress)
+        err := binary.Download(ctx, version, func(p Progress) {
+            runtime.EventsEmit(a.ctx, "binary:download-progress", p)
+        })
+        if err != nil {
+            runtime.EventsEmit(a.ctx, "binary:download-error", err.Error())
+            return
+        }
+        runtime.EventsEmit(a.ctx, "binary:download-complete", nil)
+    }()
+}
+```
 
 ### 界面结构
 
@@ -790,312 +1117,23 @@ patterns = [
 
 #### 2. 配置文件
 
-管理 `~/.claude/` 下的文件同步。
-
-```
-┌──────────────────────────────────────────────────────┐
-│  配置文件                                   [推送] [拉取] │
-├──────────────────────────────────────────────────────┤
-│                                                      │
-│  ~/.claude/                                          │
-│  ├── 📄 settings.json          ✅ 已同步    2.0 KB   │
-│  ├── 📄 CLAUDE.md              ⬆ 已修改    4.0 KB   │
-│  ├── 📄 keybindings.json       ✅ 已同步    0.5 KB   │
-│  ├── 📁 skills/                ⬆ 已修改    304 KB   │
-│  │   ├── ensp-device-manager   ✅ 已同步             │
-│  │   └── openmetadata-analyzer ⬆ 新增               │
-│  ├── 📁 commands/              ✅ 已同步             │
-│  ├── 📁 agents/                ✅ 已同步             │
-│  ├── 📁 plugins/               ✅ 已同步             │
-│  └── 📄 history.jsonl          ⬆ 已修改    100 KB   │
-│                                                      │
-│  状态说明:  ✅ 已同步  ⬆ 本地已修改  ⬇ 远程有更新  ⚠ 冲突 │
-│                                                      │
-│  ┌─ 文件详情 (点击文件后显示) ──────────────────────┐  │
-│  │  settings.json                                  │  │
-│  │                                                 │  │
-│  │  本地修改时间: 2026-05-07 14:00                  │  │
-│  │  远程修改时间: 2026-05-07 10:00                  │  │
-│  │                                                 │  │
-│  │  [查看差异]  [使用本地版本]  [使用远程版本]        │  │
-│  └─────────────────────────────────────────────────┘  │
-│                                                      │
-└──────────────────────────────────────────────────────┘
-```
-
-功能点：
-- 文件树展示，带状态图标
-- 点击文件显示 diff（高亮变更行）
-- 批量选择要同步/排除的文件
-- 对冲突文件提供三选一（本地/远程/手动合并）
+功能点：文件树展示带状态图标、点击文件显示 diff、批量选择同步/排除、冲突文件三选一。
 
 #### 3. 二进制管理
 
-管理 `~/.local/bin/` 和 `~/.local/share/claude/versions/`。
-
-```
-┌──────────────────────────────────────────────────────┐
-│  二进制管理                     [上传本地版本] [下载]   │
-├──────────────────────────────────────────────────────┤
-│                                                      │
-│  当前使用:  claude 2.1.126    ✅ 与云端一致            │
-│                                                      │
-│  ┌─ Claude CLI ────────────────────────────────────┐ │
-│  │                                                 │ │
-│  │  VERSION     SIZE      状态        操作          │ │
-│  │  2.1.126     243 MB    ✅ 当前使用    —           │ │
-│  │  2.1.84      234 MB    ☁️ 仅云端     [切换] [删除]│ │
-│  │  2.1.81      232 MB    ☁️ 仅云端     [切换] [删除]│ │
-│  │                                                 │ │
-│  └─────────────────────────────────────────────────┘ │
-│                                                      │
-│  ┌─ 辅助工具 ──────────────────────────────────────┐ │
-│  │                                                 │ │
-│  │  工具       版本      SIZE      状态             │ │
-│  │  uv.exe    0.6.14    65 MB     ✅ 已同步         │ │
-│  │  uvx.exe   0.6.14    340 KB    ✅ 已同步         │ │
-│  │  uvw.exe   0.6.14    340 KB    ✅ 已同步         │ │
-│  │                                                 │ │
-│  └─────────────────────────────────────────────────┘ │
-│                                                      │
-│  ┌─ 云端存储 ──────────────────────────────────────┐ │
-│  │                                                 │ │
-│  │  已用: 520 MB / 可用: 1 GB (坚果云免费版)        │ │
-│  │  ████████████████░░░░░░░░  52%                  │ │
-│  │                                                 │ │
-│  └─────────────────────────────────────────────────┘ │
-│                                                      │
-└──────────────────────────────────────────────────────┘
-```
-
-功能点：
-- 版本列表，区分"当前使用"、"仅云端"、"本地+云端"
-- 切换版本：当前版本移入 versions/，从云端流式下载新版本
-- 上传：将本地版本或 versions/ 下的历史版本上传到云端
-- 删除：删除云端指定版本（释放空间）
-- 存储空间进度条
-- 进度条显示上传/下载进度
+功能点：版本列表区分"当前使用/仅云端/本地+云端"、切换版本、上传本地版本、删除云端版本、存储空间进度条、下载/上传进度条。
 
 #### 4. 历史记录
 
-快照时间线。
-
-```
-┌──────────────────────────────────────────────────────┐
-│  历史记录                                             │
-├──────────────────────────────────────────────────────┤
-│                                                      │
-│  ● snap_a1b2c3d4    2026-05-07 14:30    win-pc      │
-│  │  auto sync                                       │
-│  │  M settings.json  A skills/new-skill/            │
-│  │                                        [回滚到此] │
-│  │                                                   │
-│  ● snap_e5f6g7h8    2026-05-07 10:15    mac-book    │
-│  │  updated CLAUDE.md                                │
-│  │  M CLAUDE.md                                      │
-│  │                                        [回滚到此] │
-│  │                                                   │
-│  ● snap_k9l0m1n2    2026-05-06 22:00    win-pc      │
-│     binary updated to 2.1.126                       │
-│     M ~/.local/bin/claude.exe                       │
-│                                          [回滚到此] │
-│                                                      │
-└──────────────────────────────────────────────────────┘
-```
-
-功能点：
-- 时间线展示，每个快照显示设备、变更摘要
-- 点击展开查看具体文件变更列表
-- 回滚按钮（确认对话框 + 从云端恢复）
-- 支持筛选（按设备/按时间范围）
+快照时间线。每个快照显示设备、变更摘要（含该快照记录的各平台二进制版本）。支持展开查看文件变更列表、回滚按钮、按设备/时间筛选。
 
 #### 5. 设置
 
-```
-┌──────────────────────────────────────────────────────┐
-│  设置                                                 │
-├──────────────────────────────────────────────────────┤
-│                                                      │
-│  ┌─ WebDAV 连接 ───────────────────────────────────┐ │
-│  │                                                 │ │
-│  │  服务器 URL    [https://dav.jianguoyun.com/dav/] │ │
-│  │  用户名        [user@example.com               ] │ │
-│  │  密码          [••••••••••••          ] [测试连接]│ │
-│  │  远程根目录    [/cc-box/                      ] │ │
-│  │                                                 │ │
-│  │  连接状态: ✅ 已连接    延迟: 45ms               │ │
-│  │                                                 │ │
-│  └─────────────────────────────────────────────────┘ │
-│                                                      │
-│  ┌─ 加密 ──────────────────────────────────────────┐ │
-│  │                                                 │ │
-│  │  端到端加密    [✓] 已启用                        │ │
-│  │  算法          AES-256-GCM                      │ │
-│  │  [更改密码]                                     │ │
-│  │                                                 │ │
-│  └─────────────────────────────────────────────────┘ │
-│                                                      │
-│  ┌─ 同步偏好 ──────────────────────────────────────┐ │
-│  │                                                 │ │
-│  │  冲突策略      (●) 询问  ( ) 保留本地  ( ) 保留远程│ │
-│  │  快照保留数    [20                           ]  │ │
-│  │  自动同步      [ ] 启用 (系统托盘模式下)          │ │
-│  │  同步间隔      [30] 分钟                        │ │
-│  │                                                 │ │
-│  └─────────────────────────────────────────────────┘ │
-│                                                      │
-│  ┌─ 设备管理 ──────────────────────────────────────┐ │
-│  │                                                 │ │
-│  │  设备                  平台        最后活跃       │ │
-│  │  💻 win-pc-abc123     Windows     刚刚    [移除] │ │
-│  │  🍎 mac-book-xyz789   macOS       2小时前 [移除] │ │
-│  │                                                 │ │
-│  └─────────────────────────────────────────────────┘ │
-│                                                      │
-│                                     [保存设置]       │
-└──────────────────────────────────────────────────────┘
-```
+WebDAV 连接配置（支持测试连接）、加密设置（含"更改密码"即 rekey）、同步偏好、设备管理。
 
 ### 系统托盘
 
-应用关闭窗口后缩到系统托盘，后台运行：
-
-```
-┌──────────────────┐
-│  CC-Box          │
-│                  │
-│  ✅ 已同步       │
-│  10:30 最新      │
-│  ──────────────  │
-│  ▶ 立即同步      │
-│  ▶ 打开主界面    │
-│  ▶ 推送配置      │
-│  ▶ 拉取配置      │
-│  ──────────────  │
-│  ⏸ 暂停同步      │
-│  ❌ 退出         │
-└──────────────────┘
-
-托盘图标状态：
-  🟢 绿色 → 已同步，无待处理变更
-  🟡 黄色 → 有本地/远程变更待同步
-  🔴 红色 → 冲突或连接错误
-  🔵 蓝色 → 正在同步中
-```
-
-### 架构设计
-
-```
-cc-box/
-├── main.go                        # 入口（CLI 或 GUI 模式判断）
-├── internal/                      # 核心逻辑（CLI 和 GUI 共用）
-│   ├── cli/                       # CLI 命令
-│   ├── config/
-│   ├── webdav/
-│   ├── snapshot/
-│   ├── sync/
-│   ├── crypto/
-│   ├── object/
-│   ├── binary/                    # 二进制管理
-│   └── ...
-├── app.go                         # Wails 应用绑定（连接前后端）
-├── frontend/                      # Web 前端
-│   ├── src/
-│   │   ├── App.svelte             # 根组件
-│   │   ├── main.js                # 入口
-│   │   ├── pages/
-│   │   │   ├── Dashboard.svelte   # 概览页
-│   │   │   ├── Config.svelte      # 配置文件页
-│   │   │   ├── Binary.svelte      # 二进制管理页
-│   │   │   ├── History.svelte     # 历史记录页
-│   │   │   └── Settings.svelte    # 设置页
-│   │   ├── components/
-│   │   │   ├── FileTree.svelte    # 文件树组件
-│   │   │   ├── DiffViewer.svelte  # 差异查看器
-│   │   │   ├── VersionList.svelte # 版本列表
-│   │   │   ├── ProgressBar.svelte # 进度条
-│   │   │   ├── Modal.svelte       # 对话框
-│   │   │   └── StatusBadge.svelte # 状态标识
-│   │   ├── lib/
-│   │   │   └── wails.js           # Wails 绑定调用
-│   │   └── styles/
-│   │       └── app.css            # Tailwind 入口
-│   ├── index.html
-│   ├── package.json
-│   ├── svelte.config.js
-│   ├── vite.config.js
-│   └── tailwind.config.js
-├── wails.json                     # Wails 配置
-├── go.mod
-└── go.sum
-```
-
-### Go 后端绑定（app.go）
-
-```go
-type App struct {
-    ctx context.Context
-}
-
-// 概览
-func (a *App) GetDashboard() (*Dashboard, error)
-func (a *App) GetSyncStatus() (*SyncStatus, error)
-
-// 配置同步
-func (a *App) PushConfig() error
-func (a *App) PullConfig() error
-func (a *App) GetFileTree() ([]FileNode, error)
-func (a *App) GetFileDiff(path string) (*Diff, error)
-func (a *App) ResolveConflict(path, strategy string) error
-
-// 二进制管理
-func (a *App) GetBinaryList() (*BinaryList, error)
-func (a *App) PushBinary() error
-func (a *App) PullBinary(version string) error
-func (a *App) SwitchVersion(version string) error
-func (a *App) DeleteVersion(version string) error
-
-// 历史记录
-func (a *App) GetSnapshots(limit int) ([]Snapshot, error)
-func (a *App) RevertTo(snapshotID string) error
-
-// 设置
-func (a *App) GetConfig() (*Config, error)
-func (a *App) SaveConfig(cfg *Config) error
-func (a *App) TestWebDAV() (*ConnectionTest, error)
-func (a *App) GetDevices() ([]Device, error)
-
-// 事件（前端监听）
-// EventsEmit("sync:progress", progress)
-// EventsEmit("binary:download-progress", progress)
-// EventsEmit("sync:status-change", status)
-```
-
-### 前端调用方式
-
-```javascript
-// Svelte 组件中调用 Go 后端
-import { PushConfig, GetSyncStatus } from '../lib/wails';
-
-async function handlePush() {
-    const status = await GetSyncStatus();
-    if (status.modified > 0) {
-        await PushConfig();
-    }
-}
-```
-
-### 启动模式
-
-```bash
-cc-box                    # 默认启动 GUI（检测到无终端时）
-cc-box gui                # 强制启动 GUI
-cc-box --no-gui push      # CLI 模式（跳过 GUI）
-cc-box tray               # 仅启动系统托盘（无主窗口）
-
-# Windows 双击 cc-box.exe → 启动 GUI
-# 命令行执行 cc-box push → CLI 模式
-```
+托盘图标状态：🟢已同步 🟡待同步变更 🔴冲突或连接错误 🔵同步中
 
 ### 安装包
 
@@ -1113,56 +1151,62 @@ cc-box tray               # 仅启动系统托盘（无主窗口）
 
 - [ ] 项目初始化（Go module + cobra CLI 框架）
 - [ ] config 模块（config.toml 读写 + 系统密钥环）
-- [ ] WebDAV 客户端（PROPFIND/GET/PUT/MKCOL/DELETE）
-- [ ] 文件扫描器（扫描 ~/.claude/，应用排除规则）
-- [ ] 快照管理（创建快照、计算哈希、链式存储）
-- [ ] Object 存储（文件内容上传/下载到 WebDAV）
-- [ ] init 命令（交互式向导 + 首次快照创建）
-- [ ] push 命令（扫描变更 → 加密 → 上传 → 更新快照链）
-- [ ] pull 命令（下载远程快照 → 对比 → 下载 → 应用）
-- [ ] status 命令（本地 vs 远程差异）
+- [ ] WebDAV 客户端（PROPFIND/GET/PUT/MKCOL/DELETE，含 ETag 解析）
+- [ ] 跨平台规范化器（路径/换行/大小写规范化）
+- [ ] 文件扫描器（扫描 ~/.claude/，应用排除规则 + 规范化哈希）
+- [ ] 快照管理（创建快照、链式存储、祖先查找）
+- [ ] Object 存储（文件内容加密 → 上传/下载到 WebDAV）
+- [ ] init 命令（bubbletea 交互式向导 + 首次快照创建）
+- [ ] push 命令（扫描变更 → 加密 → 上传 → 乐观锁更新 HEAD）
+- [ ] pull 命令（下载远程快照 → 差异对比 → 下载 objects → 应用）
+- [ ] status 命令（本地 vs 远程差异概览）
 
-### Phase 2: 合并与加密
+### Phase 2: 合并、加密与二进制
 
-目标：处理冲突场景，加入端到端加密。
+目标：三方合并、端到端加密、二进制版本管理。
 
 - [ ] 端到端加密（Argon2id + AES-256-GCM + age 兼容格式）
-- [ ] 三方合并引擎（基于快照链的共同祖先）
-- [ ] JSON 字段级合并（cc-switch 兼容的 settings.json 合并）
-- [ ] 冲突检测与交互式解决（diff 展示 + 选择）
+- [ ] 密钥轮转（rekey）
+- [ ] 三方合并引擎（文本行级 + JSON 字段级 + 目录递归 + history.jsonl 特殊处理）
+- [ ] cc-switch 兼容的 settings.json 合并
+- [ ] 祖先不可达降级策略
+- [ ] 冲突检测与交互式解决
+- [ ] 二进制分块上传/下载（含断点续传）
+- [ ] 二进制版本索引管理
+- [ ] 二进制版本切换
 - [ ] log / show / revert 命令
-- [ ] 备份与恢复
+- [ ] backup / restore 命令
 - [ ] 坚果云适配（请求频率控制 + 本地缓存优化）
 
-### Phase 3: GUI + 高级功能
+### Phase 3: GUI + 项目同步
 
 目标：图形界面、项目级配置同步、自动同步。
 
 - [ ] Wails 项目集成（Go 后端 + Svelte 前端）
 - [ ] Dashboard 页面（同步状态、快捷操作、设备列表）
 - [ ] 配置文件页面（文件树、diff 查看、冲突解决）
-- [ ] 二进制管理页面（版本列表、上传/下载/切换）
+- [ ] 二进制管理页面（版本列表、上传/下载/切换、进度条）
 - [ ] 历史记录页面（快照时间线、回滚）
-- [ ] 设置页面（WebDAV、加密、同步偏好）
-- [ ] 系统托盘（状态图标、快捷菜单、自动同步）
-- [ ] 项目级 .claude.json 同步（按 git remote 匹配）
+- [ ] 设置页面（WebDAV、加密 + rekey、同步偏好）
+- [ ] 系统托盘（状态图标、快捷菜单、基于 fsnotify 的自动同步）
+- [ ] 项目级 .claude.json 同步（git remote 匹配 + orphan 管理）
 - [ ] diff 命令（文件内容对比）
-- [ ] gc / verify 命令
+- [ ] gc / verify / binary prune 命令
 - [ ] macOS / Linux 适配测试
 
 ### Phase 4: 打磨与发布
 
 目标：正式发布可用版本。
 
-- [ ] 完整测试覆盖（单元 + 集成测试）
+- [ ] 完整测试覆盖（单元 + 集成测试，覆盖率 > 80%）
 - [ ] goreleaser 多平台发布（win/mac/linux, amd64/arm64）
 - [ ] Windows MSIX 安装包 + portable zip
-- [ ] macOS DMG 打包
+- [ ] macOS DMG 打包（含代码签名）
 - [ ] Linux AppImage + .deb
 - [ ] Homebrew formula（macOS）
 - [ ] Scoop manifest（Windows）
 - [ ] 完善文档和 README
-- [ ] 预留 projects/ 会话同步接口（不实现，但留好扩展点）
+- [ ] 预留 projects/ 会话同步接口（SyncTarget 接口设计完成，不实现）
 
 ## 预留：会话同步扩展点
 
@@ -1183,7 +1227,7 @@ func (c *ConfigSync) Scan() ([]FileEntry, error) { /* ... */ }
 // 预留：会话数据同步（Phase 5+）
 type SessionSync struct { /* ... */ }
 func (s *SessionSync) Scan() ([]FileEntry, error) { /* ... */ }
-func (s *SessionSync) PathRewrite(path string, from DeviceInfo) (string, error) {
+func (s *SessionSync) PathRewrite(path string, fromDevice DeviceInfo) (string, error) {
     // 路径重写逻辑：C:\Users\a\... → /home/alice/...
 }
 ```
@@ -1192,7 +1236,21 @@ func (s *SessionSync) PathRewrite(path string, from DeviceInfo) (string, error) 
 
 ```toml
 [sync.targets]
-config = true     # 当前阶段
+config = true     # 当前实现
 sessions = false  # 预留，默认关闭
 memory = false    # 预留，默认关闭
 ```
+
+## 设计权衡记录
+
+记录几个有意的取舍，便于后续开发者理解：
+
+1. **不用分布式锁**：WebDAV 不支持原生分布式锁，且本工具面向个人设备（通常 2-3 台），乐观锁足够。如果未来扩展到团队使用，可考虑在 WebDAV 上放一个 lock 文件做简单互斥。
+
+2. **key.bin 本地存储 vs 每次输密**：选择了本地存储派生密钥的便利性。攻击者获取文件系统权限时无法防御，但对于云端存储提供商的数据泄露场景有效。
+
+3. **快照链 vs DAG**：选择了线性快照链而不是 git 式的 DAG（有向无环图）。因为个人设备场景的分支情况很少，线性链简化了合并逻辑。如果未来出现多分支需求，可以通过 parent 字段扩展为 `parents[]` 数组。
+
+4. **WebDAV 而非 S3/GCS**：牺牲了对象存储的原子语义（条件写入），换取了更广泛的存储后端支持（用户可以自建 NextCloud、用坚果云等）。
+
+5. **二进制不参与快照 diff**：二进制文件的变化通过 binary index 独立管理，不纳入配置文件快照的 diff 流程。这避免了 243MB 文件的版本对比开销。
