@@ -38,7 +38,7 @@
 ```
 
 CC-Box 的二进制管理策略：
-- **版本备份**：将 `~/.local/bin/claude` 和历史版本分块上传到 WebDAV（压缩加密）
+- **版本备份**：将 `~/.local/bin/claude` 和历史版本上传到 WebDAV（压缩），加密和分块策略可配置
 - **按哈希去重**：相同版本（同平台）只存一份，多设备共享
 - **版本切换**：`cc-box binary switch 2.1.84` 一键切换 Claude 版本
 - **新设备恢复**：pull 时自动下载当前版本到 `~/.local/bin/`，无需重新安装
@@ -371,16 +371,18 @@ cc-box revert <snapshot-id>
 │   ├── ab/
 │   │   └── c1234def...enc        # 配置文件内容对象（按哈希前缀 2 字符分目录）
 │   └── ...
-├── binaries/                     # 二进制文件存储
-│   ├── index.json                # 版本索引（含引用计数，不加密）
-│   ├── parts/                    # 分块存储（大文件断点续传）
+├── binaries/                     # 二进制文件存储（加密和分块策略可配置）
+│   ├── index.json                # 版本索引（含引用计数）
+│   ├── parts/                    # 分块存储（断点续传）
 │   │   ├── sha256:abc123/
-│   │   │   ├── part-000.enc      # 10MB 分块（加密压缩）
-│   │   │   ├── part-001.enc
+│   │   │   ├── part-000.zst      # 10MB 分块（仅压缩，encrypt=false 时）
+│   │   │   ├── part-000.enc      # 10MB 分块（压缩+加密，encrypt=true 时）
+│   │   │   ├── part-001.zst/.enc
 │   │   │   └── manifest.json     # 分块清单（总数、每块哈希、总大小）
 │   │   └── ...
 │   ├── windows-amd64/
-│   │   ├── claude-2.1.126.exe.enc  # 完整文件（对于小文件或合并后的）
+│   │   ├── claude-2.1.126.zst      # 完整文件（encrypt=false 时，仅压缩）
+│   │   ├── claude-2.1.126.enc      # 完整文件（encrypt=true 时，压缩+加密）
 │   │   └── ...
 │   ├── darwin-arm64/
 │   └── linux-amd64/
@@ -472,7 +474,7 @@ settings.json 合并时的特殊处理:
 | HEAD 指针 | 否 | 只是一个快照 ID |
 | devices/*.json | 否 | 只含设备名和平台信息 |
 | salt.bin | 否 | 需要新设备 init 时读取 |
-| binaries 分块文件 | 是 | AES-256-GCM，同 objects |
+| binaries 分块文件 | 可配置 | 由 `binary.encrypt` 控制。默认 false（仅压缩不加密） |
 | binary index.json | 否 | 版本号/哈希/平台等元数据 |
 | config.toml（本地） | 否 | 本地文件，含 WebDAV 地址和用户名 |
 
@@ -617,40 +619,58 @@ Claude Code 的二进制文件（`~/.local/bin/claude`）约 242MB，加上历�
 
 ### 大文件分块上传与断点续传
 
-二进制文件（~243MB）通过 WebDAV 上传，需要考虑网络中断和 WebDAV 服务端的限制：
+二进制文件（~243MB）通过 WebDAV 上传，需要考虑网络中断和 WebDAV 服务端的限制。上传策略由两个配置项组合控制：
+
+#### 四种上传模式
+
+| 模式 | encrypt | chunk_mode | 行为 |
+|------|---------|------------|------|
+| 加密 + 按需分块 | true | auto | 超过阈值→分块加密上传；未超过→整体加密上传 |
+| 不加密 + 按需分块 | false | auto | 超过阈值→分块压缩上传；未超过→整体压缩上传 |
+| 加密 + 始终分块 | true | always | 所有文件分块加密上传，支持断点续传 |
+| 不加密 + 始终分块 | false | always | 所有文件分块压缩上传，支持断点续传 |
+
+默认配置：`encrypt = false`，`chunk_mode = "auto"`。适合大多数场景（二进制为公开可获取文件，不需要加密；小文件无需分块）。
+
+所有模式都使用 zstd 压缩。加密在压缩之后执行（compress → encrypt），兼顾压缩比和安全性。
 
 ```
-分块策略:
-  - 块大小: 10MB（chunk_size = 10 * 1024 * 1024）
-  - 每块独立压缩（zstd） + 加密（AES-256-GCM）
-  - 压缩在加密之前，充分利用二进制文件的压缩比
-
 上传流程 (cc-box binary push):
 1. 读取本地二进制文件
 2. 计算整体 sha256 哈希（用于最终校验和去重）
 3. 查询 WebDAV binaries/index.json，同哈希->跳过
-4. 将文件按 10MB 分块:
-   chunk_i = zstd_compress(file[offset : offset+10MB])
-   enc_chunk_i = AES-256-GCM(chunk_i, key, nonce_i)
-5. 上传 manifest.json 到 /cc-box/binaries/parts/<hash>/manifest.json
-6. 逐个上传 part-000.enc, part-001.enc, ...
-   - 上传前检查该 part 是否已存在（HEAD 请求）→ 跳过已上传的块
-   - 上传失败时记录已完成的块索引
-7. 所有 part 上传完成后，验证完整性
-8. 更新 index.json
+4. 判断是否分块:
+   - chunk_mode = "always" → 始终分块
+   - chunk_mode = "auto"   → 文件 > chunk_threshold_mb 时分块
+5. 分块上传路径:
+   a. 分块:
+      - 将文件按 chunk_size_mb 分块
+      - 每块: compressed = zstd_compress(chunk)
+      - 如 encrypt=true: encrypted = AES-256-GCM(compressed, key, nonce)
+      - 上传 manifest.json 到 /cc-box/binaries/parts/<hash>/manifest.json
+      - 逐个上传 part-NNN.zst（或 .enc）
+        - 上传前检查该 part 是否已存在 → 跳过已上传的块（断点续传）
+      - 所有 part 上传完成后，验证完整性
+   b. 整体上传:
+      - compressed = zstd_compress(file)
+      - 如 encrypt=true: output = AES-256-GCM(compressed, key, nonce)
+      - 上传到 /cc-box/binaries/<platform>/<name>-<version>.zst（或 .enc）
+6. 更新 index.json
 
 下载流程 (cc-box binary pull [VERSION]):
-1. 下载 index.json → 找到目标版本的哈希
-2. 下载 /cc-box/binaries/parts/<hash>/manifest.json
-3. 检查本地是否已有部分分块（断点续传）:
-   - 扫描目标目录下的 .cc-box-download/ 缓存
-   - 已完成的块跳过下载
-4. 逐个下载 part-NNN.enc
-   - 每下载完一块即解密+解压写入临时文件
-   - 记录已完成的块索引到 .cc-box-download/progress.json
-5. 所有块完成后，校验整体 sha256
-6. 将临时文件 move 到最终位置
-7. 清理 .cc-box-download/ 临时目录
+1. 下载 index.json → 找到目标版本
+2. 根据版本记录判断分块或整体:
+   a. 分块下载:
+      - 下载 manifest.json
+      - 逐个下载 part-NNN
+      - 如 encrypt=true: 先解密再解压
+      - 如 encrypt=false: 直接解压
+      - 校验整体 sha256
+   b. 整体下载:
+      - 下载完整文件
+      - 如 encrypt=true: 先解密再解压
+      - 如 encrypt=false: 直接解压
+3. 将临时文件 move 到最终位置
 
 断点续传状态文件 (.cc-box-download/progress.json):
 {
@@ -661,7 +681,7 @@ Claude Code 的二进制文件（`~/.local/bin/claude`）约 242MB，加上历�
 }
 ```
 
-完整文件（小文件如 uvx.exe ~340KB）不进行分块，直接上传到 `/cc-box/binaries/<platform>/<name>.enc`。分块阈值：文件 > 50MB 时使用分块上传。
+分块阈值由 `binary.chunk_threshold_mb` 控制（默认 50MB）。`chunk_mode = "auto"` 时，文件超过阈值才分块；`chunk_mode = "always"` 时忽略阈值，所有文件都分块。
 
 ### 版本切换流程
 
@@ -984,8 +1004,11 @@ name = "办公室电脑"      # 可自定义
 path = ""               # 留空自动检测 ~/.claude/
 
 [binary]
-chunk_size_mb = 10      # 大文件分块大小
-auto_upload = false     # push 时是否自动上传二进制
+encrypt = false              # 是否加密二进制文件（false=仅压缩，true=压缩+AES-256-GCM）
+chunk_mode = "auto"          # 分块模式: "auto"=超过阈值时分块, "always"=始终分块
+chunk_size_mb = 10           # 分块大小（MB）
+chunk_threshold_mb = 50      # chunk_mode="auto" 时的分块阈值（MB）
+auto_upload = false          # push 时是否自动上传二进制
 
 [exclude]
 patterns = [

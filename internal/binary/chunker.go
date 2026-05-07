@@ -9,10 +9,7 @@ import (
 	"fmt"
 )
 
-const (
-	DefaultChunkSize = 10 * 1024 * 1024 // 10MB
-	SmallFileThreshold = 50 * 1024 * 1024 // 50MB 以上才分块
-)
+const DefaultChunkSize = 10 * 1024 * 1024 // 10MB
 
 // Manifest 分块清单
 type Manifest struct {
@@ -68,9 +65,14 @@ func Split(data []byte, chunkSize int) *ChunkResult {
 	return &ChunkResult{Manifest: manifest, Chunks: chunks}
 }
 
-// ShouldChunk 判断文件大小是否需要分块
-func ShouldChunk(size int64) bool {
-	return size > SmallFileThreshold
+// ShouldChunk 判断是否需要分块
+// chunkMode: "always" 始终分块, "auto" 超过阈值时分块
+func ShouldChunk(size int64, chunkMode string, thresholdBytes int64) bool {
+	if chunkMode == "always" {
+		return true
+	}
+	// "auto" 模式
+	return size > thresholdBytes
 }
 
 // SerializeManifest 序列化 manifest

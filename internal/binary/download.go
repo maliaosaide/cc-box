@@ -1,5 +1,5 @@
 // 二进制下载
-// 支持分块下载和断点续传
+// 根据 index 中记录的 encrypted/chunked 元数据选择对应策略
 package binary
 
 import (
@@ -35,16 +35,15 @@ func Download(client *webdav.Client, key []byte, name string, version string, ta
 
 	var data []byte
 
-	if ShouldChunk(v.Size) {
-		data, err = downloadChunked(client, key, v.Hash, v.Size, progress)
+	if v.Chunked {
+		data, err = downloadChunked(client, key, v.Hash, v.Size, v.Encrypted, progress)
 	} else {
-		data, err = downloadWhole(client, key, name, platform)
+		data, err = downloadWhole(client, key, name, version, platform, v.Encrypted)
 	}
 	if err != nil {
 		return err
 	}
 
-	// 写入目标文件
 	os.MkdirAll(filepath.Dir(targetPath), 0755)
 	if err := os.WriteFile(targetPath, data, 0755); err != nil {
 		return fmt.Errorf("写入文件失败: %w", err)
@@ -53,7 +52,7 @@ func Download(client *webdav.Client, key []byte, name string, version string, ta
 	return nil
 }
 
-func downloadChunked(client *webdav.Client, key []byte, hash string, totalSize int64, progress DownloadProgress) ([]byte, error) {
+func downloadChunked(client *webdav.Client, key []byte, hash string, totalSize int64, encrypted bool, progress DownloadProgress) ([]byte, error) {
 	// 下载 manifest
 	manifestPath := fmt.Sprintf("binaries/parts/%s/manifest.json", hash)
 	manifestData, _, err := client.GET(manifestPath)
@@ -66,18 +65,24 @@ func downloadChunked(client *webdav.Client, key []byte, hash string, totalSize i
 		return nil, err
 	}
 
+	ext := extForEncrypted(encrypted)
 	result := make([]byte, 0, totalSize)
 	for i := 0; i < manifest.TotalParts; i++ {
-		partPath := fmt.Sprintf("binaries/parts/%s/part-%03d.enc", hash, i)
+		partPath := fmt.Sprintf("binaries/parts/%s/part-%03d%s", hash, i, ext)
 
-		encrypted, _, err := client.GET(partPath)
+		payload, _, err := client.GET(partPath)
 		if err != nil {
 			return nil, fmt.Errorf("下载分块 %d 失败: %w", i, err)
 		}
 
-		chunk, err := crypto.Decrypt(encrypted, key)
-		if err != nil {
-			return nil, fmt.Errorf("解密分块 %d 失败: %w", i, err)
+		var chunk []byte
+		if encrypted {
+			chunk, err = crypto.Decrypt(payload, key)
+			if err != nil {
+				return nil, fmt.Errorf("解密分块 %d 失败: %w", i, err)
+			}
+		} else {
+			chunk = payload
 		}
 
 		result = append(result, chunk...)
@@ -90,12 +95,17 @@ func downloadChunked(client *webdav.Client, key []byte, hash string, totalSize i
 	return result, nil
 }
 
-func downloadWhole(client *webdav.Client, key []byte, name string, platform string) ([]byte, error) {
-	path := fmt.Sprintf("binaries/%s/%s.enc", platform, name)
-	encrypted, _, err := client.GET(path)
+func downloadWhole(client *webdav.Client, key []byte, name string, version string, platform string, encrypted bool) ([]byte, error) {
+	ext := extForEncrypted(encrypted)
+	path := fmt.Sprintf("binaries/%s/%s-%s%s", platform, name, version, ext)
+
+	payload, _, err := client.GET(path)
 	if err != nil {
 		return nil, fmt.Errorf("下载失败: %w", err)
 	}
 
-	return crypto.Decrypt(encrypted, key)
+	if encrypted {
+		return crypto.Decrypt(payload, key)
+	}
+	return payload, nil
 }

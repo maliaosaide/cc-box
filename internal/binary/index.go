@@ -38,6 +38,8 @@ type Version struct {
 	Refs       int       `json:"refs"`
 	Uploaded   time.Time `json:"uploaded"`
 	UploadedBy string    `json:"uploaded_by"`
+	Encrypted  bool      `json:"encrypted"`
+	Chunked    bool      `json:"chunked"`
 }
 
 // NewIndex 创建空索引

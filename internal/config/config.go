@@ -50,8 +50,11 @@ type ClaudeConfig struct {
 }
 
 type BinaryConfig struct {
-	ChunkSizeMB int  `mapstructure:"chunk_size_mb"`
-	AutoUpload  bool `mapstructure:"auto_upload"`
+	Encrypt          bool   `mapstructure:"encrypt"`
+	ChunkMode        string `mapstructure:"chunk_mode"`
+	ChunkSizeMB      int    `mapstructure:"chunk_size_mb"`
+	ChunkThresholdMB int    `mapstructure:"chunk_threshold_mb"`
+	AutoUpload       bool   `mapstructure:"auto_upload"`
 }
 
 type ExcludeConfig struct {
@@ -96,8 +99,11 @@ func DefaultConfig() *Config {
 			ID:   GenerateDeviceID(),
 			Name: hostname(),
 		},
-		Binary: BinaryConfig{
-			ChunkSizeMB: 10,
+			Binary: BinaryConfig{
+			Encrypt:          false,
+			ChunkMode:        "auto",
+			ChunkSizeMB:      10,
+			ChunkThresholdMB: 50,
 		},
 		Exclude: ExcludeConfig{
 			Patterns: DefaultExcludePatterns,

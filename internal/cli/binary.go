@@ -318,9 +318,11 @@ func runBinaryPrune(cmd *cobra.Command, args []string) error {
 			client.DELETE(partsDir)
 		}
 
-		// 删除完整文件（小文件未分块时）
-		encPath := fmt.Sprintf("binaries/%s/%s-%s.enc", t.platform, t.name, t.version)
-		client.DELETE(encPath)
+	// 删除完整文件（尝试两种扩展名）
+		for _, ext := range []string{".enc", ".bin"} {
+			wholePath := fmt.Sprintf("binaries/%s/%s-%s%s", t.platform, t.name, t.version, ext)
+			client.DELETE(wholePath)
+		}
 
 		// 从索引中移除
 		info := idx.GetBinaryInfo(t.platform, t.name)
