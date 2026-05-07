@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -192,6 +193,96 @@ func runVerify(cmd *cobra.Command, args []string) error {
 }
 
 func runGC(cmd *cobra.Command, args []string) error {
-	fmt.Println("GC 功能将在后续版本完善（需要引用安全检查）")
+	_, client, key, err := loadClientAndKey()
+	if err != nil {
+		return err
+	}
+
+	// 1. 收集所有可达的 object 哈希（从快照链中）
+	fmt.Println("扫描快照链...")
+	reachableObjects := make(map[string]bool)
+
+	// 读取远程 HEAD
+	headData, _, err := client.GET("HEAD")
+	if err != nil {
+		return fmt.Errorf("读取远程 HEAD 失败: %w", err)
+	}
+
+	// 沿快照链遍历，收集所有引用的 object 哈希
+	snapID := string(headData)
+	snapCount := 0
+	for snapID != "" && snapCount < 50 {
+		snap, err := loadRemoteSnapshot(client, key, snapID)
+		if err != nil {
+			fmt.Printf("  跳过快照 %s: %v\n", snapID, err)
+			break
+		}
+
+		for _, entry := range snap.Files {
+			reachableObjects[entry.Hash] = true
+		}
+		snapID = snap.Parent
+		snapCount++
+	}
+	fmt.Printf("  扫描了 %d 个快照，%d 个可达 object\n", snapCount, len(reachableObjects))
+
+	// 2. 列出远程所有 objects
+	fmt.Println("扫描远程 objects...")
+	// 遍历 objects/ 下的哈希前缀目录
+	prefixFiles, err := client.PROPFIND("objects/", 1)
+	if err != nil {
+		return fmt.Errorf("列出 objects 失败: %w", err)
+	}
+
+	var orphanObjects []string
+	for _, dir := range prefixFiles {
+		if !dir.IsDir {
+			continue
+		}
+
+		objFiles, err := client.PROPFIND("objects/"+dir.Path, 1)
+		if err != nil {
+			continue
+		}
+
+		for _, f := range objFiles {
+			if f.IsDir || !strings.HasSuffix(f.Path, ".enc") {
+				continue
+			}
+
+			// 从文件名提取哈希: ab/c1234def.enc → sha256:abc1234def
+			fileName := strings.TrimSuffix(filepath.Base(f.Path), ".enc")
+			prefix := filepath.Base(filepath.Dir(f.Path))
+			hash := prefix + fileName
+
+			if !reachableObjects[hash] {
+				orphanObjects = append(orphanObjects, "objects/"+dir.Path+f.Path)
+			}
+		}
+	}
+
+	if len(orphanObjects) == 0 {
+		fmt.Println("没有可清理的 object")
+		return nil
+	}
+
+	fmt.Printf("\n发现 %d 个孤立 object（不再被任何快照引用）\n", len(orphanObjects))
+	fmt.Print("确认清理？[y/N] ")
+	var answer string
+	fmt.Scanln(&answer)
+	if strings.ToLower(answer) != "y" {
+		return nil
+	}
+
+	cleaned := 0
+	for _, path := range orphanObjects {
+		if err := client.DELETE(path); err != nil {
+			fmt.Printf("  删除失败 %s: %v\n", path, err)
+			continue
+		}
+		cleaned++
+	}
+
+	fmt.Printf("已清理 %d 个孤立 object\n", cleaned)
 	return nil
 }

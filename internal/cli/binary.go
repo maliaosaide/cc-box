@@ -224,6 +224,13 @@ func runBinarySwitch(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+type pruneTarget struct {
+	platform string
+	name     string
+	version  string
+	hash     string
+}
+
 func runBinaryPrune(cmd *cobra.Command, args []string) error {
 	_, client, _, err := loadClientAndKey()
 	if err != nil {
@@ -235,36 +242,63 @@ func runBinaryPrune(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	platform := config.Platform()
-	var toDelete []string
+	var targets []pruneTarget
 
-	for name, binInfo := range []struct {
-		n string
-		i *binary.BinaryInfo
-	}{
-		{"claude", idx.GetBinaryInfo(platform, "claude")},
-		{"uv", idx.GetBinaryInfo(platform, "uv")},
-	} {
-		_ = name
-		if binInfo.i == nil {
-			continue
+	// 遍历所有平台的二进制
+	for platform, pBins := range idx.Platforms {
+		allBins := []*binary.BinaryInfo{
+			pBins.Claude, pBins.UV, pBins.UVX, pBins.UVW,
 		}
-		for ver, v := range binInfo.i.Versions {
-			if v.Refs <= 0 && ver != binInfo.i.Current {
-				toDelete = append(toDelete, fmt.Sprintf("%s %s", name, ver))
+		names := []string{"claude", "uv", "uvx", "uvw"}
+		for i, info := range allBins {
+			if info == nil {
+				continue
+			}
+			for ver, v := range info.Versions {
+				// 安全规则：不删除 current 版本，不删除 refs > 0 的版本
+				if ver == info.Current {
+					continue
+				}
+				if v.Refs > 0 {
+					continue
+				}
+				targets = append(targets, pruneTarget{
+					platform: platform,
+					name:     names[i],
+					version:  ver,
+					hash:     v.Hash,
+				})
+			}
+		}
+		// 检查 custom 二进制
+		for name, info := range pBins.Custom {
+			if info == nil {
+				continue
+			}
+			for ver, v := range info.Versions {
+				if ver == info.Current || v.Refs > 0 {
+					continue
+				}
+				targets = append(targets, pruneTarget{
+					platform: platform,
+					name:     name,
+					version:  ver,
+					hash:     v.Hash,
+				})
 			}
 		}
 	}
 
-	if len(toDelete) == 0 {
+	if len(targets) == 0 {
 		fmt.Println("没有可清理的版本")
 		return nil
 	}
 
-	fmt.Printf("可清理的版本 (%d):\n", len(toDelete))
-	for _, v := range toDelete {
-		fmt.Printf("  - %s\n", v)
+	fmt.Printf("可清理的版本 (%d):\n\n", len(targets))
+	for _, t := range targets {
+		fmt.Printf("  %s/%s %-12s  %s\n", t.platform, t.name, t.version, t.hash)
 	}
+	fmt.Printf("\n总空间将释放: %s\n", formatSize(totalPruneSize(idx, targets)))
 
 	fmt.Print("\n确认清理？[y/N] ")
 	var answer string
@@ -273,14 +307,46 @@ func runBinaryPrune(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// 删除分块文件
-	for _, v := range toDelete {
-		fmt.Printf("  清理 %s\n", v)
+	// 删除分块文件和更新索引
+	cleaned := 0
+	for _, t := range targets {
+		// 删除分块目录
+		if t.hash != "" {
+			partsDir := "binaries/parts/" + t.hash + "/"
+			client.DELETE(partsDir)
+		}
+
+		// 删除完整文件（小文件未分块时）
+		encPath := fmt.Sprintf("binaries/%s/%s-%s.enc", t.platform, t.name, t.version)
+		client.DELETE(encPath)
+
+		// 从索引中移除
+		info := idx.GetBinaryInfo(t.platform, t.name)
+		if info != nil {
+			delete(info.Versions, t.version)
+		}
+
+		fmt.Printf("  ✓ %s/%s %s\n", t.platform, t.name, t.version)
+		cleaned++
 	}
 
+	// 保存更新后的索引
 	binary.SaveIndex(client, idx)
-	fmt.Println("清理完成")
+	fmt.Printf("\n已清理 %d 个版本\n", cleaned)
 	return nil
+}
+
+func totalPruneSize(idx *binary.Index, targets []pruneTarget) int64 {
+	var total int64
+	for _, t := range targets {
+		info := idx.GetBinaryInfo(t.platform, t.name)
+		if info != nil {
+			if v, ok := info.Versions[t.version]; ok {
+				total += v.Size
+			}
+		}
+	}
+	return total
 }
 
 // detectVersion 从二进制路径检测版本
