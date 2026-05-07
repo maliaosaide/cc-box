@@ -5,7 +5,9 @@ package cli
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/user/cc-box/internal/binary"
@@ -351,7 +353,15 @@ func totalPruneSize(idx *binary.Index, targets []pruneTarget) int64 {
 
 // detectVersion 从二进制路径检测版本
 func detectVersion(binPath string) string {
-	// 简化实现：从 versions 目录推断
-	// 实际可以从 claude --version 获取
+	cmd := exec.Command(binPath, "--version")
+	output, err := cmd.Output()
+	if err != nil {
+		return "unknown"
+	}
+	// 输出格式: "2.1.126 (Claude Code)" 或类似
+	fields := strings.Fields(string(output))
+	if len(fields) > 0 {
+		return fields[0]
+	}
 	return "unknown"
 }
