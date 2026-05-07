@@ -113,19 +113,22 @@ cc-box binary list
 #   2.1.81      232MB    2026-04-15
 
 cc-box binary switch 2.1.84
+#   当前版本 2.1.126 → 存入 ~/.local/share/claude/versions/2.1.126
+#   从 WebDAV 下载 2.1.84 → ~/.local/bin/claude.exe
 #   已切换到版本 2.1.84
-#   claude.exe → ~/.local/share/claude/versions/2.1.84
 
-cc-box binary backup
-#   正在备份 claude.exe (243MB)...
-#   正在备份 uv.exe (65MB)...
-#   已上传到 WebDAV
+cc-box binary push
+#   正在上传 claude.exe (243MB) → WebDAV...
+#   正在上传 uv.exe (65MB) → WebDAV...
+#   历史版本 2.1.84 已存在云端，跳过
+
+cc-box binary pull
+#   云端当前版本: 2.1.126
+#   正在下载 claude.exe (243MB) → ~/.local/bin/claude.exe
+#   正在下载 uv.exe (65MB) → ~/.local/bin/uv.exe
 ```
 
-不同步整个二进制文件内容（太大），而是：
-- 按版本哈希去重，相同版本只存一份
-- 压缩后上传（节省 WebDAV 空间）
-- 新设备 pull 时下载需要的版本
+**不做本地额外备份。** WebDAV 云端即是备份源，二进制文件通过流式传输直接从 WebDAV 写入目标位置，不在本地保留副本，避免双份 claude.exe 占用 ~500MB 空间。
 
 ### 端到端加密
 
@@ -172,11 +175,11 @@ cc-box diff [FILE]              # 查看文件差异
 cc-box revert <snapshot-id>     # 回滚到指定快照
 
 # 二进制管理
-cc-box binary list              # 列出已备份版本
-cc-box binary backup            # 备份当前二进制
-cc-box binary restore [VERSION] # 恢复指定版本
-cc-box binary switch <VERSION>  # 切换 Claude 版本
-cc-box binary prune             # 清理旧版本
+cc-box binary list              # 列出云端已有版本
+cc-box binary push              # 上传本地二进制到 WebDAV
+cc-box binary pull [VERSION]    # 从 WebDAV 下载版本（不指定则下载 current）
+cc-box binary switch <VERSION>  # 切换 Claude 版本（从云端下载）
+cc-box binary prune             # 清理云端旧版本
 
 # 项目配置
 cc-box project list             # 列出已追踪项目
@@ -188,8 +191,7 @@ cc-box config get <key>         # 查看配置
 cc-box config set <key> <val>   # 修改配置
 
 # 维护
-cc-box backup                   # 本地完整备份
-cc-box gc                       # 清理过期数据
+cc-box gc                       # 清理云端过期数据
 cc-box verify                   # 校验完整性
 ```
 

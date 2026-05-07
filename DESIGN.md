@@ -221,7 +221,7 @@ cc-box pull [--dry-run] [--force]
    - 双方都变 → 冲突，需解决
    - 双方都删 → 删除
 6. 下载需要的 objects，解密
-7. 备份被覆盖的文件 → ~/.cc-box/backups/snap_xxx/
+7. 直接覆盖本地文件（云端已有备份，不做本地额外备份）
 8. 应用合并结果
 9. 创建合并快照，parent 指向远程最新
 10. 上传合并快照 + 更新 latest
@@ -290,18 +290,14 @@ cc-box revert <snapshot-id>
 ├── HEAD                          # 本地最新快照 ID
 ├── cache/
 │   ├── latest-remote             # 远程 latest 缓存
-│   └── objects/                  # 已下载的 objects 缓存
-├── backups/
-│   ├── snap_a1b2c3d4/           # 回滚/覆盖前的文件备份
-│   └── ...
+│   └── objects/                  # 已下载的配置文件 objects 缓存（小文件）
 ├── snapshots/
 │   ├── snap_a1b2c3d4.json       # 本地快照缓存
 │   └── ...
-├── binary-cache/                 # 二进制下载缓存
-│   ├── claude-2.1.126.exe       # 已下载的版本
-│   └── ...
 └── key.bin                       # 派生加密密钥（0600 权限）
 ```
+
+**不做本地文件备份**：WebDAV 云端即是备份。二进制文件（~242MB）和配置文件的状态都由快照链记录在云端，不需要在本地保留额外副本。pull 时直接覆盖本地文件，需要回滚时从 WebDAV 下载即可。
 
 ## cc-switch（cc-cli）兼容设计
 
@@ -464,63 +460,48 @@ Claude Code 的二进制文件（`~/.local/bin/claude`）约 242MB，加上历�
 ```
 cc-box binary switch 2.1.84
 
-1. 检查本地 binary-cache/ 是否已有该版本
-   - 有 → 直接复制到 ~/.local/bin/claude.exe
-   - 无 → 从 WebDAV 下载到 binary-cache/，再复制
-2. 将当前版本移动到 ~/.local/share/claude/versions/{version}
-3. 更新 index.json 中的 current 指针
-4. 验证新版本的 sha256 哈希
+1. 将当前 ~/.local/bin/claude.exe 移动到 ~/.local/share/claude/versions/{当前版本号}
+2. 从 WebDAV 直接下载目标版本到 ~/.local/bin/claude.exe（流式写入，不占额外空间）
+3. 验证 sha256 哈希
+4. 更新 index.json 中的 current 指针
 ```
 
-### 备份流程
+### 上传流程
 
 ```
-cc-box binary backup
+cc-box binary push
 
 1. 读取当前 ~/.local/bin/claude 的版本号
 2. 计算 sha256 哈希
 3. 对比 WebDAV index.json，检查是否已存在相同哈希
    - 已存在 → 跳过（去重）
-   - 不存在 → 压缩 + 加密 → 上传
+   - 不存在 → 压缩 + 加密 → 流式上传到 WebDAV
 4. 扫描 ~/.local/share/claude/versions/ 下的历史版本
    - 同样按哈希去重上传
 5. 更新 index.json
 ```
 
-### 恢复流程（新设备）
+### 下载流程（新设备或版本恢复）
 
 ```
-cc-box binary restore
+cc-box binary pull [VERSION]
 
+# 不指定版本：下载云端标记的 current 版本
+cc-box binary pull
+
+# 指定版本：下载特定版本
+cc-box binary pull 2.1.84
+
+流程:
 1. 从 WebDAV 下载 index.json
 2. 读取当前平台（windows-amd64 / darwin-arm64 / linux-amd64）
-3. 下载 current 指向的版本
-4. 解密 + 解压 + 验证哈希
-5. 写入 ~/.local/bin/claude[.exe]
-6. 同时恢复 uv/uvx/uvw 等配套工具
-7. 创建 ~/.local/share/claude/versions/ 目录结构
+3. 如果本地已有 claude 且版本不同 → 将当前版本移入 ~/.local/share/claude/versions/
+4. 从 WebDAV 流式下载 + 解密 + 解压 → 直接写入 ~/.local/bin/claude[.exe]
+5. 验证 sha256 哈希
+6. 同时处理 uv/uvx/uvw 等配套工具
 ```
 
-### 存储优化
-
-| 策略 | 说明 |
-|------|------|
-| 哈希去重 | 相同版本文件只存一份，多设备共享 |
-| gzip 压缩 | PE/Mach-O 二进制压缩率约 40-50% |
-| 按需下载 | pull 时只下载当前版本，历史版本按需 |
-| 增量备份 | 只上传本地有而远程没有的版本 |
-| 平台隔离 | Windows/Mac/Linux 版本分开存储 |
-
-### 存储空间估算
-
-```
-单个平台、3 个版本：
-  claude × 3 = ~700MB → 压缩后 ~400MB
-  uv × 1 = ~65MB → 压缩后 ~40MB
-  总计 ~440MB（加密后略有膨胀）
-
-坚果云免费 1GB 够用，建议用付费版或自建 WebDAV
-```
+**核心原则：不做本地额外备份。** WebDAV 云端就是备份源。二进制文件通过流式传输直接从 WebDAV 写入目标位置，不在 ~/.cc-box/ 中保留副本。本地只存元数据（config、snapshots），不存大文件。
 
 ## CLI 命令完整设计
 
@@ -696,8 +677,6 @@ enabled = true
 
 [sync]
 snapshot_limit = 20     # 保留最近 N 个快照
-backup_days = 7         # 备份保留天数
-auto_backup = true      # pull 前自动备份
 conflict_strategy = "ask"  # ask / local / remote
 
 [device]
