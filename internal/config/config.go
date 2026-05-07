@@ -55,6 +55,8 @@ type BinaryConfig struct {
 	ChunkSizeMB      int    `mapstructure:"chunk_size_mb"`
 	ChunkThresholdMB int    `mapstructure:"chunk_threshold_mb"`
 	AutoUpload       bool   `mapstructure:"auto_upload"`
+	BinDir           string `mapstructure:"bin_dir"`
+	VersionsDir      string `mapstructure:"versions_dir"`
 }
 
 type ExcludeConfig struct {
@@ -139,17 +141,52 @@ func CCBoxDir() string {
 
 // ClaudeDir 返回 ~/.claude/ 路径
 func ClaudeDir() string {
-	if custom := viper.GetString("claude.path"); custom != "" {
-		return custom
+	v := loadViper()
+	if custom := v.GetString("claude.path"); custom != "" {
+		return expandHome(custom)
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".claude")
 }
 
-// LocalBinDir 返回 ~/.local/bin/ 路径
+// LocalBinDir 返回二进制目录路径
+// 直接用 viper 读取，绕过 Unmarshal 对 PascalCase key 的匹配问题
 func LocalBinDir() string {
+	v := loadViper()
+	if val := v.GetString("binary.bindir"); val != "" {
+		return expandHome(val)
+	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".local", "bin")
+}
+
+// VersionsDir 返回版本存档目录路径
+func VersionsDir() string {
+	v := loadViper()
+	if val := v.GetString("binary.versionsdir"); val != "" {
+		return expandHome(val)
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".local", "share", "claude", "versions")
+}
+
+// loadViper 加载配置文件的 viper 实例
+func loadViper() *viper.Viper {
+	v := viper.New()
+	v.SetConfigName("config")
+	v.SetConfigType("toml")
+	v.AddConfigPath(CCBoxDir())
+	v.ReadInConfig()
+	return v
+}
+
+// expandHome 展开路径中的 ~ 前缀
+func expandHome(path string) string {
+	if len(path) > 0 && path[0] == '~' {
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, path[1:])
+	}
+	return path
 }
 
 // KeyPath 返回密钥文件路径

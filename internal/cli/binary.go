@@ -201,7 +201,7 @@ func runBinarySwitch(cmd *cobra.Command, args []string) error {
 	// 备份当前版本到 versions 目录
 	binPath := binary.GetBinaryPath("claude")
 	if currentVersion != "" {
-		versionsDir := filepath.Join(filepath.Dir(filepath.Dir(binPath)), "share", "claude", "versions")
+		versionsDir := config.VersionsDir()
 		backupPath := filepath.Join(versionsDir, currentVersion)
 		os.MkdirAll(versionsDir, 0755)
 		fmt.Printf("备份当前版本 %s → %s\n", currentVersion, backupPath)

@@ -411,6 +411,20 @@ cc-box revert <snapshot-id>
 
 **不做本地文件备份**：WebDAV 云端即是备份。二进制文件（~242MB）和配置文件的状态都由快照链记录在云端，不需要在本地保留额外副本。pull 时直接覆盖本地文件，需要回滚时从 WebDAV 下载即可。
 
+### 路径发现
+
+CC-Box 操作三个本地目录，所有路径均可通过配置覆盖：
+
+| 目录 | 默认路径 | 配置项 | 用途 |
+|------|---------|--------|------|
+| Claude 配置 | `~/.claude/` | `claude.path` | 配置同步的源目录 |
+| 二进制目录 | `~/.local/bin/` | `binary.bin_dir` | claude/uv/uvx 等二进制所在目录 |
+| 版本存档 | `~/.local/share/claude/versions/` | `binary.versions_dir` | 历史版本存档（binary switch 时使用） |
+
+路径解析优先级：配置值 → 默认值（基于 `os.UserHomeDir()`）。
+
+`~` 在 Windows 上解析为 `C:\Users\<用户名>`，Linux/Mac 上解析为 `/home/<用户>` 或 `/Users/<用户>`。
+
 ## cc-switch（cc-cli）兼容设计
 
 cc-switch 的核心操作是修改 `settings.json` 的 `env` 字段（`ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN` 等 API 配置）。兼容策略：
@@ -1004,6 +1018,8 @@ name = "办公室电脑"      # 可自定义
 path = ""               # 留空自动检测 ~/.claude/
 
 [binary]
+bin_dir = ""             # 二进制目录，留空默认 ~/.local/bin
+versions_dir = ""        # 版本存档目录，留空默认 ~/.local/share/claude/versions
 encrypt = false              # 是否加密二进制文件（false=仅压缩，true=压缩+AES-256-GCM）
 chunk_mode = "auto"          # 分块模式: "auto"=超过阈值时分块, "always"=始终分块
 chunk_size_mb = 10           # 分块大小（MB）
