@@ -68,11 +68,15 @@ telemetry/            # 遥测数据
 
 每次 push 产生一个**快照**（类似 git commit），记录所有文件的哈希和状态。快照之间形成链式结构，可以沿链回溯任意历史版本。
 
-## 快速上手
+## 环境要求
+
+| 依赖 | 版本 | 说明 |
+|------|------|------|
+| Go | 1.24+ | 编译需要 |
+| WebDAV 服务 | — | Alist / 坚果云 / NextCloud / Synology 等任意标准 WebDAV |
+| Git | 任意 | 项目配置同步时需要（可选） |
 
 ### 编译安装
-
-需要 Go 1.24+：
 
 ```bash
 git clone https://github.com/maliaosaide/cc-box.git
@@ -80,7 +84,13 @@ cd cc-box
 go build -o cc-box ./cmd/cc-box/
 ```
 
-### 使用
+### 环境变量
+
+| 变量 | 说明 |
+|------|------|
+| `CC_BOX_WEBDAV_PASSWORD` | WebDAV 密码，设置后免交互输入 |
+
+## 快速上手
 
 ```bash
 # 首次使用：配置 WebDAV + 加密 + 创建初始快照
