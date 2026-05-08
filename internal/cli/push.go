@@ -104,6 +104,14 @@ func runPush(cmd *cobra.Command, args []string) error {
 	}
 
 	store := object.NewStore(client, key, "")
+	// 利用本地快照的哈希跳过已上传的 object（省去 Exists 请求）
+	if localSnap != nil {
+		knownHashes := make(map[string]bool)
+		for _, entry := range localSnap.Files {
+			knownHashes[entry.Hash] = true
+		}
+		store.SetKnownHashes(knownHashes)
+	}
 	uploaded := 0
 	for _, c := range changes {
 		if c.Type == snapshot.Deleted {

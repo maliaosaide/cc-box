@@ -3,6 +3,7 @@
 package sync
 
 import (
+	"encoding/json"
 	"strings"
 )
 
@@ -81,10 +82,35 @@ func splitHistoryLines(data []byte) []string {
 }
 
 // dedupKey 生成去重键
-// 从 JSONL 行中提取 command + 精确到分钟的 timestamp
+// 从 JSONL 行中提取 command + 精确到分钟的 timestamp 作为去重依据
 func dedupKey(line string) string {
-	// 简化实现：直接用整行内容做 key
-	// JSONL 中每行包含完整的 command 和 timestamp，
-	// 完全相同的行视为重复
-	return strings.TrimSpace(line)
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return ""
+	}
+
+	// 尝试解析为 JSON 提取 command 和 timestamp
+	var entry map[string]interface{}
+	if err := json.Unmarshal([]byte(line), &entry); err != nil {
+		// 非 JSON 行，回退到整行去重
+		return line
+	}
+
+	var parts []string
+	if cmd, ok := entry["command"].(string); ok {
+		parts = append(parts, cmd)
+	}
+	if ts, ok := entry["timestamp"].(string); ok {
+		// 截断到分钟：2026-05-07T14:30:45Z → 2026-05-07T14:30
+		if len(ts) >= 16 {
+			parts = append(parts, ts[:16])
+		} else {
+			parts = append(parts, ts)
+		}
+	}
+
+	if len(parts) > 0 {
+		return strings.Join(parts, "|")
+	}
+	return line
 }

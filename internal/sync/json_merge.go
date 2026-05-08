@@ -120,16 +120,25 @@ func mergeSettingsJSON(ancestor, local, remote interface{}) (interface{}, error)
 }
 
 // mergeEnvField 合并 env 字段，保留双方所有 key
+// 双方都有的 key：本地优先（env 变量通常是本机设置的，如 API token）
+// 远程独有的 key：保留
 func mergeEnvField(ancestor, local, remote interface{}) interface{} {
+	ancestorEnv, _ := toMap(ancestor)
 	localEnv, _ := toMap(local)
 	remoteEnv, _ := toMap(remote)
 
+	if ancestorEnv == nil {
+		ancestorEnv = make(map[string]interface{})
+	}
+
 	result := make(map[string]interface{})
 
+	// 本地 key 全部保留
 	for k, v := range localEnv {
 		result[k] = v
 	}
 
+	// 远程独有的 key 也保留
 	for k, v := range remoteEnv {
 		if _, exists := result[k]; !exists {
 			result[k] = v

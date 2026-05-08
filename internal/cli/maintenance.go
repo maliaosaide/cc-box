@@ -11,6 +11,9 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/user/cc-box/internal/config"
+	"github.com/user/cc-box/internal/crypto"
+	"github.com/user/cc-box/internal/object"
+	"github.com/user/cc-box/internal/snapshot"
 )
 
 var backupCmd = &cobra.Command{
@@ -93,6 +96,12 @@ func runBackup(cmd *cobra.Command, args []string) error {
 }
 
 func runRestore(cmd *cobra.Command, args []string) error {
+	// 如果提供了 snapshot-id，从快照恢复
+	if len(args) > 0 && args[0] != "" {
+		return restoreFromSnapshot(args[0])
+	}
+
+	// 否则从本地备份恢复
 	backupDir := config.CCBoxDir() + "/backups"
 	entries, err := os.ReadDir(backupDir)
 	if err != nil || len(entries) == 0 {
@@ -132,6 +141,107 @@ func runRestore(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("恢复完成")
+	return nil
+}
+
+// restoreFromSnapshot 从指定快照恢复配置文件
+func restoreFromSnapshot(snapID string) error {
+	_, client, key, err := loadClientAndKey()
+	if err != nil {
+		return err
+	}
+
+	// 加载目标快照
+	snap, err := loadRemoteSnapshot(client, key, snapID)
+	if err != nil {
+		return fmt.Errorf("加载快照 %s 失败: %w", snapID, err)
+	}
+
+	// 扫描本地文件
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
+	scanResult, err := scanner.Scan()
+	if err != nil {
+		return fmt.Errorf("扫描本地文件失败: %w", err)
+	}
+
+	// 计算需要恢复的文件
+	var toRestore []string
+	var toDelete []string
+
+	for path := range scanResult.Files {
+		if _, exists := snap.Files[path]; !exists {
+			toDelete = append(toDelete, path)
+		}
+	}
+	for path, entry := range snap.Files {
+		localEntry, exists := scanResult.Files[path]
+		if !exists || localEntry.Hash != entry.Hash {
+			toRestore = append(toRestore, path)
+		}
+	}
+
+	if len(toRestore) == 0 && len(toDelete) == 0 {
+		fmt.Println("当前状态与快照一致，无需恢复")
+		return nil
+	}
+
+	fmt.Printf("将从快照 %s 恢复:\n", snapID[:12])
+	fmt.Printf("  恢复 %d 个文件\n", len(toRestore))
+	if len(toDelete) > 0 {
+		fmt.Printf("  删除 %d 个快照中不存在的文件\n", len(toDelete))
+	}
+
+	fmt.Print("确认恢复？[y/N] ")
+	var answer string
+	fmt.Scanln(&answer)
+	if answer != "y" && answer != "Y" {
+		return nil
+	}
+
+	// 下载并恢复文件
+	store := object.NewStore(client, key, "")
+	applied := 0
+	for _, path := range toRestore {
+		entry, ok := snap.Files[path]
+		if !ok {
+			continue
+		}
+		data, err := store.Download(entry.Hash)
+		if err != nil {
+			fmt.Printf("  下载失败 %s: %v\n", path, err)
+			continue
+		}
+		fullPath := filepath.Join(config.ClaudeDir(), filepath.FromSlash(path))
+		os.MkdirAll(filepath.Dir(fullPath), 0700)
+		if err := os.WriteFile(fullPath, data, 0600); err != nil {
+			fmt.Printf("  写入失败 %s: %v\n", path, err)
+			continue
+		}
+		applied++
+	}
+
+	// 删除快照中不存在的文件
+	for _, path := range toDelete {
+		fullPath := filepath.Join(config.ClaudeDir(), filepath.FromSlash(path))
+		os.Remove(fullPath)
+	}
+
+	// 创建恢复快照
+	newSnap := snapshot.CreateSnapshot(snap.ID, cfg.Device.ID, "restore from "+snapID[:12], snap.Files)
+	snapData, _ := newSnap.Serialize()
+	encrypted, _ := crypto.Encrypt(snapData, key)
+	client.EnsureDir("snapshots/")
+	client.PUT("snapshots/"+newSnap.ID+".json.enc", encrypted, "")
+
+	// 更新本地 HEAD
+	os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(newSnap.ID), 0600)
+	os.WriteFile(config.CCBoxDir()+"/snapshots/"+newSnap.ID+".json", snapData, 0600)
+
+	fmt.Printf("已恢复 %d 个文件（快照 %s）\n", applied, snapID[:12])
 	return nil
 }
 

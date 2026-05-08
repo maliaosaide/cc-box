@@ -190,6 +190,25 @@ func runConfigRekey(cmd *cobra.Command, args []string) error {
 	// 上传新 salt
 	client.PUT("salt.bin", newSalt, "")
 
+	// 轮转 projects/ 下的加密文件
+	projFiles, _ := client.PROPFIND("projects/", 2)
+	for _, f := range projFiles {
+		if f.IsDir || !strings.HasSuffix(f.Path, ".enc") {
+			continue
+		}
+		encData, _, err := client.GET("projects/" + f.Path)
+		if err != nil {
+			continue
+		}
+		plain, err := crypto.Decrypt(encData, oldKey)
+		if err != nil {
+			continue
+		}
+		newEnc, _ := crypto.Encrypt(plain, newKey)
+		client.PUT("projects/"+f.Path, newEnc, "")
+		rotated++
+	}
+
 	// 更新本地密钥
 	crypto.SaveKey(newKey, config.KeyPath())
 
@@ -227,7 +246,8 @@ func runConfigWebdav(cmd *cobra.Command, args []string) error {
 
 	// 测试连接
 	fmt.Print("测试连接... ")
-	client := webdav.NewClient(cfg.WebDAV.URL, cfg.WebDAV.Username, "")
+	testPass, _ := config.LoadWebDAVPassword()
+	client := webdav.NewClient(cfg.WebDAV.URL, cfg.WebDAV.Username, testPass)
 	if _, err := client.Exists("/"); err != nil {
 		return fmt.Errorf("连接失败: %w", err)
 	}

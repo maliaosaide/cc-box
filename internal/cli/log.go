@@ -4,6 +4,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -170,5 +171,5 @@ func readLocalHEAD() ([]byte, error) {
 }
 
 func readFile(path string) ([]byte, error) {
-	return []byte{}, fmt.Errorf("not found")
+	return os.ReadFile(path)
 }

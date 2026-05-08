@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 
 	"github.com/spf13/cobra"
 	"github.com/user/cc-box/internal/binary"
@@ -46,6 +45,9 @@ var binarySwitchCmd = &cobra.Command{
 	RunE:  runBinarySwitch,
 }
 
+// binaryName 二进制名称，默认 claude
+var binaryName string
+
 var binaryPruneCmd = &cobra.Command{
 	Use:   "prune",
 	Short: "清理不再被引用的版本",
@@ -59,6 +61,9 @@ func init() {
 	binaryCmd.AddCommand(binaryPullCmd)
 	binaryCmd.AddCommand(binarySwitchCmd)
 	binaryCmd.AddCommand(binaryPruneCmd)
+	binaryPushCmd.Flags().StringVar(&binaryName, "name", "claude", "二进制名称 (claude/uv/uvx/uvw)")
+	binaryPullCmd.Flags().StringVar(&binaryName, "name", "claude", "二进制名称 (claude/uv/uvx/uvw)")
+	binarySwitchCmd.Flags().StringVar(&binaryName, "name", "claude", "二进制名称 (claude/uv/uvx/uvw)")
 }
 
 func runBinaryList(cmd *cobra.Command, args []string) error {
@@ -97,23 +102,22 @@ func runBinaryList(cmd *cobra.Command, args []string) error {
 }
 
 func runBinaryPush(cmd *cobra.Command, args []string) error {
+	name := binaryName
 	cfg, client, key, err := loadClientAndKey()
 	if err != nil {
 		return err
 	}
 
-	// 读取 claude 二进制
-	binPath := binary.GetBinaryPath("claude")
+	binPath := binary.GetBinaryPath(name)
 	data, err := os.ReadFile(binPath)
 	if err != nil {
 		return fmt.Errorf("读取 %s 失败: %w", binPath, err)
 	}
 
-	// 获取版本号（从文件名或 claude --version）
 	version := detectVersion(binPath)
 	fmt.Printf("上传 %s (%s, %s)...\n", binPath, version, formatSize(int64(len(data))))
 
-	err = binary.Upload(client, key, "claude", data, version, func(total, uploaded int64, part, totalParts int) {
+	err = binary.Upload(client, key, name, data, version, func(total, uploaded int64, part, totalParts int) {
 		pct := float64(uploaded) / float64(total) * 100
 		fmt.Printf("\r  进度: %.0f%% (%d/%d 分块)", pct, part, totalParts)
 	})
@@ -121,12 +125,13 @@ func runBinaryPush(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fmt.Printf("\n已上传 %s %s\n", "claude", version)
+	fmt.Printf("\n已上传 %s %s\n", name, version)
 	_ = cfg
 	return nil
 }
 
 func runBinaryPull(cmd *cobra.Command, args []string) error {
+	name := binaryName
 	_, client, key, err := loadClientAndKey()
 	if err != nil {
 		return err
@@ -143,10 +148,9 @@ func runBinaryPull(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// 如果没指定版本，使用 current
-	info := idx.GetBinaryInfo(platform, "claude")
+	info := idx.GetBinaryInfo(platform, name)
 	if info == nil {
-		return fmt.Errorf("没有可用的 claude 二进制")
+		return fmt.Errorf("没有可用的 %s 二进制", name)
 	}
 
 	if version == "" {
@@ -156,10 +160,10 @@ func runBinaryPull(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("请指定版本号")
 	}
 
-	targetPath := binary.GetBinaryPath("claude")
-	fmt.Printf("下载 claude %s → %s ...\n", version, targetPath)
+	targetPath := binary.GetBinaryPath(name)
+	fmt.Printf("下载 %s %s → %s ...\n", name, version, targetPath)
 
-	err = binary.Download(client, key, "claude", version, targetPath, func(total, downloaded int64, part, totalParts int) {
+	err = binary.Download(client, key, name, version, targetPath, func(total, downloaded int64, part, totalParts int) {
 		pct := float64(downloaded) / float64(total) * 100
 		fmt.Printf("\r  进度: %.0f%% (%d/%d 分块)", pct, part, totalParts)
 	})
@@ -167,12 +171,13 @@ func runBinaryPull(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fmt.Printf("\n已下载 claude %s\n", version)
+	fmt.Printf("\n已下载 %s %s\n", name, version)
 	return nil
 }
 
 func runBinarySwitch(cmd *cobra.Command, args []string) error {
 	targetVersion := args[0]
+	name := binaryName
 
 	_, client, key, err := loadClientAndKey()
 	if err != nil {
@@ -185,9 +190,9 @@ func runBinarySwitch(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	info := idx.GetBinaryInfo(platform, "claude")
+	info := idx.GetBinaryInfo(platform, name)
 	if info == nil {
-		return fmt.Errorf("没有可用的 claude 二进制")
+		return fmt.Errorf("没有可用的 %s 二进制", name)
 	}
 
 	currentVersion := info.Current
@@ -201,7 +206,7 @@ func runBinarySwitch(cmd *cobra.Command, args []string) error {
 	}
 
 	// 备份当前版本到 versions 目录
-	binPath := binary.GetBinaryPath("claude")
+	binPath := binary.GetBinaryPath(name)
 	if currentVersion != "" {
 		versionsDir := config.VersionsDir()
 		backupPath := filepath.Join(versionsDir, currentVersion)
@@ -211,8 +216,8 @@ func runBinarySwitch(cmd *cobra.Command, args []string) error {
 	}
 
 	// 下载目标版本
-	fmt.Printf("下载 claude %s ...\n", targetVersion)
-	err = binary.Download(client, key, "claude", targetVersion, binPath, func(total, downloaded int64, part, totalParts int) {
+	fmt.Printf("下载 %s %s ...\n", name, targetVersion)
+	err = binary.Download(client, key, name, targetVersion, binPath, func(total, downloaded int64, part, totalParts int) {
 		pct := float64(downloaded) / float64(total) * 100
 		fmt.Printf("\r  进度: %.0f%% (%d/%d 分块)", pct, part, totalParts)
 	})
@@ -224,7 +229,7 @@ func runBinarySwitch(cmd *cobra.Command, args []string) error {
 	info.Current = targetVersion
 	binary.SaveIndex(client, idx)
 
-	fmt.Printf("\n已切换到 claude %s\n", targetVersion)
+	fmt.Printf("\n已切换到 %s %s\n", name, targetVersion)
 	return nil
 }
 
@@ -359,7 +364,7 @@ func totalPruneSize(idx *binary.Index, targets []pruneTarget) int64 {
 func detectVersion(binPath string) string {
 	cmd := exec.Command(binPath, "--version")
 	if runtime.GOOS == "windows" {
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
+		setHideWindow(cmd)
 	}
 	output, err := cmd.Output()
 	if err != nil {

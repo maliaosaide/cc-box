@@ -13,18 +13,25 @@ import (
 
 // Store Object 存储管理器
 type Store struct {
-	client *webdav.Client
-	key    []byte
-	cache  string // 本地缓存目录
+	client         *webdav.Client
+	key            []byte
+	cache          string // 本地缓存目录
+	knownHashes    map[string]bool // 已知在远程存在的哈希（跳过 Exists 检查）
 }
 
 // NewStore 创建 Store 实例
 func NewStore(client *webdav.Client, key []byte, cacheDir string) *Store {
 	return &Store{
-		client: client,
-		key:    key,
-		cache:  cacheDir,
+		client:      client,
+		key:         key,
+		cache:       cacheDir,
+		knownHashes: make(map[string]bool),
 	}
+}
+
+// SetKnownHashes 设置已知远程存在的哈希集合，跳过 Exists 检查
+func (s *Store) SetKnownHashes(hashes map[string]bool) {
+	s.knownHashes = hashes
 }
 
 // Upload 加密并上传文件内容到 WebDAV
@@ -32,8 +39,23 @@ func (s *Store) Upload(data []byte) (string, error) {
 	hash := ComputeHash(data)
 	objPath := ObjectPath(hash)
 
-	// 检查是否已存在（去重）
+	// 先查本地已知集合（零网络请求）
+	if s.knownHashes[hash] {
+		return hash, nil
+	}
+
+	// 查本地缓存（同进程内可能已上传过）
+	if s.knownHashes != nil {
+		if _, already := s.knownHashes["_uploaded_"+hash]; already {
+			return hash, nil
+		}
+	}
+
+	// 检查远程是否已存在
 	if exists, _ := s.client.Exists(objPath); exists {
+		if s.knownHashes != nil {
+			s.knownHashes[hash] = true
+		}
 		return hash, nil
 	}
 
@@ -51,6 +73,11 @@ func (s *Store) Upload(data []byte) (string, error) {
 	// 上传
 	if _, err := s.client.PUT(objPath, encrypted, ""); err != nil {
 		return "", fmt.Errorf("上传 object 失败: %w", err)
+	}
+
+	// 标记为已知，后续同 hash 跳过
+	if s.knownHashes != nil {
+		s.knownHashes["_uploaded_"+hash] = true
 	}
 
 	return hash, nil

@@ -43,16 +43,25 @@ func runConflicts(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	fmt.Printf("未解决的冲突 (%d):\n", len(entries))
+	// 用 map 去重，避免 .local/.remote 同一文件显示两次
+	seen := make(map[string]bool)
+	var conflictFiles []string
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
 		name := entry.Name()
-		// 去掉 .local / .remote 后缀
 		base := strings.TrimSuffix(name, ".local")
 		base = strings.TrimSuffix(base, ".remote")
-		fmt.Printf("  %s\n", base)
+		if !seen[base] {
+			seen[base] = true
+			conflictFiles = append(conflictFiles, base)
+		}
+	}
+
+	fmt.Printf("未解决的冲突 (%d):\n", len(conflictFiles))
+	for _, f := range conflictFiles {
+		fmt.Printf("  %s\n", f)
 	}
 	return nil
 }
