@@ -11,6 +11,7 @@
   let error = ''
   let msg = ''
   let switching = ''
+  let uploading = ''
   let uploadProgress = null
 
   const tabs = [

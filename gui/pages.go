@@ -195,9 +195,10 @@ func (a *App) GetConfig() (*ConfigView, error) {
 			AutoUpload:       cfg.Binary.AutoUpload,
 		},
 		Sync: SyncView{
-			SnapshotLimit:    cfg.Sync.SnapshotLimit,
-			ConflictStrategy: cfg.Sync.ConflictStrategy,
-			MergeRetryMax:    cfg.Sync.MergeRetryMax,
+			SnapshotLimit:     cfg.Sync.SnapshotLimit,
+			ConflictStrategy:  cfg.Sync.ConflictStrategy,
+			MergeRetryMax:     cfg.Sync.MergeRetryMax,
+			AutoSyncInterval:  cfg.Sync.AutoSyncInterval,
 		},
 		Exclude:        cfg.Exclude.Patterns,
 		ClaudeDir:      config.ClaudeDir(),
@@ -271,6 +272,8 @@ func (a *App) SetConfigField(section, key, value string) error {
 			if v, e := parseInt(value); e == nil {
 				cfg.Sync.MergeRetryMax = v
 			}
+		case "auto_sync_interval":
+			cfg.Sync.AutoSyncInterval = value
 		}
 	}
 
@@ -477,9 +480,10 @@ type BinaryView struct {
 }
 
 type SyncView struct {
-	SnapshotLimit    int    `json:"snapshotLimit"`
-	ConflictStrategy string `json:"conflictStrategy"`
-	MergeRetryMax    int    `json:"mergeRetryMax"`
+	SnapshotLimit     int    `json:"snapshotLimit"`
+	ConflictStrategy  string `json:"conflictStrategy"`
+	MergeRetryMax     int    `json:"mergeRetryMax"`
+	AutoSyncInterval  string `json:"autoSyncInterval"`
 }
 
 type ConnectionTest struct {

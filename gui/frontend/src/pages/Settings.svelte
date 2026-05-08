@@ -36,6 +36,7 @@
   let snapshotLimit = 50
   let conflictStrategy = 'ask'
   let mergeRetryMax = 3
+  let autoSyncInterval = ''
   let claudeDirRaw = ''
   let binDirRaw = ''
   let versionsDirRaw = ''
@@ -65,6 +66,7 @@
         snapshotLimit = cfg.sync.snapshotLimit || 50
         conflictStrategy = cfg.sync.conflictStrategy || 'ask'
         mergeRetryMax = cfg.sync.mergeRetryMax || 3
+        autoSyncInterval = cfg.sync.autoSyncInterval || ''
         claudeDirRaw = cfg.claudeDirRaw || ''
         binDirRaw = cfg.binDirRaw || ''
         versionsDirRaw = cfg.versionsDirRaw || ''
@@ -122,6 +124,7 @@
   async function saveSnapshotLimit() { await saveField('sync', 'snapshot_limit', String(snapshotLimit)) }
   async function saveConflictStrategy() { await saveField('sync', 'conflict_strategy', conflictStrategy) }
   async function saveMergeRetry() { await saveField('sync', 'merge_retry_max', String(mergeRetryMax)) }
+  async function saveAutoSyncInterval() { await saveField('sync', 'auto_sync_interval', autoSyncInterval) }
   async function saveClaudeDir() { await saveField('claude', 'path', claudeDirRaw) }
   async function saveBinDir() { await saveField('binary', 'bin_dir', binDirRaw) }
   async function saveVersionsDir() { await saveField('binary', 'versions_dir', versionsDirRaw) }
@@ -338,6 +341,17 @@
             <input class="input" type="number" bind:value={mergeRetryMax} min="1" max="10" />
             <button class="btn-sm" on:click={saveMergeRetry}>保存</button>
           </div>
+        </div>
+        <div class="form-group">
+          <label class="label">自动同步间隔</label>
+          <select class="input select-input" bind:value={autoSyncInterval} on:change={saveAutoSyncInterval}>
+            <option value="">关闭</option>
+            <option value="5m">每 5 分钟</option>
+            <option value="15m">每 15 分钟</option>
+            <option value="30m">每 30 分钟</option>
+            <option value="60m">每 60 分钟</option>
+          </select>
+          <div class="hint">监听 ~/.claude/ 变更并自动同步到云端</div>
         </div>
       </div>
     {/if}

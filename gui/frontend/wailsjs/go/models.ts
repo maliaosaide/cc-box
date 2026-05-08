@@ -161,6 +161,7 @@ export namespace main {
 	    snapshotLimit: number;
 	    conflictStrategy: string;
 	    mergeRetryMax: number;
+	    autoSyncInterval: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new SyncView(source);
@@ -171,6 +172,7 @@ export namespace main {
 	        this.snapshotLimit = source["snapshotLimit"];
 	        this.conflictStrategy = source["conflictStrategy"];
 	        this.mergeRetryMax = source["mergeRetryMax"];
+	        this.autoSyncInterval = source["autoSyncInterval"];
 	    }
 	}
 	export class EncryptionView {
