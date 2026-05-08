@@ -14,6 +14,7 @@ import (
 	"github.com/user/cc-box/internal/binary"
 	"github.com/user/cc-box/internal/config"
 	"github.com/user/cc-box/internal/crypto"
+	"github.com/user/cc-box/internal/object"
 	"github.com/user/cc-box/internal/project"
 	"github.com/user/cc-box/internal/snapshot"
 	"github.com/user/cc-box/internal/webdav"
@@ -84,7 +85,7 @@ func (a *App) GetSnapshotList(limit int) ([]SnapshotEntry, error) {
 			ID:        snap.ID,
 			ShortID:   shortID,
 			Parent:    snap.Parent,
-			Timestamp: snap.Timestamp.Format("2006-01-02 15:04"),
+			Timestamp: snap.Timestamp.Local().Format("2006-01-02 15:04"),
 			Device:    snap.Device,
 			Message:   snap.Message,
 			FileCount: len(snap.Files),
@@ -112,13 +113,13 @@ func (a *App) GetSnapshotDetail(id string) (*SnapshotDetail, error) {
 		files[path] = FileEntry{
 			Hash:     entry.Hash[:16],
 			Size:     entry.Size,
-			Modified: entry.Modified.Format("2006-01-02 15:04"),
+			Modified: entry.Modified.Local().Format("2006-01-02 15:04"),
 		}
 	}
 
 	return &SnapshotDetail{
 		ID:        snap.ID,
-		Timestamp: snap.Timestamp.Format("2006-01-02 15:04:05"),
+		Timestamp: snap.Timestamp.Local().Format("2006-01-02 15:04:05"),
 		Device:    snap.Device,
 		Message:   snap.Message,
 		Parent:    snap.Parent,
@@ -581,7 +582,7 @@ func (a *App) GetBinaryPage() (*BinaryPageData, error) {
 			Size:       v.Size,
 			Refs:       v.Refs,
 			UploadedBy: v.UploadedBy,
-			UploadedAt: v.Uploaded.Format("2006-01-02 15:04"),
+			UploadedAt: v.Uploaded.Local().Format("2006-01-02 15:04"),
 			IsCurrent:  isCurrent,
 			IsRemote:   true,
 		})
@@ -746,4 +747,74 @@ func (a *App) GetBinaryStorage() (*BinaryStorageInfo, error) {
 func (a *App) DeleteLocalVersion(version string) error {
 	verDir := config.VersionsDir()
 	return os.Remove(filepath.Join(verDir, version))
+}
+
+// RevertToSnapshot 回滚到指定快照版本
+func (a *App) RevertToSnapshot(snapID string) error {
+	cfg, client, key, err := a.loadClients()
+	if err != nil {
+		return err
+	}
+
+	snap, err := a.loadSnapByID(client, key, snapID)
+	if err != nil {
+		return fmt.Errorf("加载快照失败: %w", err)
+	}
+
+	// 扫描本地文件
+	scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
+	scanResult, err := scanner.Scan()
+	if err != nil {
+		return fmt.Errorf("扫描失败: %w", err)
+	}
+
+	// 计算需要恢复的文件
+	var toRestore []string
+	for path, entry := range snap.Files {
+		localEntry, exists := scanResult.Files[path]
+		if !exists || localEntry.Hash != entry.Hash {
+			toRestore = append(toRestore, path)
+		}
+	}
+
+	if len(toRestore) == 0 {
+		return nil
+	}
+
+	// 下载并恢复文件
+	store := object.NewStore(client, key, config.CCBoxDir()+"/cache/objects")
+	for _, path := range toRestore {
+		entry, ok := snap.Files[path]
+		if !ok {
+			continue
+		}
+		data, err := store.Download(entry.Hash)
+		if err != nil {
+			continue
+		}
+		fullPath := filepath.Join(config.ClaudeDir(), filepath.FromSlash(path))
+		os.MkdirAll(filepath.Dir(fullPath), 0755)
+		os.WriteFile(fullPath, data, 0600)
+	}
+
+	// 删除快照中不存在的文件
+	for path := range scanResult.Files {
+		if _, exists := snap.Files[path]; !exists {
+			fullPath := filepath.Join(config.ClaudeDir(), filepath.FromSlash(path))
+			os.Remove(fullPath)
+		}
+	}
+
+	// 创建恢复快照
+	newSnap := snapshot.CreateSnapshot(snap.ID, cfg.Device.ID, "revert to "+snapID[:12], snap.Files)
+	snapData, _ := newSnap.Serialize()
+	encrypted, _ := crypto.Encrypt(snapData, key)
+	client.EnsureDir("snapshots/")
+	client.PUT("snapshots/"+newSnap.ID+".json.enc", encrypted, "")
+
+	// 更新本地 HEAD
+	os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(newSnap.ID), 0600)
+	os.WriteFile(config.CCBoxDir()+"/snapshots/"+newSnap.ID+".json", snapData, 0600)
+
+	return nil
 }

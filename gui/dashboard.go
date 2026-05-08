@@ -138,6 +138,9 @@ func (a *App) fillDashboardFromSnapshots(data *DashboardData, cfg *config.Config
 		return
 	}
 
+	// 上次同步时间
+	data.LastSync = snap.Timestamp.Local().Format("2006-01-02 15:04")
+
 	// 备份列表（最多3个）
 	entries, _ := a.GetSnapshotList(3)
 	for i, e := range entries {
@@ -166,6 +169,7 @@ func (a *App) fillDashboardFromSnapshots(data *DashboardData, cfg *config.Config
 			if err == nil {
 				currentSnap := snapshot.CreateSnapshot("", cfg.Device.ID, "", scanResult.Files)
 				changes := localSnap.Diff(currentSnap)
+				changeTime := localSnap.Timestamp.Local().Format("15:04")
 				for i, c := range changes {
 					if i >= 5 {
 						break
@@ -180,7 +184,7 @@ func (a *App) fillDashboardFromSnapshots(data *DashboardData, cfg *config.Config
 					data.RecentChanges = append(data.RecentChanges, ChangeInfo{
 						Status: status,
 						Path:   c.Path,
-						Time:   "刚刚",
+						Time:   changeTime,
 					})
 				}
 			}
