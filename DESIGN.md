@@ -1784,10 +1784,10 @@ func (a *App) PullBinaryAsync(version string) {
 目标：三方合并、端到端加密、二进制版本管理。
 
 - [x] 端到端加密（Argon2id + AES-256-GCM + age 兼容格式）
-- [ ] 密钥轮转（rekey）
+- [x] 密钥轮转（rekey）
 - [x] 三方合并引擎（文本行级 + JSON 字段级 + 目录递归 + history.jsonl 特殊处理）
-- [ ] cc-switch 兼容的 settings.json 合并
-- [ ] 祖先不可达降级策略
+- [x] cc-switch 兼容的 settings.json 合并
+- [x] 祖先不可达降级策略
 - [x] 冲突检测与交互式解决
 - [x] 二进制分块上传/下载（含断点续传）
 - [x] 二进制版本索引管理
@@ -1858,7 +1858,7 @@ func (a *App) PullBinaryAsync(version string) {
 - [ ] 系统托盘：状态图标（已同步/待同步/冲突/同步中）
 - [ ] 系统托盘：右键菜单（推送/拉取/同步/打开/退出）
 - [ ] 系统托盘：fsnotify 自动同步（可配置间隔）
-- [ ] gc / verify / binary prune 命令（CLI 侧）
+- [x] gc / verify / binary prune 命令（CLI 侧）
 - [ ] macOS / Linux 适配测试
 
 ### Phase 4: 打磨与发布

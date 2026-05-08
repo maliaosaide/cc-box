@@ -251,17 +251,18 @@ go test ./internal/ -run TestPhase2 -v
 go test ./internal/ -run TestPhase3 -v
 ```
 
-当前 50 个测试通过：8 crypto + 6 normalize + 6 object + 7 snapshot + 9 sync + 6 project + 13 集成。
+当前 50+ 个测试通过：8 crypto + 6 normalize + 6 object + 7 snapshot + 9 sync + 6 project + 13 集成。
 
 ## 项目状态
 
 - [x] **Phase 1** — MVP：init → push → pull → status 完整流程
 - [x] **Phase 2** — 三方合并引擎、二进制版本管理、密钥轮转、log/revert/conflicts 等命令
 - [x] **Phase 3a** — CLI 补齐：diff、device、project、gc 完善、binary prune 完善
-- [ ] **Phase 3b** — GUI (Wails + Svelte)
+- [x] **Phase 3b** — GUI (Wails + Svelte)
+- [x] **Phase 3c** — Bug 修复：三方合并祖先降级、坚果云适配、上传去重、跨平台兼容、时间显示修正
 - [ ] **Phase 4** — 测试覆盖、多平台发布、打磨
 
-详细设计文档见 [DESIGN.md](./DESIGN.md)。
+详细设计文档见 [DESIGN.md](./DESIGN.md)，GUI 完善计划见 [IMPROVEMENT-PLAN.md](./IMPROVEMENT-PLAN.md)。
 
 ## License
 
