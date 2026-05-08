@@ -51,6 +51,7 @@
   $: hasChanges = data.recentChanges && data.recentChanges.length
   $: hasBackups = data.backups && data.backups.length
   $: hasBinaries = data.binaries && data.binaries.length
+  $: hasDevices = data.devices && data.devices.length > 1
 </script>
 
 {#if loading}
@@ -194,6 +195,28 @@
         <div class="empty-compact">暂无变更记录</div>
       {/if}
     </div>
+
+    <!-- 设备列表 -->
+    {#if hasDevices}
+      <div class="card animate-fade-in stagger-4">
+        <div class="section-label-row">
+          <span class="section-label">设备</span>
+        </div>
+        <div class="item-list">
+          {#each data.devices as dev}
+            <div class="item-row">
+              <div class="item-badge accent">{dev.name ? dev.name[0].toUpperCase() : '?'}</div>
+              <div class="item-main">
+                <span class="item-name">{dev.name || dev.platform}</span>
+                <span class="item-detail">
+                  {dev.platform}{dev.isCurrent ? ' · 本机' : ''} · {dev.lastActive || '未知'}
+                </span>
+              </div>
+            </div>
+          {/each}
+        </div>
+      </div>
+    {/if}
   </div>
 {/if}
 

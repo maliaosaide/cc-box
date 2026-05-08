@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import { GetSnapshotList, GetSnapshotDetail, QuickPull } from '../../wailsjs/go/main/App.js'
+  import { GetSnapshotList, GetSnapshotDetail, RevertToSnapshot } from '../../wailsjs/go/main/App.js'
 
   export let syncState = 'idle'
 
@@ -61,7 +61,7 @@
   async function rollback(id) {
     msg = ''; error = ''
     try {
-      await QuickPull()
+      await RevertToSnapshot(id)
       msg = '已回滚到快照 ' + id.slice(0, 12)
       await refresh()
     } catch (e) {
