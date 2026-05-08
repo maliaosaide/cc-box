@@ -14,7 +14,8 @@ import (
 
 // App Wails 绑定结构体
 type App struct {
-	ctx context.Context
+	ctx     context.Context
+	watcher *Watcher
 }
 
 // NewApp 创建 App 实例
@@ -24,9 +25,42 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+
+	// 启动系统托盘
+	StartTray(a)
+
+	// 启动文件监听
+	if config.IsInitialized() {
+		if w, err := NewWatcher(); err == nil {
+			w.Start(ctx)
+			a.watcher = w
+		}
+	}
 }
 
-func (a *App) shutdown(_ context.Context) {}
+func (a *App) shutdown(_ context.Context) {
+	if a.watcher != nil {
+		a.watcher.Stop()
+	}
+}
+
+// OnBeforeClose 窗口关闭拦截：最小化到托盘而非退出
+func (a *App) OnBeforeClose(ctx context.Context) bool {
+	if ShouldQuit() {
+		return false // 允许关闭
+	}
+	runtime.WindowHide(ctx)
+	return true // 阻止关闭
+}
+
+func (a *App) showWindow() {
+	runtime.WindowShow(a.ctx)
+	runtime.WindowUnminimise(a.ctx)
+}
+
+func (a *App) quitApp() {
+	runtime.Quit(a.ctx)
+}
 
 // IsInitialized 检查是否已完成初始化
 func (a *App) IsInitialized() bool {
