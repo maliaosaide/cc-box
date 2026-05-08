@@ -68,9 +68,6 @@ func (a *App) InitNewDevice(url, username, password, root, encPassword, deviceNa
 	client := webdav.NewClient(fullURL, username, password)
 
 	// 上传 salt
-	if err := client.EnsureDir("salt.bin"); err != nil {
-		return fmt.Errorf("创建远程目录失败: %w", err)
-	}
 	if _, err := client.PUT("salt.bin", salt, ""); err != nil {
 		return fmt.Errorf("上传 salt 失败: %w", err)
 	}
@@ -104,20 +101,20 @@ func (a *App) InitNewDevice(url, username, password, root, encPassword, deviceNa
 
 	// 创建初始快照
 	snap := snapshot.CreateSnapshot("", cfg.Device.ID, "initial sync", scanResult.Files)
-	snapData, _ := snap.Serialize()
-	encrypted, _ := crypto.Encrypt(snapData, key)
-	client.EnsureDir("snapshots/")
-	client.PUT("snapshots/"+snap.ID+".json.enc", encrypted, "")
-
-	// 更新 HEAD
-	client.PUT("HEAD", []byte(snap.ID), "")
-	os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(snap.ID), 0600)
-	os.WriteFile(config.CCBoxDir()+"/snapshots/"+snap.ID+".json", snapData, 0600)
-
-	// 注册设备
-	registerDeviceInfo(client, cfg)
-
-	// 保存配置和密码
+	snapData, err := snap.Serialize()
+	if err != nil {
+		return fmt.Errorf("serialize snapshot: %w", err)
+	}
+	encrypted, err := crypto.Encrypt(snapData, key)
+	if err != nil {
+		return fmt.Errorf("encrypt snapshot: %w", err)
+	}
+	if err := client.EnsureDir("snapshots/"); err != nil {
+		return fmt.Errorf("create snapshots dir: %w", err)
+	}
+	if _, err := client.PUT("snapshots/"+snap.ID+".json.enc", encrypted, ""); err != nil {
+		return fmt.Errorf("upload snapshot: %w", err)
+	}
 	if err := config.Save(cfg); err != nil {
 		return fmt.Errorf("保存配置失败: %w", err)
 	}
@@ -230,7 +227,7 @@ func registerDeviceInfo(client *webdav.Client, cfg *config.Config) {
 	}
 	data, _ := json.MarshalIndent(info, "", "  ")
 	devicePath := "devices/" + cfg.Device.ID + ".json"
-	client.EnsureDir(devicePath)
+	client.EnsureDir("devices/")
 	client.PUT(devicePath, data, "")
 }
 

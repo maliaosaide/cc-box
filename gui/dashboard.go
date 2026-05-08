@@ -133,8 +133,8 @@ func (a *App) fillDashboardFromSnapshots(data *DashboardData, cfg *config.Config
 	}
 
 	// 加载最新快照获取备份信息和最近变更
-	_, _ = a.loadSnapByID(client, key, headID)
-	if err != nil {
+	snap, snapErr := a.loadSnapByID(client, key, headID)
+	if snapErr != nil || snap == nil {
 		return
 	}
 
@@ -417,6 +417,14 @@ func (a *App) QuickSync() int64 {
 			if !running {
 				break
 			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+		}
+		if pullErr := opResults[pullID]; pullErr != nil {
+			return fmt.Errorf("拉取失败: %w", pullErr)
 		}
 
 		a.emitProgress(opID, "quick-sync", 1, 2, 1, 2, "正在推送...")
@@ -429,6 +437,14 @@ func (a *App) QuickSync() int64 {
 			if !running {
 				break
 			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+		}
+		if pushErr := opResults[pushID]; pushErr != nil {
+			return fmt.Errorf("推送失败: %w", pushErr)
 		}
 
 		a.emitProgress(opID, "quick-sync", 2, 2, 2, 2, "同步完成")

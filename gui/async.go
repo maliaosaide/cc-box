@@ -15,6 +15,7 @@ var (
 	opCounter  atomic.Int64
 	opCancels  = make(map[int64]context.CancelFunc)
 	opCancelMu sync.Mutex
+	opResults  = make(map[int64]error)
 )
 
 // ProgressEvent 进度事件
@@ -46,13 +47,15 @@ func (a *App) StartAsync(operation string, fn func(ctx context.Context, opID int
 	opCancelMu.Unlock()
 
 	go func() {
+		var err error
 		defer func() {
 			opCancelMu.Lock()
 			delete(opCancels, opID)
+			opResults[opID] = err
 			opCancelMu.Unlock()
 		}()
 
-		err := fn(ctx, opID)
+		err = fn(ctx, opID)
 
 		result := OpResult{OpID: opID, Status: "success"}
 		if err != nil {

@@ -130,7 +130,7 @@ func (a *App) loadRemoteSnap(client *webdav.Client, key []byte) (*snapshot.Snaps
 	if err != nil {
 		return nil, err
 	}
-	head := string(data)
+	head := strings.TrimSpace(string(data))
 	if head == "" {
 		return nil, nil
 	}
@@ -174,10 +174,14 @@ func (a *App) GetFileTree() (*FileTreeResult, error) {
 	// 加载远程快照
 	remoteSnap, _ := a.loadRemoteSnap(client, key)
 
+	// 读取远程 HEAD 用于比对
+	remoteHeadData, _, _ := client.GET("HEAD")
+	remoteHeadStr := strings.TrimSpace(string(remoteHeadData))
+
 	// 计算每个文件的同步状态
 	statusMap := make(map[string]string)
 	for path := range scanResult.Files {
-		statusMap[path] = computeFileStatus(path, scanResult.Files, localSnap, remoteSnap)
+		statusMap[path] = computeFileStatus(path, scanResult.Files, localSnap, remoteSnap, remoteHeadStr)
 	}
 
 	// 检查快照中有但本地没有的（已删除）
@@ -230,7 +234,7 @@ func (a *App) GetFileTree() (*FileTreeResult, error) {
 }
 
 // computeFileStatus 计算单个文件的同步状态
-func computeFileStatus(path string, current map[string]snapshot.FileEntry, localSnap, remoteSnap *snapshot.Snapshot) string {
+func computeFileStatus(path string, current map[string]snapshot.FileEntry, localSnap, remoteSnap *snapshot.Snapshot, remoteHeadStr string) string {
 	cur, ok := current[path]
 	if !ok {
 		return "deleted"
@@ -255,9 +259,8 @@ func computeFileStatus(path string, current map[string]snapshot.FileEntry, local
 	// 检查远程是否有更新
 	if remoteSnap != nil && localSnap != nil {
 		localHead, _ := os.ReadFile(config.CCBoxDir() + "/HEAD")
-		remoteHead, _ := loadRemoteHEADData(localSnap)
 
-		if string(localHead) != remoteHead {
+		if string(localHead) != remoteHeadStr {
 			if remoteEntry, exists := remoteSnap.Files[path]; exists {
 				if localSnap != nil {
 					if localEntry, ok := localSnap.Files[path]; ok {
@@ -274,11 +277,6 @@ func computeFileStatus(path string, current map[string]snapshot.FileEntry, local
 	}
 
 	return "synced"
-}
-
-func loadRemoteHEADData(snap *snapshot.Snapshot) (string, error) {
-	// unused placeholder
-	return "", nil
 }
 
 // listConflicts 列出冲突目录中的文件

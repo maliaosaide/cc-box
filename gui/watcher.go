@@ -127,19 +127,39 @@ func (w *Watcher) triggerAutoSync(ctx context.Context) {
 	w.mu.Unlock()
 
 	UpdateTrayState(TraySyncing)
-	appRef.QuickSync()
-	time.AfterFunc(1*time.Second, func() {
+	opID := appRef.QuickSync()
+
+	// 等待同步操作完成
+	go func() {
+		for {
+			time.Sleep(300 * time.Millisecond)
+			opCancelMu.Lock()
+			_, running := opCancels[opID]
+			opCancelMu.Unlock()
+			if !running {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+		}
 		w.mu.Lock()
 		w.syncing = false
 		w.lastSync = time.Now()
 		w.changed = false
 		w.mu.Unlock()
 		UpdateTrayState(TraySynced)
-	})
+	}()
 
 	// 重置定时器
 	if w.interval > 0 {
-		w.timer.Reset(w.interval)
+		w.mu.Lock()
+		if w.timer != nil {
+			w.timer.Reset(w.interval)
+		}
+		w.mu.Unlock()
 	}
 }
 

@@ -35,6 +35,7 @@ var (
 	mQuit      *systray.MenuItem
 	shouldQuit bool
 	appRef     *App
+	trayReady  bool
 )
 
 var stateIconFiles = map[TrayState]string{
@@ -68,6 +69,7 @@ func trayOnReady() {
 	mQuit = systray.AddMenuItem("退出", "关闭 CC-Box")
 
 	go trayMenuLoop()
+	trayReady = true
 	UpdateTrayState(TraySynced)
 }
 
@@ -103,6 +105,9 @@ func trayMenuLoop() {
 
 // UpdateTrayState 更新托盘图标状态
 func UpdateTrayState(state TrayState) {
+	if !trayReady {
+		return
+	}
 	trayState = state
 	iconData, _ := trayIcons.ReadFile(stateIconFiles[state])
 	systray.SetIcon(iconData)
