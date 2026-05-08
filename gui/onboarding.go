@@ -3,10 +3,17 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/user/cc-box/internal/config"
+	"github.com/user/cc-box/internal/crypto"
+	"github.com/user/cc-box/internal/object"
+	"github.com/user/cc-box/internal/snapshot"
 	"github.com/user/cc-box/internal/webdav"
 )
 
@@ -32,7 +39,7 @@ func (a *App) DetectExistingSetup(url, username, password, root string) (bool, e
 	return exists, nil
 }
 
-// InitNewDevice 新建设备初始化
+// InitNewDevice 新建设备初始化：生成密钥 + 创建初始快照 + 上传
 func (a *App) InitNewDevice(url, username, password, root, encPassword, deviceName string) error {
 	cfg := config.DefaultConfig()
 	cfg.WebDAV = config.WebDAVConfig{
@@ -44,23 +51,84 @@ func (a *App) InitNewDevice(url, username, password, root, encPassword, deviceNa
 		cfg.Device.Name = deviceName
 	}
 
+	// 创建本地目录
 	if err := config.InitCCBoxDir(); err != nil {
 		return fmt.Errorf("创建配置目录失败: %w", err)
 	}
 
+	// 生成 salt 和密钥
+	salt, err := crypto.GenerateSalt()
+	if err != nil {
+		return fmt.Errorf("生成 salt 失败: %w", err)
+	}
+	key := crypto.DeriveKey(encPassword, salt)
+
+	// 构建 WebDAV 客户端
+	fullURL := buildWebDAVURL(url, root)
+	client := webdav.NewClient(fullURL, username, password)
+
+	// 上传 salt
+	if err := client.EnsureDir("salt.bin"); err != nil {
+		return fmt.Errorf("创建远程目录失败: %w", err)
+	}
+	if _, err := client.PUT("salt.bin", salt, ""); err != nil {
+		return fmt.Errorf("上传 salt 失败: %w", err)
+	}
+
+	// 保存密钥
+	if err := crypto.SaveKey(key, config.KeyPath()); err != nil {
+		return fmt.Errorf("保存密钥失败: %w", err)
+	}
+
+	// 扫描配置文件
+	scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
+	scanResult, err := scanner.Scan()
+	if err != nil {
+		return fmt.Errorf("扫描配置文件失败: %w", err)
+	}
+
+	// 上传文件 objects
+	store := object.NewStore(client, key, config.CCBoxDir()+"/cache/objects")
+	for path, entry := range scanResult.Files {
+		fullPath := config.ClaudeDir() + "/" + path
+		data, err := os.ReadFile(fullPath)
+		if err != nil {
+			continue
+		}
+		normData := normalizeContent(data)
+		hash := object.ComputeHash(normData)
+		entry.Hash = hash
+		scanResult.Files[path] = entry
+		store.Upload(normData)
+	}
+
+	// 创建初始快照
+	snap := snapshot.CreateSnapshot("", cfg.Device.ID, "initial sync", scanResult.Files)
+	snapData, _ := snap.Serialize()
+	encrypted, _ := crypto.Encrypt(snapData, key)
+	client.EnsureDir("snapshots/")
+	client.PUT("snapshots/"+snap.ID+".json.enc", encrypted, "")
+
+	// 更新 HEAD
+	client.PUT("HEAD", []byte(snap.ID), "")
+	os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(snap.ID), 0600)
+	os.WriteFile(config.CCBoxDir()+"/snapshots/"+snap.ID+".json", snapData, 0600)
+
+	// 注册设备
+	registerDeviceInfo(client, cfg)
+
+	// 保存配置和密码
 	if err := config.Save(cfg); err != nil {
 		return fmt.Errorf("保存配置失败: %w", err)
 	}
-
 	if err := config.SaveWebDAVPassword(password); err != nil {
 		return fmt.Errorf("保存密码失败: %w", err)
 	}
 
-	// TODO: 生成加密密钥、创建初始快照、上传到 WebDAV
 	return nil
 }
 
-// InitJoinExisting 加入已有同步组
+// InitJoinExisting 加入已有同步组：验证密码 + 拉取最新快照
 func (a *App) InitJoinExisting(url, username, password, root, encPassword, deviceName string) error {
 	cfg := config.DefaultConfig()
 	cfg.WebDAV = config.WebDAVConfig{
@@ -72,20 +140,98 @@ func (a *App) InitJoinExisting(url, username, password, root, encPassword, devic
 		cfg.Device.Name = deviceName
 	}
 
+	// 创建本地目录
 	if err := config.InitCCBoxDir(); err != nil {
 		return fmt.Errorf("创建配置目录失败: %w", err)
 	}
 
+	// 连接远程，下载 salt
+	fullURL := buildWebDAVURL(url, root)
+	client := webdav.NewClient(fullURL, username, password)
+
+	remoteSalt, _, err := client.GET("salt.bin")
+	if err != nil {
+		return fmt.Errorf("下载远程 salt 失败: %w", err)
+	}
+
+	key := crypto.DeriveKey(encPassword, remoteSalt)
+
+	// 验证密钥：尝试解密远程快照
+	headData, _, err := client.GET("HEAD")
+	if err != nil || string(headData) == "" {
+		return fmt.Errorf("远程没有数据或无法读取")
+	}
+	remoteHead := strings.TrimSpace(string(headData))
+
+	snapPath := "snapshots/" + remoteHead + ".json.enc"
+	encData, _, err := client.GET(snapPath)
+	if err != nil {
+		return fmt.Errorf("下载快照失败: %w", err)
+	}
+	_, err = crypto.Decrypt(encData, key)
+	if err != nil {
+		return fmt.Errorf("密码验证失败：与远程数据不匹配")
+	}
+
+	// 保存密钥
+	if err := crypto.SaveKey(key, config.KeyPath()); err != nil {
+		return fmt.Errorf("保存密钥失败: %w", err)
+	}
+
+	// 拉取最新快照的文件到本地
+	decrypted, _ := crypto.Decrypt(encData, key)
+	remoteSnap, err := snapshot.Deserialize(decrypted)
+	if err != nil {
+		return fmt.Errorf("解析快照失败: %w", err)
+	}
+
+	store := object.NewStore(client, key, config.CCBoxDir()+"/cache/objects")
+	for path, entry := range remoteSnap.Files {
+		data, err := store.Download(entry.Hash)
+		if err != nil {
+			continue
+		}
+		fullPath := filepath.Join(config.ClaudeDir(), filepath.FromSlash(path))
+		os.MkdirAll(filepath.Dir(fullPath), 0755)
+		os.WriteFile(fullPath, data, 0600)
+	}
+
+	// 更新本地 HEAD
+	os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(remoteHead), 0600)
+	os.WriteFile(config.CCBoxDir()+"/snapshots/"+remoteHead+".json", decrypted, 0600)
+
+	// 注册设备
+	registerDeviceInfo(client, cfg)
+
+	// 保存配置和密码
 	if err := config.Save(cfg); err != nil {
 		return fmt.Errorf("保存配置失败: %w", err)
 	}
-
 	if err := config.SaveWebDAVPassword(password); err != nil {
 		return fmt.Errorf("保存密码失败: %w", err)
 	}
 
-	// TODO: 从 WebDAV 拉取 salt.bin、验证密码、拉取最新快照
 	return nil
+}
+
+// registerDeviceInfo 注册/更新设备信息到 WebDAV
+func registerDeviceInfo(client *webdav.Client, cfg *config.Config) {
+	type deviceInfo struct {
+		ID       string    `json:"id"`
+		Name     string    `json:"name"`
+		Platform string    `json:"platform"`
+		LastSeen time.Time `json:"last_seen"`
+	}
+	info := deviceInfo{
+		ID:       cfg.Device.ID,
+		Name:     cfg.Device.Name,
+		Platform: config.Platform(),
+		LastSeen: time.Now().UTC(),
+	}
+	data, _ := json.MarshalIndent(info, "", "  ")
+	devicePath := "devices/" + cfg.Device.ID + ".json"
+	client.EnsureDir(devicePath)
+	client.PUT(devicePath, data, "")
 }
 
 // buildWebDAVURL 拼接完整的 WebDAV 地址（URL + root path）
@@ -96,4 +242,22 @@ func buildWebDAVURL(url, root string) string {
 		base += "/" + root
 	}
 	return base + "/"
+}
+
+// normalizeContent CRLF -> LF
+func normalizeContent(data []byte) []byte {
+	result := make([]byte, 0, len(data))
+	for i := 0; i < len(data); i++ {
+		if data[i] == '\r' {
+			if i+1 < len(data) && data[i+1] == '\n' {
+				result = append(result, '\n')
+				i++
+			} else {
+				result = append(result, '\n')
+			}
+		} else {
+			result = append(result, data[i])
+		}
+	}
+	return result
 }

@@ -631,19 +631,35 @@ func (a *App) doBulkPush(ctx context.Context, opID int64, cfg *config.Config, cl
 		a.emitProgress(opID, "bulk-push", int64(i+1), total, int(i+1), int(total), fmt.Sprintf("推送 %s", c.Path))
 	}
 
-	// 创建新快照
 	newSnap := snapshot.CreateSnapshot(string(localHead), cfg.Device.ID, "gui push", scanResult.Files)
 	snapData, _ := newSnap.Serialize()
-	encrypted, _ := crypto.Encrypt(snapData, key)
-	client.EnsureDir("snapshots/" + newSnap.ID + ".json.enc")
-	client.PUT("snapshots/"+newSnap.ID+".json.enc", encrypted, "")
-
-	// 更新 HEAD
-	client.PUT("HEAD", []byte(newSnap.ID), "")
+	encrypted, err := crypto.Encrypt(snapData, key)
+	if err != nil {
+		return fmt.Errorf("encrypt snap: %w", err)
+	}
+	client.EnsureDir("snapshots/")
+	if _, err := client.PUT("snapshots/"+newSnap.ID+".json.enc", encrypted, ""); err != nil {
+		return fmt.Errorf("upload snap: %w", err)
+	}
+	for attempt := 0; attempt < cfg.Sync.MergeRetryMax; attempt++ {
+		_, etag, err := client.GET("HEAD")
+		if err != nil && err != webdav.ErrNotFound {
+			return fmt.Errorf("read HEAD: %w", err)
+		}
+		res, err := client.CompareAndSwapHEAD("HEAD", newSnap.ID, etag)
+		if err != nil {
+			return fmt.Errorf("cas HEAD: %w", err)
+		}
+		if res.Success {
+			break
+		}
+		time.Sleep(time.Duration(attempt+1) * time.Second)
+		if attempt == cfg.Sync.MergeRetryMax-1 {
+			return fmt.Errorf("conflict, pull first")
+		}
+	}
 	os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(newSnap.ID), 0600)
-	snapDir := config.CCBoxDir() + "/snapshots/"
-	os.WriteFile(snapDir+newSnap.ID+".json", snapData, 0600)
-
+	os.WriteFile(config.CCBoxDir()+"/snapshots/"+newSnap.ID+".json", snapData, 0600)
 	return nil
 }
 
@@ -656,30 +672,46 @@ func (a *App) doBulkPull(ctx context.Context, opID int64, cfg *config.Config, cl
 		return fmt.Errorf("远程没有数据")
 	}
 
+	// 只下载有差异的文件
+	scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
+	scanResult, err := scanner.Scan()
+	if err != nil {
+		return fmt.Errorf("scan failed: %w", err)
+	}
+	var toDownload []string
+	for path, remoteEntry := range remoteSnap.Files {
+		localEntry, exists := scanResult.Files[path]
+		if !exists || localEntry.Hash != remoteEntry.Hash {
+			toDownload = append(toDownload, path)
+		}
+	}
+	if len(toDownload) == 0 {
+		os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(remoteSnap.ID), 0600)
+		a.emitProgress(opID, "bulk-pull", 1, 1, 1, 1, "already up to date")
+		return nil
+	}
 	store := object.NewStore(client, key, config.CCBoxDir()+"/cache/objects")
-	total := int64(len(remoteSnap.Files))
-	i := 0
-
-	for path, entry := range remoteSnap.Files {
+	total := int64(len(toDownload))
+	for i, path := range toDownload {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
-
-		data, err := store.Download(entry.Hash)
-		if err != nil {
-			i++
+		remoteEntry, ok := remoteSnap.Files[path]
+		if !ok {
 			continue
 		}
-
+		data, err := store.Download(remoteEntry.Hash)
+		if err != nil {
+			continue
+		}
 		fullPath := filepath.Join(config.ClaudeDir(), filepath.FromSlash(path))
 		os.MkdirAll(filepath.Dir(fullPath), 0755)
 		os.WriteFile(fullPath, data, 0600)
-
-		i++
-		a.emitProgress(opID, "bulk-pull", int64(i), total, i, int(total), fmt.Sprintf("拉取 %s", path))
+		a.emitProgress(opID, "bulk-pull", int64(i+1), total, int(i+1), int(total), fmt.Sprintf("pull %s", path))
 	}
+
 
 	// 更新本地 HEAD
 	os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(remoteSnap.ID), 0600)
