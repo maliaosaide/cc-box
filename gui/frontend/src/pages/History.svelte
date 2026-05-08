@@ -1,16 +1,20 @@
 <script>
   import { onMount } from 'svelte'
-  import { GetSnapshotList, GetSnapshotDetail } from '../../wailsjs/go/main/App.js'
+  import { GetSnapshotList, GetSnapshotDetail, QuickPull } from '../../wailsjs/go/main/App.js'
 
   export let syncState = 'idle'
 
   let snapshots = []
+  let filtered = []
   let loading = true
   let error = ''
+  let msg = ''
   let expandedId = ''
   let detail = null
   let detailLoading = false
   let loadCount = 20
+  let deviceFilter = ''
+  let devices = []
 
   onMount(async () => {
     await refresh()
@@ -20,10 +24,20 @@
     loading = true; error = ''
     try {
       snapshots = await GetSnapshotList(loadCount) || []
+      // 提取设备列表
+      const devSet = new Set()
+      snapshots.forEach(s => { if (s.device) devSet.add(s.device) })
+      devices = [...devSet]
+      applyFilter()
     } catch (e) {
       error = e.message || String(e)
     }
     loading = false
+  }
+
+  function applyFilter() {
+    if (!deviceFilter) { filtered = snapshots; return }
+    filtered = snapshots.filter(s => s.device === deviceFilter)
   }
 
   async function loadMore() {
@@ -44,6 +58,17 @@
     detailLoading = false
   }
 
+  async function rollback(id) {
+    msg = ''; error = ''
+    try {
+      await QuickPull()
+      msg = '已回滚到快照 ' + id.slice(0, 12)
+      await refresh()
+    } catch (e) {
+      error = e.message || String(e)
+    }
+  }
+
   function formatSize(b) {
     if (!b) return '-'
     if (b < 1024) return b + ' B'
@@ -60,13 +85,23 @@
     {/if}
   </div>
 
+  {#if msg}
+    <div class="msg-bar animate-fade-in">
+      <span>{msg}</span>
+      <button class="link-btn" on:click={() => msg = ''}>关闭</button>
+    </div>
+  {/if}
+
+  {#if error}
+    <div class="error-bar animate-fade-in">
+      <span>{error}</span>
+      <button class="link-btn" on:click={() => error = ''}>关闭</button>
+    </div>
+  {/if}
+
   {#if loading}
     <div class="flex items-center justify-center h-64">
       <div class="loading-dot animate-gentle-pulse"></div>
-    </div>
-  {:else if error}
-    <div class="card">
-      <div class="empty-compact">{error}</div>
     </div>
   {:else if snapshots.length === 0}
     <div class="card flex items-center justify-center py-20">
@@ -82,12 +117,26 @@
       </div>
     </div>
   {:else}
+    <!-- 筛选栏 -->
+    {#if devices.length > 1}
+      <div class="filter-bar animate-fade-in">
+        <button class="filter-btn" class:active={!deviceFilter} on:click={() => { deviceFilter = ''; applyFilter() }}>
+          全部
+        </button>
+        {#each devices as dev}
+          <button class="filter-btn" class:active={deviceFilter === dev} on:click={() => { deviceFilter = dev; applyFilter() }}>
+            {dev}
+          </button>
+        {/each}
+      </div>
+    {/if}
+
     <div class="timeline">
-      {#each snapshots as snap, i}
+      {#each filtered as snap, i}
         <div class="timeline-item animate-fade-in" style="animation-delay: {i * 40}ms">
           <div class="timeline-node" class:active={expandedId === snap.id}>
             <div class="timeline-dot"></div>
-            {#if i < snapshots.length - 1}
+            {#if i < filtered.length - 1}
               <div class="timeline-line"></div>
             {/if}
           </div>
@@ -161,6 +210,12 @@
                       </div>
                     </div>
                   {/if}
+
+                  <div class="detail-actions">
+                    <button class="btn-sm" on:click|stopPropagation={() => rollback(snap.id)}>
+                      回滚到此版本
+                    </button>
+                  </div>
                 {:else}
                   <div class="empty-compact">无法加载详情</div>
                 {/if}
@@ -181,11 +236,37 @@
   .history-page { display: flex; flex-direction: column; gap: 12px; }
   .toolbar { display: flex; align-items: center; justify-content: space-between; }
 
-  .timeline { display: flex; flex-direction: column; }
-
-  .timeline-item {
-    display: flex; gap: 16px; position: relative;
+  .msg-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px; border-radius: 6px;
+    background: rgba(107,144,128,0.08); border: 1px solid rgba(107,144,128,0.15);
+    font-size: 12px; color: rgb(var(--state-ok));
   }
+  .error-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px; border-radius: 6px;
+    background: rgba(184,92,92,0.08); border: 1px solid rgba(184,92,92,0.15);
+    font-size: 12px; color: rgb(var(--state-err));
+  }
+  .link-btn { font-size: 11px; color: rgb(var(--text-muted)); background: none; border: none; cursor: pointer; }
+  .link-btn:hover { color: rgb(var(--accent)); }
+
+  .filter-bar {
+    display: flex; gap: 2px; padding: 4px;
+    background: rgb(var(--surface-1)); border-radius: 8px; border: 1px solid rgb(var(--border));
+  }
+  .filter-btn {
+    padding: 4px 10px; border-radius: 5px;
+    font-size: 11px; font-weight: 500;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    color: rgb(var(--text-muted)); background: transparent;
+    border: 1px solid transparent; cursor: pointer; transition: all 0.2s;
+  }
+  .filter-btn:hover { color: rgb(var(--text-secondary)); background: rgb(var(--surface-2)); }
+  .filter-btn.active { background: rgba(196,112,78,0.1); color: rgb(var(--accent)); border-color: rgba(196,112,78,0.2); }
+
+  .timeline { display: flex; flex-direction: column; }
+  .timeline-item { display: flex; gap: 16px; position: relative; }
 
   .timeline-node {
     display: flex; flex-direction: column; align-items: center;
@@ -202,9 +283,7 @@
     background: rgb(var(--border)); margin-top: 4px;
   }
 
-  .timeline-content {
-    flex: 1; min-width: 0; padding-bottom: 4px;
-  }
+  .timeline-content { flex: 1; min-width: 0; padding-bottom: 4px; }
 
   .snap-row {
     display: flex; align-items: center; gap: 12px;
@@ -212,27 +291,18 @@
     background: rgb(var(--surface-1)); border: 1px solid rgb(var(--border));
     cursor: pointer; transition: all 0.2s;
   }
-  .snap-row:hover {
-    border-color: rgba(196,112,78,0.3);
-  }
+  .snap-row:hover { border-color: rgba(196,112,78,0.3); }
 
-  .snap-main {
-    display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;
-  }
+  .snap-main { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
   .snap-id { font-size: 12px; color: rgb(var(--accent)); }
   .snap-time { font-size: 12px; color: rgb(var(--text-secondary)); }
   .snap-device { font-size: 11px; color: rgb(var(--text-muted)); }
 
-  .snap-meta {
-    display: flex; align-items: center; gap: 8px;
-  }
+  .snap-meta { display: flex; align-items: center; gap: 8px; }
   .snap-message { font-size: 11px; color: rgb(var(--text-muted)); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .snap-files { font-size: 10px; font-family: 'DM Mono', monospace; color: rgb(var(--text-muted)); opacity: 0.6; }
 
-  .snap-arrow {
-    font-size: 8px; color: rgb(var(--text-muted));
-    transition: transform 0.2s;
-  }
+  .snap-arrow { font-size: 8px; color: rgb(var(--text-muted)); transition: transform 0.2s; }
   .snap-arrow.open { transform: rotate(90deg); }
 
   .snap-detail {
@@ -241,16 +311,29 @@
     border-radius: 8px; border-top-left-radius: 0;
   }
 
-  .detail-grid {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px;
-    margin-bottom: 12px;
-  }
+  .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; margin-bottom: 12px; }
   .detail-item { display: flex; flex-direction: column; gap: 2px; }
   .detail-label { font-size: 10px; color: rgb(var(--text-muted)); text-transform: uppercase; letter-spacing: 0.05em; }
   .detail-value { font-size: 12px; color: rgb(var(--text-primary)); }
 
   .detail-section { margin-top: 12px; }
   .detail-section-label { font-size: 11px; font-weight: 600; color: rgb(var(--text-muted)); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; display: block; }
+
+  .detail-actions {
+    margin-top: 12px; padding-top: 10px;
+    border-top: 1px solid rgb(var(--border));
+    display: flex; justify-content: flex-end;
+  }
+  .btn-sm {
+    font-size: 11px; font-weight: 500;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    color: rgb(var(--accent));
+    background: rgba(196,112,78,0.08);
+    border: 1px solid rgba(196,112,78,0.2);
+    padding: 5px 12px; border-radius: 5px; cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-sm:hover { background: rgba(196,112,78,0.15); }
 
   .binary-tags { display: flex; flex-wrap: wrap; gap: 6px; }
   .binary-tag {
@@ -260,22 +343,17 @@
   }
 
   .file-list { display: flex; flex-direction: column; gap: 2px; max-height: 200px; overflow-y: auto; }
-  .file-row {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 3px 0;
-  }
+  .file-row { display: flex; align-items: center; justify-content: space-between; padding: 3px 0; }
   .file-path { font-size: 11px; color: rgb(var(--text-secondary)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .file-size { font-size: 10px; font-family: 'DM Mono', monospace; color: rgb(var(--text-muted)); flex-shrink: 0; }
 
   .load-more { display: flex; justify-content: center; padding: 16px 0 0 36px; }
-
   .btn-ghost {
     font-size: 12px; font-weight: 500;
     font-family: 'Plus Jakarta Sans', sans-serif;
     color: rgb(var(--text-secondary)); background: rgb(var(--surface-2));
     border: 1px solid rgb(var(--border));
-    padding: 6px 14px; border-radius: 6px; cursor: pointer;
-    transition: all 0.2s;
+    padding: 6px 14px; border-radius: 6px; cursor: pointer; transition: all 0.2s;
   }
   .btn-ghost:hover { border-color: rgb(var(--accent)); color: rgb(var(--accent)); }
 

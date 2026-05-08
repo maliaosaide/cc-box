@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -393,7 +394,43 @@ func (a *App) GetProjectList() (*ProjectListResult, error) {
 	return result, nil
 }
 
-// ProjectListResult 项目列表结果
+// GetProjectDetail 获取项目 .claude.json 内容
+func (a *App) GetProjectDetail(projectPath string) (string, error) {
+	content, err := project.LoadClaudeJSON(projectPath)
+	if err != nil {
+		return "", fmt.Errorf("读取 .claude.json 失败: %w", err)
+	}
+	data, err := json.MarshalIndent(content, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// AddProjectPath 添加项目路径
+func (a *App) AddProjectPath(dir string) error {
+	claudeJSON := filepath.Join(dir, ".claude.json")
+	if _, err := os.Stat(claudeJSON); os.IsNotExist(err) {
+		return fmt.Errorf("该目录下没有 .claude.json 文件")
+	}
+	return nil
+}
+
+// DeleteOrphan 删除 orphan 记录
+func (a *App) DeleteOrphan(remote string) error {
+	idx, err := project.LoadOrphanIndex()
+	if err != nil {
+		return err
+	}
+	filtered := make([]project.OrphanProject, 0)
+	for _, o := range idx.Orphans {
+		if o.RemoteURL != remote {
+			filtered = append(filtered, o)
+		}
+	}
+	idx.Orphans = filtered
+	return project.SaveOrphanIndex(idx)
+}
 type ProjectListResult struct {
 	Projects []ProjectInfo `json:"projects"`
 	Orphans  []OrphanInfo  `json:"orphans"`
@@ -644,4 +681,55 @@ func (a *App) UploadBinaryVersion(version string) int64 {
 		a.emitProgress(opID, "binary-upload", 0, int64(len(data)), 0, 1, "正在上传 "+version+"...")
 		return binary.Upload(client, key, "claude", data, version, a.progressCallback(opID, "binary-upload"))
 	})
+}
+
+// BinaryStorageInfo 二进制存储空间统计
+type BinaryStorageInfo struct {
+	LocalTotal int64 `json:"localTotal"`
+	CloudTotal int64 `json:"cloudTotal"`
+	LocalCount int   `json:"localCount"`
+	CloudCount int   `json:"cloudCount"`
+}
+
+// GetBinaryStorage 返回二进制存储统计
+func (a *App) GetBinaryStorage() (*BinaryStorageInfo, error) {
+	info := &BinaryStorageInfo{}
+	verDir := config.VersionsDir()
+	entries, err := os.ReadDir(verDir)
+	if err == nil {
+		for _, e := range entries {
+			if !e.IsDir() && e.Name()[0] != '.' {
+				if fi, err := e.Info(); err == nil {
+					info.LocalTotal += fi.Size()
+					info.LocalCount++
+				}
+			}
+		}
+	}
+	binPath := binary.GetBinaryPath("claude")
+	if fi, err := os.Stat(binPath); err == nil {
+		info.LocalTotal += fi.Size()
+		info.LocalCount++
+	}
+	_, client, _, err := a.loadClients()
+	if err == nil {
+		idx, err := binary.LoadIndex(client)
+		if err == nil {
+			platform := config.Platform()
+			binInfo := idx.GetBinaryInfo(platform, "claude")
+			if binInfo != nil {
+				for _, v := range binInfo.Versions {
+					info.CloudTotal += v.Size
+					info.CloudCount++
+				}
+			}
+		}
+	}
+	return info, nil
+}
+
+// DeleteLocalVersion 删除本地版本文件
+func (a *App) DeleteLocalVersion(version string) error {
+	verDir := config.VersionsDir()
+	return os.Remove(filepath.Join(verDir, version))
 }

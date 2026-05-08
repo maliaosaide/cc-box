@@ -1,11 +1,12 @@
 <script>
   import { onMount } from 'svelte'
   import { EventsOn } from '../../wailsjs/runtime/runtime.js'
-  import { GetBinaryPage, SwitchBinaryVersion, UploadBinaryVersion } from '../../wailsjs/go/main/App.js'
+  import { GetBinaryPage, SwitchBinaryVersion, UploadBinaryVersion, GetBinaryStorage, DeleteLocalVersion } from '../../wailsjs/go/main/App.js'
 
   export let syncState = 'idle'
   let activeTab = 'claude'
   let binData = null
+  let storage = null
   let loading = true
   let error = ''
   let msg = ''
@@ -43,7 +44,10 @@
 
   async function loadBinary() {
     loading = true; error = ''
-    try { binData = await GetBinaryPage() }
+    try {
+      binData = await GetBinaryPage()
+      storage = await GetBinaryStorage()
+    }
     catch (e) { error = e.message || String(e) }
     loading = false
   }
@@ -72,6 +76,17 @@
     msg = ''; error = ''
     uploading = version
     UploadBinaryVersion(version)
+  }
+
+  async function deleteVersion(version) {
+    msg = ''; error = ''
+    try {
+      await DeleteLocalVersion(version)
+      msg = `已删除本地版本 ${version}`
+      await loadBinary()
+    } catch (e) {
+      error = e.message || String(e)
+    }
   }
 </script>
 
@@ -158,6 +173,20 @@
       {/if}
     </div>
 
+    {#if storage}
+      <div class="storage-bar animate-fade-in">
+        <div class="storage-item">
+          <span class="storage-label">本地</span>
+          <span class="storage-value">{formatSize(storage.localTotal)} ({storage.localCount} 个)</span>
+        </div>
+        <div class="storage-divider"></div>
+        <div class="storage-item">
+          <span class="storage-label">云端</span>
+          <span class="storage-value">{formatSize(storage.cloudTotal)} ({storage.cloudCount} 个)</span>
+        </div>
+      </div>
+    {/if}
+
     {#if binData.localVersions && binData.localVersions.length > 0}
       <div class="card animate-fade-in stagger-2">
         <div class="section-label-row">
@@ -185,6 +214,13 @@
                         on:click={() => upload(ver.version)}>
                   {uploadProgress && uploading === ver.version ? '上传中...' : '上传'}
                 </button>
+                {#if !ver.isCurrent}
+                  <button class="btn-del-sm" on:click|stopPropagation={() => deleteVersion(ver.version)}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="12" height="12">
+                      <path d="M18 6L6 18M6 6l12 12"/>
+                    </svg>
+                  </button>
+                {/if}
               </div>
             </div>
           {/each}
@@ -352,6 +388,24 @@
     border-color: rgb(var(--border));
   }
   .btn-sm.btn-upload:hover { color: rgb(var(--accent)); background: rgba(196,112,78,0.08); border-color: rgba(196,112,78,0.15); }
+
+  .btn-del-sm {
+    width: 22px; height: 22px; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    background: transparent; border: none; cursor: pointer;
+    color: rgb(var(--text-muted)); opacity: 0.3; transition: all 0.2s;
+  }
+  .btn-del-sm:hover { opacity: 1; color: rgb(var(--state-err)); background: rgba(184,92,92,0.08); }
+
+  .storage-bar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 14px; border-radius: 6px;
+    background: rgb(var(--surface-1)); border: 1px solid rgb(var(--border));
+  }
+  .storage-item { display: flex; align-items: center; gap: 6px; }
+  .storage-label { font-size: 10px; color: rgb(var(--text-muted)); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+  .storage-value { font-size: 11px; color: rgb(var(--text-secondary)); font-family: 'DM Mono', monospace; }
+  .storage-divider { width: 1px; height: 14px; background: rgb(var(--border)); }
 
   .link-btn {
     font-size: 11px; color: rgb(var(--text-muted));

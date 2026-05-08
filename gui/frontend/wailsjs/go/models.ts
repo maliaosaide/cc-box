@@ -102,6 +102,24 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class BinaryStorageInfo {
+	    localTotal: number;
+	    cloudTotal: number;
+	    localCount: number;
+	    cloudCount: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new BinaryStorageInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.localTotal = source["localTotal"];
+	        this.cloudTotal = source["cloudTotal"];
+	        this.localCount = source["localCount"];
+	        this.cloudCount = source["cloudCount"];
+	    }
+	}
 	
 	export class BinaryView {
 	    encrypt: boolean;

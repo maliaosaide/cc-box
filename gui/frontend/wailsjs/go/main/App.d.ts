@@ -4,11 +4,17 @@ import {main} from '../models';
 
 export function AddExcludePattern(arg1:string):Promise<void>;
 
+export function AddProjectPath(arg1:string):Promise<void>;
+
 export function BrowseFolder(arg1:string):Promise<string>;
 
 export function BulkSync(arg1:string):Promise<number>;
 
 export function CancelOperation(arg1:number):Promise<void>;
+
+export function DeleteLocalVersion(arg1:string):Promise<void>;
+
+export function DeleteOrphan(arg1:string):Promise<void>;
 
 export function DetectExistingSetup(arg1:string,arg2:string,arg3:string,arg4:string):Promise<boolean>;
 
@@ -17,6 +23,8 @@ export function ExcludeFile(arg1:string):Promise<void>;
 export function GetAppInfo():Promise<Record<string, any>>;
 
 export function GetBinaryPage():Promise<main.BinaryPageData>;
+
+export function GetBinaryStorage():Promise<main.BinaryStorageInfo>;
 
 export function GetConfig():Promise<main.ConfigView>;
 
@@ -29,6 +37,8 @@ export function GetFileContent(arg1:string):Promise<main.FileDetail>;
 export function GetFileDiff(arg1:string):Promise<main.DiffResult>;
 
 export function GetFileTree():Promise<main.FileTreeResult>;
+
+export function GetProjectDetail(arg1:string):Promise<string>;
 
 export function GetProjectList():Promise<main.ProjectListResult>;
 
@@ -68,4 +78,4 @@ export function TestConnection():Promise<main.ConnectionTest>;
 
 export function TestWebDAVConnection(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
-export function UploadBinaryVersion(arg1:string):Promise<void>;
+export function UploadBinaryVersion(arg1:string):Promise<number>;

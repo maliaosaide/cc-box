@@ -6,6 +6,10 @@ export function AddExcludePattern(arg1) {
   return window['go']['main']['App']['AddExcludePattern'](arg1);
 }
 
+export function AddProjectPath(arg1) {
+  return window['go']['main']['App']['AddProjectPath'](arg1);
+}
+
 export function BrowseFolder(arg1) {
   return window['go']['main']['App']['BrowseFolder'](arg1);
 }
@@ -16,6 +20,14 @@ export function BulkSync(arg1) {
 
 export function CancelOperation(arg1) {
   return window['go']['main']['App']['CancelOperation'](arg1);
+}
+
+export function DeleteLocalVersion(arg1) {
+  return window['go']['main']['App']['DeleteLocalVersion'](arg1);
+}
+
+export function DeleteOrphan(arg1) {
+  return window['go']['main']['App']['DeleteOrphan'](arg1);
 }
 
 export function DetectExistingSetup(arg1, arg2, arg3, arg4) {
@@ -32,6 +44,10 @@ export function GetAppInfo() {
 
 export function GetBinaryPage() {
   return window['go']['main']['App']['GetBinaryPage']();
+}
+
+export function GetBinaryStorage() {
+  return window['go']['main']['App']['GetBinaryStorage']();
 }
 
 export function GetConfig() {
@@ -56,6 +72,10 @@ export function GetFileDiff(arg1) {
 
 export function GetFileTree() {
   return window['go']['main']['App']['GetFileTree']();
+}
+
+export function GetProjectDetail(arg1) {
+  return window['go']['main']['App']['GetProjectDetail'](arg1);
 }
 
 export function GetProjectList() {
