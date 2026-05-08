@@ -7,7 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 
 	"github.com/spf13/cobra"
 	"github.com/user/cc-box/internal/binary"
@@ -356,6 +358,9 @@ func totalPruneSize(idx *binary.Index, targets []pruneTarget) int64 {
 // detectVersion 从二进制路径检测版本
 func detectVersion(binPath string) string {
 	cmd := exec.Command(binPath, "--version")
+	if runtime.GOOS == "windows" {
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
+	}
 	output, err := cmd.Output()
 	if err != nil {
 		return "unknown"
