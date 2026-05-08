@@ -93,16 +93,20 @@
 
   .main-content {
     flex: 1;
-    overflow-y: auto;
-    padding: 28px 32px;
-    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
   }
 
   .page-panel {
     display: none;
-    height: 100%;
+    flex: 1;
+    overflow: hidden;
+    padding: 28px 32px;
+    overflow-y: auto;
   }
   .page-panel.active {
-    display: block;
+    display: flex;
+    flex-direction: column;
   }
 </style>

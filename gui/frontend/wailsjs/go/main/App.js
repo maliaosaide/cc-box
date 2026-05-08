@@ -26,6 +26,14 @@ export function GetAppInfo() {
   return window['go']['main']['App']['GetAppInfo']();
 }
 
+export function GetBinaryPage() {
+  return window['go']['main']['App']['GetBinaryPage']();
+}
+
+export function GetConfig() {
+  return window['go']['main']['App']['GetConfig']();
+}
+
 export function GetConflictDetail(arg1) {
   return window['go']['main']['App']['GetConflictDetail'](arg1);
 }
@@ -44,6 +52,18 @@ export function GetFileDiff(arg1) {
 
 export function GetFileTree() {
   return window['go']['main']['App']['GetFileTree']();
+}
+
+export function GetProjectList() {
+  return window['go']['main']['App']['GetProjectList']();
+}
+
+export function GetSnapshotDetail(arg1) {
+  return window['go']['main']['App']['GetSnapshotDetail'](arg1);
+}
+
+export function GetSnapshotList(arg1) {
+  return window['go']['main']['App']['GetSnapshotList'](arg1);
 }
 
 export function InitJoinExisting(arg1, arg2, arg3, arg4, arg5, arg6) {
@@ -82,8 +102,16 @@ export function SaveMergedConflict(arg1, arg2) {
   return window['go']['main']['App']['SaveMergedConflict'](arg1, arg2);
 }
 
+export function SetConfigField(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SetConfigField'](arg1, arg2, arg3);
+}
+
 export function StartAsync(arg1, arg2) {
   return window['go']['main']['App']['StartAsync'](arg1, arg2);
+}
+
+export function TestConnection() {
+  return window['go']['main']['App']['TestConnection']();
 }
 
 export function TestWebDAVConnection(arg1, arg2, arg3, arg4) {

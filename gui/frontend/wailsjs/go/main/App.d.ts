@@ -14,6 +14,10 @@ export function ExcludeFile(arg1:string):Promise<void>;
 
 export function GetAppInfo():Promise<Record<string, any>>;
 
+export function GetBinaryPage():Promise<main.BinaryPageData>;
+
+export function GetConfig():Promise<main.ConfigView>;
+
 export function GetConflictDetail(arg1:string):Promise<main.ConflictDetail>;
 
 export function GetDashboard():Promise<main.DashboardData>;
@@ -23,6 +27,12 @@ export function GetFileContent(arg1:string):Promise<main.FileDetail>;
 export function GetFileDiff(arg1:string):Promise<main.DiffResult>;
 
 export function GetFileTree():Promise<main.FileTreeResult>;
+
+export function GetProjectList():Promise<main.ProjectListResult>;
+
+export function GetSnapshotDetail(arg1:string):Promise<main.SnapshotDetail>;
+
+export function GetSnapshotList(arg1:number):Promise<Array<main.SnapshotEntry>>;
 
 export function InitJoinExisting(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string):Promise<void>;
 
@@ -42,6 +52,10 @@ export function ResolveConflict(arg1:string,arg2:string):Promise<void>;
 
 export function SaveMergedConflict(arg1:string,arg2:string):Promise<void>;
 
+export function SetConfigField(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function StartAsync(arg1:string,arg2:any):Promise<number>;
+
+export function TestConnection():Promise<main.ConnectionTest>;
 
 export function TestWebDAVConnection(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
