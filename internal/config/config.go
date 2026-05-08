@@ -180,6 +180,11 @@ func loadViper() *viper.Viper {
 	return v
 }
 
+// LoadRaw 返回原始 viper 实例用于读取未映射字段
+func LoadRaw() *viper.Viper {
+	return loadViper()
+}
+
 // expandHome 展开路径中的 ~ 前缀
 func expandHome(path string) string {
 	if len(path) > 0 && path[0] == '~' {

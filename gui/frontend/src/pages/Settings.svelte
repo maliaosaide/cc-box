@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import { GetConfig, SetConfigField, TestConnection, SetWebDAVPassword } from '../../wailsjs/go/main/App.js'
+  import { GetConfig, SetConfigField, TestConnection, SetWebDAVPassword, AddExcludePattern, RemoveExcludePattern } from '../../wailsjs/go/main/App.js'
 
   export let syncState = 'idle'
   let activeTab = 'connection'
@@ -25,7 +25,6 @@
   // 可编辑字段
   let webdavUrl = ''
   let webdavUser = ''
-  let webdavPass = ''
   let webdavPassNew = ''
   let deviceName = ''
   let encryptionEnabled = false
@@ -37,6 +36,11 @@
   let snapshotLimit = 50
   let conflictStrategy = 'ask'
   let mergeRetryMax = 3
+  let claudeDirRaw = ''
+  let binDirRaw = ''
+  let versionsDirRaw = ''
+  let newPattern = ''
+  let excludeList = []
 
   const defaultPatterns = ['sessions/', 'cache/', 'debug/', 'telemetry/', 'downloads/', 'paste-cache/', 'shell-snapshots/', 'file-history/', 'session-env/', 'ide/', 'backups/', 'plans/', 'tasks/', 'teams/', 'plugins/data/', '*.lock']
 
@@ -61,6 +65,10 @@
         snapshotLimit = cfg.sync.snapshotLimit || 50
         conflictStrategy = cfg.sync.conflictStrategy || 'ask'
         mergeRetryMax = cfg.sync.mergeRetryMax || 3
+        claudeDirRaw = cfg.claudeDirRaw || ''
+        binDirRaw = cfg.binDirRaw || ''
+        versionsDirRaw = cfg.versionsDirRaw || ''
+        excludeList = [...(cfg.exclude || [])]
       }
     } catch (e) {
       error = e.message || String(e)
@@ -114,6 +122,32 @@
   async function saveSnapshotLimit() { await saveField('sync', 'snapshot_limit', String(snapshotLimit)) }
   async function saveConflictStrategy() { await saveField('sync', 'conflict_strategy', conflictStrategy) }
   async function saveMergeRetry() { await saveField('sync', 'merge_retry_max', String(mergeRetryMax)) }
+  async function saveClaudeDir() { await saveField('claude', 'path', claudeDirRaw) }
+  async function saveBinDir() { await saveField('binary', 'bin_dir', binDirRaw) }
+  async function saveVersionsDir() { await saveField('binary', 'versions_dir', versionsDirRaw) }
+
+  async function addPattern() {
+    const p = newPattern.trim()
+    if (!p) return
+    try {
+      await AddExcludePattern(p)
+      excludeList = [...excludeList, p]
+      newPattern = ''
+      showSaved()
+    } catch (e) {
+      error = e.message || String(e)
+    }
+  }
+
+  async function removePattern(p) {
+    try {
+      await RemoveExcludePattern(p)
+      excludeList = excludeList.filter(x => x !== p)
+      showSaved()
+    } catch (e) {
+      error = e.message || String(e)
+    }
+  }
 
   async function testConn() {
     testLoading = true; testResult = null
@@ -255,13 +289,11 @@
         </div>
         <div class="form-group">
           <label class="label">分块模式</label>
-          <div class="input-row">
-            <select class="input select-input" bind:value={chunkMode} on:change={saveChunkMode}>
-              <option value="auto">自动</option>
-              <option value="always">始终分块</option>
-              <option value="never">不分块</option>
-            </select>
-          </div>
+          <select class="input select-input" bind:value={chunkMode} on:change={saveChunkMode}>
+            <option value="auto">自动</option>
+            <option value="always">始终分块</option>
+            <option value="never">不分块</option>
+          </select>
         </div>
         <div class="form-group">
           <label class="label">分块大小 (MB)</label>
@@ -293,14 +325,12 @@
         </div>
         <div class="form-group">
           <label class="label">冲突策略</label>
-          <div class="input-row">
-            <select class="input select-input" bind:value={conflictStrategy} on:change={saveConflictStrategy}>
-              <option value="ask">询问</option>
-              <option value="local">保留本地</option>
-              <option value="remote">采用远程</option>
-              <option value="merge">尝试合并</option>
-            </select>
-          </div>
+          <select class="input select-input" bind:value={conflictStrategy} on:change={saveConflictStrategy}>
+            <option value="ask">询问</option>
+            <option value="local">保留本地</option>
+            <option value="remote">采用远程</option>
+            <option value="merge">尝试合并</option>
+          </select>
         </div>
         <div class="form-group">
           <label class="label">合并重试次数</label>
@@ -315,17 +345,29 @@
     <!-- 路径 -->
     {#if activeTab === 'paths'}
       <div class="card animate-fade-in">
-        <div class="path-section">
-          <span class="path-label">Claude 配置目录</span>
-          <span class="path-value font-mono">{cfg.claudeDir}</span>
+        <div class="form-group">
+          <label class="label">Claude 配置目录</label>
+          <div class="input-row">
+            <input class="input font-mono" type="text" bind:value={claudeDirRaw} placeholder="留空使用默认 ~/.claude/" />
+            <button class="btn-sm" on:click={saveClaudeDir}>保存</button>
+          </div>
+          <div class="hint">当前解析路径: {cfg.claudeDir}</div>
         </div>
-        <div class="path-section">
-          <span class="path-label">Claude 二进制目录</span>
-          <span class="path-value font-mono">{cfg.binDir}</span>
+        <div class="form-group">
+          <label class="label">Claude 二进制目录</label>
+          <div class="input-row">
+            <input class="input font-mono" type="text" bind:value={binDirRaw} placeholder="留空使用默认 ~/.local/bin/" />
+            <button class="btn-sm" on:click={saveBinDir}>保存</button>
+          </div>
+          <div class="hint">当前解析路径: {cfg.binDir}</div>
         </div>
-        <div class="path-section">
-          <span class="path-label">Claude 版本目录</span>
-          <span class="path-value font-mono">{cfg.versionsDir}</span>
+        <div class="form-group">
+          <label class="label">Claude 版本目录</label>
+          <div class="input-row">
+            <input class="input font-mono" type="text" bind:value={versionsDirRaw} placeholder="留空使用默认 ~/.local/share/claude/versions/" />
+            <button class="btn-sm" on:click={saveVersionsDir}>保存</button>
+          </div>
+          <div class="hint">当前解析路径: {cfg.versionsDir}</div>
         </div>
       </div>
     {/if}
@@ -335,15 +377,26 @@
       <div class="card animate-fade-in">
         <div class="exclude-header">
           <span class="info-label">排除的文件/目录</span>
-          <span class="text-xs text-txt-muted">{cfg.exclude.length} 条规则</span>
+          <span class="text-xs text-txt-muted">{excludeList.length} 条规则</span>
+        </div>
+        <div class="add-row">
+          <input class="input" type="text" bind:value={newPattern} placeholder="输入规则，如 node_modules/ 或 *.log" on:keydown={(e) => { if (e.key === 'Enter') addPattern() }} />
+          <button class="btn-sm" on:click={addPattern}>添加</button>
         </div>
         <div class="exclude-list">
-          {#each cfg.exclude as pattern}
+          {#each excludeList as pattern}
             <div class="exclude-row">
-              <span class="exclude-pattern font-mono">{pattern}</span>
-              <span class="exclude-type" class:default={isDefaultPattern(pattern)} class:custom={!isDefaultPattern(pattern)}>
-                {isDefaultPattern(pattern) ? '默认' : '自定义'}
-              </span>
+              <div class="exclude-left">
+                <span class="exclude-pattern font-mono">{pattern}</span>
+                <span class="exclude-type" class:default={isDefaultPattern(pattern)} class:custom={!isDefaultPattern(pattern)}>
+                  {isDefaultPattern(pattern) ? '默认' : '自定义'}
+                </span>
+              </div>
+              <button class="del-btn" on:click={() => removePattern(pattern)}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14">
+                  <path d="M18 6L6 18M6 6l12 12"/>
+                </svg>
+              </button>
             </div>
           {/each}
         </div>
@@ -452,30 +505,36 @@
     background: rgba(196,165,78,0.06); border: 1px solid rgba(196,165,78,0.12);
   }
 
-  .path-section {
-    padding: 10px 0; border-bottom: 1px solid rgba(46,45,51,0.4);
-  }
-  .path-section:last-child { border-bottom: none; }
-  .path-label { font-size: 12px; color: rgb(var(--text-secondary)); display: block; margin-bottom: 4px; }
-  .path-value { font-size: 12px; color: rgb(var(--text-muted)); opacity: 0.7; }
-
   .exclude-header {
     display: flex; align-items: center; justify-content: space-between;
     margin-bottom: 10px;
   }
+  .add-row {
+    display: flex; gap: 8px; margin-bottom: 12px;
+  }
+  .add-row .input { flex: 1; }
   .exclude-list { display: flex; flex-direction: column; }
   .exclude-row {
     display: flex; align-items: center; justify-content: space-between;
     padding: 6px 0; border-bottom: 1px solid rgba(46,45,51,0.3);
   }
   .exclude-row:last-child { border-bottom: none; }
+  .exclude-left { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
   .exclude-pattern { font-size: 12px; color: rgb(var(--text-primary)); }
   .exclude-type {
     font-size: 10px; font-family: 'DM Mono', monospace;
-    padding: 2px 6px; border-radius: 3px;
+    padding: 2px 6px; border-radius: 3px; flex-shrink: 0;
   }
   .exclude-type.default { color: rgb(var(--text-muted)); background: rgb(var(--surface-2)); }
   .exclude-type.custom { color: rgb(var(--accent)); background: rgba(196,112,78,0.08); }
+  .del-btn {
+    width: 24px; height: 24px; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    background: transparent; border: none; cursor: pointer;
+    color: rgb(var(--text-muted)); opacity: 0.4; transition: all 0.2s;
+    flex-shrink: 0;
+  }
+  .del-btn:hover { opacity: 1; color: rgb(var(--state-err)); background: rgba(184,92,92,0.08); }
 
   .device-card { display: flex; flex-direction: column; gap: 12px; }
   .device-main { display: flex; align-items: center; gap: 12px; }

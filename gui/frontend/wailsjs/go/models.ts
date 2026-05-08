@@ -207,8 +207,11 @@ export namespace main {
 	    sync: SyncView;
 	    exclude: string[];
 	    claudeDir: string;
+	    claudeDirRaw: string;
 	    binDir: string;
+	    binDirRaw: string;
 	    versionsDir: string;
+	    versionsDirRaw: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ConfigView(source);
@@ -223,8 +226,11 @@ export namespace main {
 	        this.sync = this.convertValues(source["sync"], SyncView);
 	        this.exclude = source["exclude"];
 	        this.claudeDir = source["claudeDir"];
+	        this.claudeDirRaw = source["claudeDirRaw"];
 	        this.binDir = source["binDir"];
+	        this.binDirRaw = source["binDirRaw"];
 	        this.versionsDir = source["versionsDir"];
+	        this.versionsDirRaw = source["versionsDirRaw"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

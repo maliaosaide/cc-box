@@ -165,6 +165,12 @@ func (a *App) GetConfig() (*ConfigView, error) {
 		hasPassword = true
 	}
 
+	// 读取原始配置中的路径字段（用于编辑回显）
+	v := config.LoadRaw()
+	claudePath := v.GetString("claude.path")
+	binDir := v.GetString("binary.bindir")
+	verDir := v.GetString("binary.versionsdir")
+
 	return &ConfigView{
 		WebDAV: WebDAVView{
 			URL:         cfg.WebDAV.URL,
@@ -191,10 +197,13 @@ func (a *App) GetConfig() (*ConfigView, error) {
 			ConflictStrategy: cfg.Sync.ConflictStrategy,
 			MergeRetryMax:    cfg.Sync.MergeRetryMax,
 		},
-		Exclude:   cfg.Exclude.Patterns,
-		ClaudeDir: config.ClaudeDir(),
-		BinDir:    config.LocalBinDir(),
-		VersionsDir: config.VersionsDir(),
+		Exclude:        cfg.Exclude.Patterns,
+		ClaudeDir:      config.ClaudeDir(),
+		ClaudeDirRaw:   claudePath,
+		BinDir:         config.LocalBinDir(),
+		BinDirRaw:      binDir,
+		VersionsDir:    config.VersionsDir(),
+		VersionsDirRaw: verDir,
 	}, nil
 }
 
@@ -223,6 +232,10 @@ func (a *App) SetConfigField(section, key, value string) error {
 		if key == "enabled" {
 			cfg.Encryption.Enabled = value == "true"
 		}
+	case "claude":
+		if key == "path" {
+			cfg.Claude.Path = value
+		}
 	case "binary":
 		switch key {
 		case "encrypt":
@@ -239,6 +252,10 @@ func (a *App) SetConfigField(section, key, value string) error {
 			}
 		case "auto_upload":
 			cfg.Binary.AutoUpload = value == "true"
+		case "bin_dir":
+			cfg.Binary.BinDir = value
+		case "versions_dir":
+			cfg.Binary.VersionsDir = value
 		}
 	case "sync":
 		switch key {
@@ -261,6 +278,37 @@ func (a *App) SetConfigField(section, key, value string) error {
 // SetWebDAVPassword 保存 WebDAV 密码到密钥环
 func (a *App) SetWebDAVPassword(password string) error {
 	return config.SaveWebDAVPassword(password)
+}
+
+// AddExcludePattern 添加排除规则
+func (a *App) AddExcludePattern(pattern string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	for _, p := range cfg.Exclude.Patterns {
+		if p == pattern {
+			return nil
+		}
+	}
+	cfg.Exclude.Patterns = append(cfg.Exclude.Patterns, pattern)
+	return config.Save(cfg)
+}
+
+// RemoveExcludePattern 删除排除规则
+func (a *App) RemoveExcludePattern(pattern string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	filtered := make([]string, 0, len(cfg.Exclude.Patterns))
+	for _, p := range cfg.Exclude.Patterns {
+		if p != pattern {
+			filtered = append(filtered, p)
+		}
+	}
+	cfg.Exclude.Patterns = filtered
+	return config.Save(cfg)
 }
 
 func parseInt(s string) (int, error) {
@@ -352,15 +400,18 @@ type ProjectListResult struct {
 
 // ConfigView 配置视图
 type ConfigView struct {
-	WebDAV      WebDAVView     `json:"webdav"`
-	Device      DeviceView     `json:"device"`
-	Encryption  EncryptionView `json:"encryption"`
-	Binary      BinaryView     `json:"binary"`
-	Sync        SyncView       `json:"sync"`
-	Exclude     []string       `json:"exclude"`
-	ClaudeDir   string         `json:"claudeDir"`
-	BinDir      string         `json:"binDir"`
-	VersionsDir string         `json:"versionsDir"`
+	WebDAV         WebDAVView     `json:"webdav"`
+	Device         DeviceView     `json:"device"`
+	Encryption     EncryptionView `json:"encryption"`
+	Binary         BinaryView     `json:"binary"`
+	Sync           SyncView       `json:"sync"`
+	Exclude        []string       `json:"exclude"`
+	ClaudeDir      string         `json:"claudeDir"`
+	ClaudeDirRaw   string         `json:"claudeDirRaw"`
+	BinDir         string         `json:"binDir"`
+	BinDirRaw      string         `json:"binDirRaw"`
+	VersionsDir    string         `json:"versionsDir"`
+	VersionsDirRaw string         `json:"versionsDirRaw"`
 }
 
 type WebDAVView struct {
