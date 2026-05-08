@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -624,20 +625,23 @@ func (a *App) SwitchBinaryVersion(version string, source string) error {
 	return nil
 }
 
-// UploadBinaryVersion 上传指定本地版本到云端
-func (a *App) UploadBinaryVersion(version string) error {
-	_, client, key, err := a.loadClients()
-	if err != nil {
-		return err
-	}
+// UploadBinaryVersion 上传指定本地版本到云端（异步，带进度）
+func (a *App) UploadBinaryVersion(version string) int64 {
+	return a.StartAsync("binary-upload", func(ctx context.Context, opID int64) error {
+		_, client, key, err := a.loadClients()
+		if err != nil {
+			return err
+		}
 
-	verDir := config.VersionsDir()
-	srcPath := filepath.Join(verDir, version)
+		verDir := config.VersionsDir()
+		srcPath := filepath.Join(verDir, version)
 
-	data, err := os.ReadFile(srcPath)
-	if err != nil {
-		return fmt.Errorf("读取版本文件 %s 失败: %w", version, err)
-	}
+		data, err := os.ReadFile(srcPath)
+		if err != nil {
+			return fmt.Errorf("读取版本文件 %s 失败: %w", version, err)
+		}
 
-	return binary.Upload(client, key, "claude", data, version, nil)
+		a.emitProgress(opID, "binary-upload", 0, int64(len(data)), 0, 1, "正在上传 "+version+"...")
+		return binary.Upload(client, key, "claude", data, version, a.progressCallback(opID, "binary-upload"))
+	})
 }

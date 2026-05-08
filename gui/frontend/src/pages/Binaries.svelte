@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte'
+  import { EventsOn } from '../../wailsjs/runtime/runtime.js'
   import { GetBinaryPage, SwitchBinaryVersion, UploadBinaryVersion } from '../../wailsjs/go/main/App.js'
 
   export let syncState = 'idle'
@@ -9,7 +10,7 @@
   let error = ''
   let msg = ''
   let switching = ''
-  let uploading = ''
+  let uploadProgress = null
 
   const tabs = [
     { id: 'claude', label: 'Claude', active: true },
@@ -24,6 +25,20 @@
 
   onMount(async () => {
     await loadBinary()
+    EventsOn('op:progress', (e) => {
+      if (e.operation === 'binary-upload') uploadProgress = e
+    })
+    EventsOn('op:complete', (e) => {
+      if (uploadProgress) {
+        if (e.status === 'error') {
+          error = e.error || '上传失败'
+        } else {
+          msg = '上传完成'
+          loadBinary()
+        }
+        uploadProgress = null
+      }
+    })
   })
 
   async function loadBinary() {
@@ -53,17 +68,10 @@
     switching = ''
   }
 
-  async function upload(version) {
-    uploading = version
+  function upload(version) {
     msg = ''; error = ''
-    try {
-      await UploadBinaryVersion(version)
-      msg = `已上传 ${version} 到云端`
-      await loadBinary()
-    } catch (e) {
-      error = e.message || String(e)
-    }
-    uploading = ''
+    uploading = version
+    UploadBinaryVersion(version)
   }
 </script>
 
@@ -97,6 +105,18 @@
     </div>
   {/if}
 
+  {#if uploadProgress}
+    <div class="progress-section animate-fade-in">
+      <div class="progress-header">
+        <span class="progress-msg font-mono">{uploadProgress.message}</span>
+        <span class="progress-pct font-mono">{Math.round(uploadProgress.percent)}%</span>
+      </div>
+      <div class="progress-bar">
+        <div class="progress-bar-fill" style="width: {uploadProgress.percent}%"></div>
+      </div>
+    </div>
+  {/if}
+
   {#if activeTab !== 'claude'}
     <div class="card animate-fade-in">
       <div class="text-center py-16">
@@ -118,7 +138,6 @@
       <div class="loading-dot animate-gentle-pulse"></div>
     </div>
   {:else if binData}
-    <!-- 当前版本 -->
     <div class="card animate-fade-in stagger-1">
       <div class="section-label-row">
         <span class="section-label">当前版本</span>
@@ -139,7 +158,6 @@
       {/if}
     </div>
 
-    <!-- 本地版本 -->
     {#if binData.localVersions && binData.localVersions.length > 0}
       <div class="card animate-fade-in stagger-2">
         <div class="section-label-row">
@@ -163,9 +181,9 @@
                   </button>
                 {/if}
                 <button class="btn-sm btn-upload"
-                        disabled={uploading === ver.version}
+                        disabled={!!uploadProgress}
                         on:click={() => upload(ver.version)}>
-                  {uploading === ver.version ? '上传中...' : '上传'}
+                  {uploadProgress && uploading === ver.version ? '上传中...' : '上传'}
                 </button>
               </div>
             </div>
@@ -174,7 +192,6 @@
       </div>
     {/if}
 
-    <!-- 云端版本 -->
     {#if binData.versions && binData.versions.length > 0}
       <div class="card animate-fade-in stagger-3">
         <div class="section-label-row">
@@ -251,6 +268,24 @@
     padding: 8px 12px; border-radius: 6px;
     background: rgba(184,92,92,0.08); border: 1px solid rgba(184,92,92,0.15);
     font-size: 12px; color: rgb(var(--state-err));
+  }
+
+  .progress-section {
+    padding: 10px 14px; border-radius: 6px;
+    background: rgb(var(--surface-1)); border: 1px solid rgb(var(--border));
+  }
+  .progress-header {
+    display: flex; justify-content: space-between; margin-bottom: 6px;
+  }
+  .progress-msg { font-size: 11px; color: rgb(var(--text-muted)); }
+  .progress-pct { font-size: 11px; color: rgb(var(--accent)); }
+  .progress-bar {
+    height: 4px; border-radius: 2px; background: rgb(var(--surface-2)); overflow: hidden;
+  }
+  .progress-bar-fill {
+    height: 100%; border-radius: 2px;
+    background: linear-gradient(90deg, rgb(var(--accent)), rgba(196,112,78,0.6));
+    transition: width 0.3s;
   }
 
   .section-label-row {

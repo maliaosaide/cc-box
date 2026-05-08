@@ -163,10 +163,14 @@
     <div class="content-layout">
       <div class="tree-panel">
         <div class="filter-bar">
-          <button class="filter-btn" class:active={filter === 'all'} on:click={() => filter = 'all'}>全部</button>
-          <button class="filter-btn" class:active={filter === 'changed'} on:click={() => filter = 'changed'}>已变更</button>
-          <button class="filter-btn" class:active={filter === 'conflict'} on:click={() => filter = 'conflict'}>
-            冲突{#if tree.conflicts > 0} ({tree.conflicts}){/if}
+          <button class="filter-btn" class:active={filter === 'all'} on:click={() => filter = 'all'}>
+            全部<span class="filter-count">{tree.total}</span>
+          </button>
+          <button class="filter-btn" class:active={filter === 'changed'} on:click={() => filter = 'changed'}>
+            已变更<span class="filter-count">{tree.changed}</span>
+          </button>
+          <button class="filter-btn filter-conflict" class:active={filter === 'conflict'} on:click={() => filter = 'conflict'}>
+            冲突<span class="filter-count" class:has-conflict={tree.conflicts > 0}>{tree.conflicts}</span>
           </button>
         </div>
         <div class="tree-list">
@@ -331,14 +335,31 @@
   }
   .filter-bar { display: flex; gap: 2px; padding: 8px 8px 4px; border-bottom: 1px solid rgb(var(--border)); }
   .filter-btn {
-    flex: 1; padding: 4px 8px; border-radius: 4px;
+    flex: 1; padding: 5px 8px; border-radius: 5px;
     font-size: 11px; font-weight: 500;
     font-family: 'Plus Jakarta Sans', sans-serif;
-    color: rgb(var(--text-muted)); background: transparent; border: none; cursor: pointer;
+    color: rgb(var(--text-muted)); background: transparent;
+    border: 1px solid transparent; cursor: pointer;
     transition: all 0.2s;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
   }
-  .filter-btn:hover { color: rgb(var(--text-secondary)); }
-  .filter-btn.active { background: rgb(var(--surface-2)); color: rgb(var(--accent)); }
+  .filter-btn:hover { color: rgb(var(--text-secondary)); background: rgb(var(--surface-2)); }
+  .filter-btn.active {
+    background: rgba(196,112,78,0.1); color: rgb(var(--accent));
+    border-color: rgba(196,112,78,0.2);
+  }
+  .filter-btn.filter-conflict.active {
+    background: rgba(184,92,92,0.08); color: rgb(var(--state-err));
+    border-color: rgba(184,92,92,0.2);
+  }
+  .filter-count {
+    font-size: 10px; font-family: 'DM Mono', monospace;
+    padding: 1px 5px; border-radius: 3px;
+    background: rgb(var(--surface-2)); color: rgb(var(--text-muted));
+  }
+  .filter-btn.active .filter-count { background: rgba(196,112,78,0.15); color: rgb(var(--accent)); }
+  .filter-btn.filter-conflict.active .filter-count { background: rgba(184,92,92,0.12); color: rgb(var(--state-err)); }
+  .filter-count.has-conflict { background: rgba(184,92,92,0.12); color: rgb(var(--state-err)); }
   .tree-list { flex: 1; overflow-y: auto; padding: 4px 0; }
 
   .detail-panel {
