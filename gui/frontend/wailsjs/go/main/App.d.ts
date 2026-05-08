@@ -54,6 +54,8 @@ export function SaveMergedConflict(arg1:string,arg2:string):Promise<void>;
 
 export function SetConfigField(arg1:string,arg2:string,arg3:string):Promise<void>;
 
+export function SetWebDAVPassword(arg1:string):Promise<void>;
+
 export function StartAsync(arg1:string,arg2:any):Promise<number>;
 
 export function TestConnection():Promise<main.ConnectionTest>;

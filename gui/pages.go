@@ -159,11 +159,18 @@ func (a *App) GetConfig() (*ConfigView, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	hasPassword := false
+	if _, err := config.LoadWebDAVPassword(); err == nil {
+		hasPassword = true
+	}
+
 	return &ConfigView{
 		WebDAV: WebDAVView{
-			URL:      cfg.WebDAV.URL,
-			Username: cfg.WebDAV.Username,
-			Root:     cfg.WebDAV.Root,
+			URL:         cfg.WebDAV.URL,
+			Username:    cfg.WebDAV.Username,
+			Root:        cfg.WebDAV.Root,
+			HasPassword: hasPassword,
 		},
 		Device: DeviceView{
 			ID:   cfg.Device.ID,
@@ -172,13 +179,22 @@ func (a *App) GetConfig() (*ConfigView, error) {
 		Encryption: EncryptionView{
 			Enabled: cfg.Encryption.Enabled,
 		},
-		Sync: SyncView{
-			SnapshotLimit:   cfg.Sync.SnapshotLimit,
-			ConflictStrategy: cfg.Sync.ConflictStrategy,
-			MergeRetryMax:   cfg.Sync.MergeRetryMax,
+		Binary: BinaryView{
+			Encrypt:          cfg.Binary.Encrypt,
+			ChunkMode:        cfg.Binary.ChunkMode,
+			ChunkSizeMB:      cfg.Binary.ChunkSizeMB,
+			ChunkThresholdMB: cfg.Binary.ChunkThresholdMB,
+			AutoUpload:       cfg.Binary.AutoUpload,
 		},
-		Exclude: cfg.Exclude.Patterns,
+		Sync: SyncView{
+			SnapshotLimit:    cfg.Sync.SnapshotLimit,
+			ConflictStrategy: cfg.Sync.ConflictStrategy,
+			MergeRetryMax:    cfg.Sync.MergeRetryMax,
+		},
+		Exclude:   cfg.Exclude.Patterns,
 		ClaudeDir: config.ClaudeDir(),
+		BinDir:    config.LocalBinDir(),
+		VersionsDir: config.VersionsDir(),
 	}, nil
 }
 
@@ -190,17 +206,73 @@ func (a *App) SetConfigField(section, key, value string) error {
 	}
 
 	switch section {
+	case "webdav":
+		switch key {
+		case "url":
+			cfg.WebDAV.URL = value
+		case "username":
+			cfg.WebDAV.Username = value
+		case "root":
+			cfg.WebDAV.Root = value
+		}
 	case "device":
 		if key == "name" {
 			cfg.Device.Name = value
 		}
+	case "encryption":
+		if key == "enabled" {
+			cfg.Encryption.Enabled = value == "true"
+		}
+	case "binary":
+		switch key {
+		case "encrypt":
+			cfg.Binary.Encrypt = value == "true"
+		case "chunk_mode":
+			cfg.Binary.ChunkMode = value
+		case "chunk_size_mb":
+			if v, e := parseInt(value); e == nil {
+				cfg.Binary.ChunkSizeMB = v
+			}
+		case "chunk_threshold_mb":
+			if v, e := parseInt(value); e == nil {
+				cfg.Binary.ChunkThresholdMB = v
+			}
+		case "auto_upload":
+			cfg.Binary.AutoUpload = value == "true"
+		}
 	case "sync":
-		if key == "conflict_strategy" {
+		switch key {
+		case "conflict_strategy":
 			cfg.Sync.ConflictStrategy = value
+		case "snapshot_limit":
+			if v, e := parseInt(value); e == nil {
+				cfg.Sync.SnapshotLimit = v
+			}
+		case "merge_retry_max":
+			if v, e := parseInt(value); e == nil {
+				cfg.Sync.MergeRetryMax = v
+			}
 		}
 	}
 
 	return config.Save(cfg)
+}
+
+// SetWebDAVPassword 保存 WebDAV 密码到密钥环
+func (a *App) SetWebDAVPassword(password string) error {
+	return config.SaveWebDAVPassword(password)
+}
+
+func parseInt(s string) (int, error) {
+	v := 0
+	for _, c := range s {
+		if c >= '0' && c <= '9' {
+			v = v*10 + int(c-'0')
+		} else {
+			return 0, fmt.Errorf("invalid int")
+		}
+	}
+	return v, nil
 }
 
 // TestConnection 测试 WebDAV 连接
@@ -280,18 +352,22 @@ type ProjectListResult struct {
 
 // ConfigView 配置视图
 type ConfigView struct {
-	WebDAV     WebDAVView    `json:"webdav"`
-	Device     DeviceView    `json:"device"`
-	Encryption EncryptionView `json:"encryption"`
-	Sync       SyncView      `json:"sync"`
-	Exclude    []string      `json:"exclude"`
-	ClaudeDir  string        `json:"claudeDir"`
+	WebDAV      WebDAVView     `json:"webdav"`
+	Device      DeviceView     `json:"device"`
+	Encryption  EncryptionView `json:"encryption"`
+	Binary      BinaryView     `json:"binary"`
+	Sync        SyncView       `json:"sync"`
+	Exclude     []string       `json:"exclude"`
+	ClaudeDir   string         `json:"claudeDir"`
+	BinDir      string         `json:"binDir"`
+	VersionsDir string         `json:"versionsDir"`
 }
 
 type WebDAVView struct {
-	URL      string `json:"url"`
-	Username string `json:"username"`
-	Root     string `json:"root"`
+	URL         string `json:"url"`
+	Username    string `json:"username"`
+	Root        string `json:"root"`
+	HasPassword bool   `json:"hasPassword"`
 }
 
 type DeviceView struct {
@@ -303,10 +379,18 @@ type EncryptionView struct {
 	Enabled bool `json:"enabled"`
 }
 
+type BinaryView struct {
+	Encrypt          bool   `json:"encrypt"`
+	ChunkMode        string `json:"chunkMode"`
+	ChunkSizeMB      int    `json:"chunkSizeMB"`
+	ChunkThresholdMB int    `json:"chunkThresholdMB"`
+	AutoUpload       bool   `json:"autoUpload"`
+}
+
 type SyncView struct {
-	SnapshotLimit   int    `json:"snapshotLimit"`
+	SnapshotLimit    int    `json:"snapshotLimit"`
 	ConflictStrategy string `json:"conflictStrategy"`
-	MergeRetryMax   int    `json:"mergeRetryMax"`
+	MergeRetryMax    int    `json:"mergeRetryMax"`
 }
 
 type ConnectionTest struct {
@@ -348,8 +432,10 @@ type BinaryVersionInfo struct {
 type BinaryPageData struct {
 	CurrentVersion string              `json:"currentVersion"`
 	Versions       []BinaryVersionInfo `json:"versions"`
+	LocalVersions  []BinaryVersionInfo `json:"localVersions"`
 	Platform       string              `json:"platform"`
 	BinaryPath     string              `json:"binaryPath"`
+	VersionsDir    string              `json:"versionsDir"`
 	LocalExists    bool                `json:"localExists"`
 }
 
@@ -362,21 +448,23 @@ func (a *App) GetBinaryPage() (*BinaryPageData, error) {
 
 	platform := config.Platform()
 	binPath := binary.GetBinaryPath("claude")
+	verDir := config.VersionsDir()
 
 	data := &BinaryPageData{
-		Platform:   platform,
-		BinaryPath: binPath,
+		Platform:    platform,
+		BinaryPath:  binPath,
+		VersionsDir: verDir,
 	}
 
-	// 检查本地文件
-	info, statErr := os.Stat(binPath)
-	if statErr == nil {
+	// 检查主二进制文件
+	if info, statErr := os.Stat(binPath); statErr == nil {
 		data.LocalExists = true
-		// 尝试读取版本
-		ver := detectBinVersion(binPath)
-		data.CurrentVersion = ver
+		data.CurrentVersion = detectBinVersion(binPath)
 		_ = info
 	}
+
+	// 扫描本地版本目录
+	data.LocalVersions = scanLocalVersions(verDir, data.CurrentVersion)
 
 	// 从 WebDAV 加载索引
 	idx, err := binary.LoadIndex(client)
@@ -389,7 +477,9 @@ func (a *App) GetBinaryPage() (*BinaryPageData, error) {
 		return data, nil
 	}
 
-	data.CurrentVersion = binInfo.Current
+	if data.CurrentVersion == "" {
+		data.CurrentVersion = binInfo.Current
+	}
 
 	for ver, v := range binInfo.Versions {
 		isCurrent := (ver == binInfo.Current)
@@ -405,4 +495,37 @@ func (a *App) GetBinaryPage() (*BinaryPageData, error) {
 	}
 
 	return data, nil
+}
+
+// scanLocalVersions 扫描本地版本目录
+func scanLocalVersions(dir string, currentVersion string) []BinaryVersionInfo {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+
+	var versions []BinaryVersionInfo
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		// 跳过非版本格式文件
+		if name == "" || name[0] == '.' {
+			continue
+		}
+
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+
+		versions = append(versions, BinaryVersionInfo{
+			Version:   name,
+			Size:      info.Size(),
+			IsLocal:   true,
+			IsCurrent: name == currentVersion,
+		})
+	}
+	return versions
 }

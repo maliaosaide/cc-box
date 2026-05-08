@@ -106,6 +106,10 @@ export function SetConfigField(arg1, arg2, arg3) {
   return window['go']['main']['App']['SetConfigField'](arg1, arg2, arg3);
 }
 
+export function SetWebDAVPassword(arg1) {
+  return window['go']['main']['App']['SetWebDAVPassword'](arg1);
+}
+
 export function StartAsync(arg1, arg2) {
   return window['go']['main']['App']['StartAsync'](arg1, arg2);
 }

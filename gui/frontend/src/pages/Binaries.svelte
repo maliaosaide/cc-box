@@ -77,9 +77,10 @@
   {:else if error}
     <div class="card"><div class="empty-compact">{error}</div></div>
   {:else if binData}
+    <!-- 当前版本 -->
     <div class="card animate-fade-in stagger-1">
       <div class="section-label-row">
-        <span class="section-label">Claude</span>
+        <span class="section-label">当前版本</span>
         <span class="font-mono text-xs text-txt-muted">{binData.platform}</span>
       </div>
       <div class="current-row">
@@ -97,10 +98,35 @@
       {/if}
     </div>
 
-    {#if binData.versions && binData.versions.length > 0}
+    <!-- 本地版本 -->
+    {#if binData.localVersions && binData.localVersions.length > 0}
       <div class="card animate-fade-in stagger-2">
         <div class="section-label-row">
-          <span class="section-label">版本列表</span>
+          <span class="section-label">本地版本</span>
+          <span class="text-xs text-txt-muted">{binData.versionsDir}</span>
+        </div>
+        <div class="item-list">
+          {#each binData.localVersions as ver}
+            <div class="item-row">
+              <div class="ver-dot" class:current={ver.isCurrent}></div>
+              <div class="item-main">
+                <span class="item-name font-mono">{ver.version}</span>
+                <span class="item-detail">{formatSize(ver.size)}</span>
+              </div>
+              <span class="version-tag" class:latest={ver.isCurrent}>
+                {ver.isCurrent ? '当前' : '本地'}
+              </span>
+            </div>
+          {/each}
+        </div>
+      </div>
+    {/if}
+
+    <!-- 云端版本 -->
+    {#if binData.versions && binData.versions.length > 0}
+      <div class="card animate-fade-in stagger-3">
+        <div class="section-label-row">
+          <span class="section-label">云端版本</span>
           <span class="text-xs text-txt-muted">{binData.versions.length} 个版本</span>
         </div>
         <div class="item-list">

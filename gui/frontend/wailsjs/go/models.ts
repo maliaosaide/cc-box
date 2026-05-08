@@ -63,8 +63,10 @@ export namespace main {
 	export class BinaryPageData {
 	    currentVersion: string;
 	    versions: BinaryVersionInfo[];
+	    localVersions: BinaryVersionInfo[];
 	    platform: string;
 	    binaryPath: string;
+	    versionsDir: string;
 	    localExists: boolean;
 	
 	    static createFrom(source: any = {}) {
@@ -75,8 +77,10 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.currentVersion = source["currentVersion"];
 	        this.versions = this.convertValues(source["versions"], BinaryVersionInfo);
+	        this.localVersions = this.convertValues(source["localVersions"], BinaryVersionInfo);
 	        this.platform = source["platform"];
 	        this.binaryPath = source["binaryPath"];
+	        this.versionsDir = source["versionsDir"];
 	        this.localExists = source["localExists"];
 	    }
 	
@@ -99,6 +103,26 @@ export namespace main {
 		}
 	}
 	
+	export class BinaryView {
+	    encrypt: boolean;
+	    chunkMode: string;
+	    chunkSizeMB: number;
+	    chunkThresholdMB: number;
+	    autoUpload: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new BinaryView(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.encrypt = source["encrypt"];
+	        this.chunkMode = source["chunkMode"];
+	        this.chunkSizeMB = source["chunkSizeMB"];
+	        this.chunkThresholdMB = source["chunkThresholdMB"];
+	        this.autoUpload = source["autoUpload"];
+	    }
+	}
 	export class ChangeInfo {
 	    status: string;
 	    path: string;
@@ -161,6 +185,7 @@ export namespace main {
 	    url: string;
 	    username: string;
 	    root: string;
+	    hasPassword: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new WebDAVView(source);
@@ -171,15 +196,19 @@ export namespace main {
 	        this.url = source["url"];
 	        this.username = source["username"];
 	        this.root = source["root"];
+	        this.hasPassword = source["hasPassword"];
 	    }
 	}
 	export class ConfigView {
 	    webdav: WebDAVView;
 	    device: DeviceView;
 	    encryption: EncryptionView;
+	    binary: BinaryView;
 	    sync: SyncView;
 	    exclude: string[];
 	    claudeDir: string;
+	    binDir: string;
+	    versionsDir: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ConfigView(source);
@@ -190,9 +219,12 @@ export namespace main {
 	        this.webdav = this.convertValues(source["webdav"], WebDAVView);
 	        this.device = this.convertValues(source["device"], DeviceView);
 	        this.encryption = this.convertValues(source["encryption"], EncryptionView);
+	        this.binary = this.convertValues(source["binary"], BinaryView);
 	        this.sync = this.convertValues(source["sync"], SyncView);
 	        this.exclude = source["exclude"];
 	        this.claudeDir = source["claudeDir"];
+	        this.binDir = source["binDir"];
+	        this.versionsDir = source["versionsDir"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
