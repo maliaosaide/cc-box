@@ -4,13 +4,25 @@ import {main} from '../models';
 
 export function BrowseFolder(arg1:string):Promise<string>;
 
+export function BulkSync(arg1:string):Promise<number>;
+
 export function CancelOperation(arg1:number):Promise<void>;
 
 export function DetectExistingSetup(arg1:string,arg2:string,arg3:string,arg4:string):Promise<boolean>;
 
+export function ExcludeFile(arg1:string):Promise<void>;
+
 export function GetAppInfo():Promise<Record<string, any>>;
 
+export function GetConflictDetail(arg1:string):Promise<main.ConflictDetail>;
+
 export function GetDashboard():Promise<main.DashboardData>;
+
+export function GetFileContent(arg1:string):Promise<main.FileDetail>;
+
+export function GetFileDiff(arg1:string):Promise<main.DiffResult>;
+
+export function GetFileTree():Promise<main.FileTreeResult>;
 
 export function InitJoinExisting(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string):Promise<void>;
 
@@ -25,6 +37,10 @@ export function QuickPull():Promise<number>;
 export function QuickPush():Promise<number>;
 
 export function QuickSync():Promise<number>;
+
+export function ResolveConflict(arg1:string,arg2:string):Promise<void>;
+
+export function SaveMergedConflict(arg1:string,arg2:string):Promise<void>;
 
 export function StartAsync(arg1:string,arg2:any):Promise<number>;
 

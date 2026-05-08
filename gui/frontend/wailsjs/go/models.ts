@@ -50,6 +50,22 @@ export namespace main {
 	        this.time = source["time"];
 	    }
 	}
+	export class ConflictDetail {
+	    path: string;
+	    local: string;
+	    remote: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ConflictDetail(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.local = source["local"];
+	        this.remote = source["remote"];
+	    }
+	}
 	export class ConflictRef {
 	    path: string;
 	    detail: string;
@@ -112,6 +128,171 @@ export namespace main {
 	        this.recentChanges = this.convertValues(source["recentChanges"], ChangeInfo);
 	        this.backups = this.convertValues(source["backups"], BackupInfo);
 	        this.binaries = this.convertValues(source["binaries"], BinaryInfo);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	export class DiffHunk {
+	    oldStart: number;
+	    oldCount: number;
+	    newStart: number;
+	    newCount: number;
+	    lines: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new DiffHunk(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.oldStart = source["oldStart"];
+	        this.oldCount = source["oldCount"];
+	        this.newStart = source["newStart"];
+	        this.newCount = source["newCount"];
+	        this.lines = source["lines"];
+	    }
+	}
+	export class DiffResult {
+	    path: string;
+	    local?: string;
+	    remote?: string;
+	    hunks?: DiffHunk[];
+	    status: string;
+	    localNew?: boolean;
+	    remoteNew?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new DiffResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.local = source["local"];
+	        this.remote = source["remote"];
+	        this.hunks = this.convertValues(source["hunks"], DiffHunk);
+	        this.status = source["status"];
+	        this.localNew = source["localNew"];
+	        this.remoteNew = source["remoteNew"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class FileDetail {
+	    path: string;
+	    size: number;
+	    modified: string;
+	    status: string;
+	    content?: string;
+	    hash?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FileDetail(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.size = source["size"];
+	        this.modified = source["modified"];
+	        this.status = source["status"];
+	        this.content = source["content"];
+	        this.hash = source["hash"];
+	    }
+	}
+	export class FileNode {
+	    name: string;
+	    path: string;
+	    isDir: boolean;
+	    status: string;
+	    size: number;
+	    modified: string;
+	    children?: FileNode[];
+	    expanded?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new FileNode(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.path = source["path"];
+	        this.isDir = source["isDir"];
+	        this.status = source["status"];
+	        this.size = source["size"];
+	        this.modified = source["modified"];
+	        this.children = this.convertValues(source["children"], FileNode);
+	        this.expanded = source["expanded"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class FileTreeResult {
+	    root?: FileNode;
+	    total: number;
+	    changed: number;
+	    conflicts: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new FileTreeResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.root = this.convertValues(source["root"], FileNode);
+	        this.total = source["total"];
+	        this.changed = source["changed"];
+	        this.conflicts = source["conflicts"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

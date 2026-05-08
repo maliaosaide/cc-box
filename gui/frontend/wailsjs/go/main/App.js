@@ -6,6 +6,10 @@ export function BrowseFolder(arg1) {
   return window['go']['main']['App']['BrowseFolder'](arg1);
 }
 
+export function BulkSync(arg1) {
+  return window['go']['main']['App']['BulkSync'](arg1);
+}
+
 export function CancelOperation(arg1) {
   return window['go']['main']['App']['CancelOperation'](arg1);
 }
@@ -14,12 +18,32 @@ export function DetectExistingSetup(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['DetectExistingSetup'](arg1, arg2, arg3, arg4);
 }
 
+export function ExcludeFile(arg1) {
+  return window['go']['main']['App']['ExcludeFile'](arg1);
+}
+
 export function GetAppInfo() {
   return window['go']['main']['App']['GetAppInfo']();
 }
 
+export function GetConflictDetail(arg1) {
+  return window['go']['main']['App']['GetConflictDetail'](arg1);
+}
+
 export function GetDashboard() {
   return window['go']['main']['App']['GetDashboard']();
+}
+
+export function GetFileContent(arg1) {
+  return window['go']['main']['App']['GetFileContent'](arg1);
+}
+
+export function GetFileDiff(arg1) {
+  return window['go']['main']['App']['GetFileDiff'](arg1);
+}
+
+export function GetFileTree() {
+  return window['go']['main']['App']['GetFileTree']();
 }
 
 export function InitJoinExisting(arg1, arg2, arg3, arg4, arg5, arg6) {
@@ -48,6 +72,14 @@ export function QuickPush() {
 
 export function QuickSync() {
   return window['go']['main']['App']['QuickSync']();
+}
+
+export function ResolveConflict(arg1, arg2) {
+  return window['go']['main']['App']['ResolveConflict'](arg1, arg2);
+}
+
+export function SaveMergedConflict(arg1, arg2) {
+  return window['go']['main']['App']['SaveMergedConflict'](arg1, arg2);
 }
 
 export function StartAsync(arg1, arg2) {
