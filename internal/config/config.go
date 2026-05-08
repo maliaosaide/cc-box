@@ -35,9 +35,10 @@ type EncryptionConfig struct {
 }
 
 type SyncConfig struct {
-	SnapshotLimit   int    `mapstructure:"snapshot_limit"`
-	ConflictStrategy string `mapstructure:"conflict_strategy"`
-	MergeRetryMax   int    `mapstructure:"merge_retry_max"`
+	SnapshotLimit     int    `mapstructure:"snapshot_limit"`
+	ConflictStrategy  string `mapstructure:"conflict_strategy"`
+	MergeRetryMax     int    `mapstructure:"merge_retry_max"`
+	AutoSyncInterval  string `mapstructure:"auto_sync_interval"`
 }
 
 type DeviceConfig struct {
