@@ -1,12 +1,15 @@
 <script>
   import { onMount } from 'svelte'
-  import { GetBinaryPage } from '../../wailsjs/go/main/App.js'
+  import { GetBinaryPage, SwitchBinaryVersion, UploadBinaryVersion } from '../../wailsjs/go/main/App.js'
 
   export let syncState = 'idle'
   let activeTab = 'claude'
   let binData = null
   let loading = true
   let error = ''
+  let msg = ''
+  let switching = ''
+  let uploading = ''
 
   const tabs = [
     { id: 'claude', label: 'Claude', active: true },
@@ -36,6 +39,32 @@
     if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB'
     return (b / 1024 / 1024).toFixed(1) + ' MB'
   }
+
+  async function switchTo(version, source) {
+    switching = version + '-' + source
+    msg = ''; error = ''
+    try {
+      await SwitchBinaryVersion(version, source)
+      msg = `已切换到 ${version}`
+      await loadBinary()
+    } catch (e) {
+      error = e.message || String(e)
+    }
+    switching = ''
+  }
+
+  async function upload(version) {
+    uploading = version
+    msg = ''; error = ''
+    try {
+      await UploadBinaryVersion(version)
+      msg = `已上传 ${version} 到云端`
+      await loadBinary()
+    } catch (e) {
+      error = e.message || String(e)
+    }
+    uploading = ''
+  }
 </script>
 
 <div class="bin-page">
@@ -53,6 +82,20 @@
       </button>
     {/each}
   </div>
+
+  {#if msg}
+    <div class="msg-bar animate-fade-in">
+      <span>{msg}</span>
+      <button class="link-btn" on:click={() => msg = ''}>关闭</button>
+    </div>
+  {/if}
+
+  {#if error}
+    <div class="error-bar animate-fade-in">
+      <span>{error}</span>
+      <button class="link-btn" on:click={() => error = ''}>关闭</button>
+    </div>
+  {/if}
 
   {#if activeTab !== 'claude'}
     <div class="card animate-fade-in">
@@ -74,8 +117,6 @@
     <div class="flex items-center justify-center h-64">
       <div class="loading-dot animate-gentle-pulse"></div>
     </div>
-  {:else if error}
-    <div class="card"><div class="empty-compact">{error}</div></div>
   {:else if binData}
     <!-- 当前版本 -->
     <div class="card animate-fade-in stagger-1">
@@ -103,7 +144,7 @@
       <div class="card animate-fade-in stagger-2">
         <div class="section-label-row">
           <span class="section-label">本地版本</span>
-          <span class="text-xs text-txt-muted">{binData.versionsDir}</span>
+          <span class="text-xs text-txt-muted">{binData.localVersions.length} 个</span>
         </div>
         <div class="item-list">
           {#each binData.localVersions as ver}
@@ -113,9 +154,20 @@
                 <span class="item-name font-mono">{ver.version}</span>
                 <span class="item-detail">{formatSize(ver.size)}</span>
               </div>
-              <span class="version-tag" class:latest={ver.isCurrent}>
-                {ver.isCurrent ? '当前' : '本地'}
-              </span>
+              <div class="item-actions">
+                {#if !ver.isCurrent}
+                  <button class="btn-sm"
+                          disabled={switching === ver.version + '-local'}
+                          on:click={() => switchTo(ver.version, 'local')}>
+                    {switching === ver.version + '-local' ? '切换中...' : '切换'}
+                  </button>
+                {/if}
+                <button class="btn-sm btn-upload"
+                        disabled={uploading === ver.version}
+                        on:click={() => upload(ver.version)}>
+                  {uploading === ver.version ? '上传中...' : '上传'}
+                </button>
+              </div>
             </div>
           {/each}
         </div>
@@ -127,7 +179,7 @@
       <div class="card animate-fade-in stagger-3">
         <div class="section-label-row">
           <span class="section-label">云端版本</span>
-          <span class="text-xs text-txt-muted">{binData.versions.length} 个版本</span>
+          <span class="text-xs text-txt-muted">{binData.versions.length} 个</span>
         </div>
         <div class="item-list">
           {#each binData.versions as ver}
@@ -135,11 +187,17 @@
               <div class="ver-dot" class:current={ver.isCurrent}></div>
               <div class="item-main">
                 <span class="item-name font-mono">{ver.version}</span>
-                <span class="item-detail">{formatSize(ver.size)} · {ver.uploadedBy} · {ver.uploadedAt}</span>
+                <span class="item-detail">{formatSize(ver.size)} · {ver.uploadedBy || '-'} · {ver.uploadedAt}</span>
               </div>
-              <span class="version-tag" class:latest={ver.isCurrent}>
-                {ver.isCurrent ? '当前' : '云端'}
-              </span>
+              <div class="item-actions">
+                {#if !ver.isCurrent}
+                  <button class="btn-sm"
+                          disabled={switching === ver.version + '-remote'}
+                          on:click={() => switchTo(ver.version, 'remote')}>
+                    {switching === ver.version + '-remote' ? '下载中...' : '切换'}
+                  </button>
+                {/if}
+              </div>
             </div>
           {/each}
         </div>
@@ -182,6 +240,19 @@
     border: 1px solid rgba(196,112,78,0.15);
   }
 
+  .msg-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px; border-radius: 6px;
+    background: rgba(107,144,128,0.08); border: 1px solid rgba(107,144,128,0.15);
+    font-size: 12px; color: rgb(var(--state-ok));
+  }
+  .error-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px; border-radius: 6px;
+    background: rgba(184,92,92,0.08); border: 1px solid rgba(184,92,92,0.15);
+    font-size: 12px; color: rgb(var(--state-err));
+  }
+
   .section-label-row {
     display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;
   }
@@ -203,6 +274,7 @@
   .item-main { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; }
   .item-name { font-size: 12px; color: rgb(var(--text-primary)); }
   .item-detail { font-size: 11px; color: rgb(var(--text-muted)); opacity: 0.7; }
+  .item-actions { display: flex; gap: 4px; flex-shrink: 0; }
   .version-tag {
     font-size: 10px; font-family: 'DM Mono', monospace;
     padding: 2px 7px; border-radius: 3px;
@@ -227,6 +299,30 @@
     background: rgb(var(--text-muted)); opacity: 0.3;
   }
   .ver-dot.current { background: rgb(var(--state-ok)); opacity: 1; }
+
+  .btn-sm {
+    font-size: 10px; font-weight: 500;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    color: rgb(var(--accent));
+    background: rgba(196,112,78,0.08);
+    border: 1px solid rgba(196,112,78,0.15);
+    padding: 3px 10px; border-radius: 4px; cursor: pointer;
+    transition: all 0.2s; white-space: nowrap;
+  }
+  .btn-sm:hover { background: rgba(196,112,78,0.15); }
+  .btn-sm:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-sm.btn-upload {
+    color: rgb(var(--text-secondary));
+    background: rgb(var(--surface-2));
+    border-color: rgb(var(--border));
+  }
+  .btn-sm.btn-upload:hover { color: rgb(var(--accent)); background: rgba(196,112,78,0.08); border-color: rgba(196,112,78,0.15); }
+
+  .link-btn {
+    font-size: 11px; color: rgb(var(--text-muted));
+    background: none; border: none; cursor: pointer; transition: color 0.2s;
+  }
+  .link-btn:hover { color: rgb(var(--accent)); }
 
   .empty-compact { text-align: center; padding: 14px 0; color: rgb(var(--text-muted)); font-size: 12px; opacity: 0.6; }
   .empty-icon { width: 48px; height: 48px; margin: 0 auto 12px; color: rgb(var(--text-muted)); opacity: 0.4; }

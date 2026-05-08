@@ -62,6 +62,10 @@ export function SetWebDAVPassword(arg1:string):Promise<void>;
 
 export function StartAsync(arg1:string,arg2:any):Promise<number>;
 
+export function SwitchBinaryVersion(arg1:string,arg2:string):Promise<void>;
+
 export function TestConnection():Promise<main.ConnectionTest>;
 
 export function TestWebDAVConnection(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function UploadBinaryVersion(arg1:string):Promise<void>;

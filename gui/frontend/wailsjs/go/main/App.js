@@ -122,10 +122,18 @@ export function StartAsync(arg1, arg2) {
   return window['go']['main']['App']['StartAsync'](arg1, arg2);
 }
 
+export function SwitchBinaryVersion(arg1, arg2) {
+  return window['go']['main']['App']['SwitchBinaryVersion'](arg1, arg2);
+}
+
 export function TestConnection() {
   return window['go']['main']['App']['TestConnection']();
 }
 
 export function TestWebDAVConnection(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['TestWebDAVConnection'](arg1, arg2, arg3, arg4);
+}
+
+export function UploadBinaryVersion(arg1) {
+  return window['go']['main']['App']['UploadBinaryVersion'](arg1);
 }

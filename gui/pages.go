@@ -580,3 +580,64 @@ func scanLocalVersions(dir string, currentVersion string) []BinaryVersionInfo {
 	}
 	return versions
 }
+
+// SwitchBinaryVersion 切换本地 Claude 版本
+// source: "local" 从本地版本目录切换, "remote" 从云端下载切换
+func (a *App) SwitchBinaryVersion(version string, source string) error {
+	binPath := binary.GetBinaryPath("claude")
+	verDir := config.VersionsDir()
+
+	// 备份当前版本到 versions 目录
+	currentVer := detectBinVersion(binPath)
+	if currentVer != "" {
+		os.MkdirAll(verDir, 0755)
+		backupPath := filepath.Join(verDir, currentVer)
+		if _, err := os.Stat(backupPath); os.IsNotExist(err) {
+			os.Rename(binPath, backupPath)
+		} else {
+			os.Remove(binPath)
+		}
+	}
+
+	if source == "local" {
+		// 从本地版本目录复制
+		srcPath := filepath.Join(verDir, version)
+		srcData, err := os.ReadFile(srcPath)
+		if err != nil {
+			return fmt.Errorf("读取本地版本 %s 失败: %w", version, err)
+		}
+		if err := os.WriteFile(binPath, srcData, 0755); err != nil {
+			return fmt.Errorf("写入失败: %w", err)
+		}
+	} else {
+		// 从云端下载
+		_, client, key, err := a.loadClients()
+		if err != nil {
+			return err
+		}
+		err = binary.Download(client, key, "claude", version, binPath, nil)
+		if err != nil {
+			return fmt.Errorf("下载版本 %s 失败: %w", version, err)
+		}
+	}
+
+	return nil
+}
+
+// UploadBinaryVersion 上传指定本地版本到云端
+func (a *App) UploadBinaryVersion(version string) error {
+	_, client, key, err := a.loadClients()
+	if err != nil {
+		return err
+	}
+
+	verDir := config.VersionsDir()
+	srcPath := filepath.Join(verDir, version)
+
+	data, err := os.ReadFile(srcPath)
+	if err != nil {
+		return fmt.Errorf("读取版本文件 %s 失败: %w", version, err)
+	}
+
+	return binary.Upload(client, key, "claude", data, version, nil)
+}
