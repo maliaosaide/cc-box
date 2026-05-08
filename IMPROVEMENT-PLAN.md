@@ -209,35 +209,54 @@ type UnifiedBinaryVersion struct {
 
 ---
 
-### 6. 跨设备加密密钥输入
+### 6. Settings 加密密码管理缺失
 
-**现象**：加入已有同步组时，需要输入密码来派生加密密钥。但 Onboarding 的"加入"流程（step 3）只要求输入密码，没有说明"密码必须与已有设备相同"。
+**现象**：加密密码只在 Onboarding 时输入一次，之后完全不可见、不可管理。Settings 加密页（`Settings.svelte:247-270`）只有一个开关和两个静态标签（AES-256-GCM / Argon2id），没有任何密码管理能力。
 
-**现状**：`InitJoinExisting` 接收密码，用 Argon2id 派生密钥。如果密码不对，解密远程数据时会失败。Onboarding 界面有提示文案（"密码将用于解密云端已有数据"），但缺乏明确的验证机制。
+**根因分析**：
+
+加密链路：`加密密码 + salt.bin(WebDAV) → Argon2id → 32字节密钥 → 本地文件`。密码不存储，只存派生后的密钥。加入已有设备时输入同一密码 + 下载同一 salt = 同一密钥。因此**不需要直接输入/导入密钥**，密码机制已完整覆盖跨设备场景。
+
+但日常使用中缺失：
+1. **无法修改加密密码** — CLI 有 `config rekey`（`config_cmd.go:85-218`：验证旧密码 → 新 salt → 轮换所有远程加密数据），GUI 没有
+2. **无法确认密钥状态** — 两台设备无法快速确认密钥是否一致。`crypto.KeyFingerprint()`（`keygen.go:54`）已实现但从未被调用
+3. **无法验证密钥有效性** — 不确定当前本地密钥能否解密远程数据
+4. **Onboarding "加入"已有验证**（`onboarding.go:168-171`：下载快照→解密→失败报错）— 已实现，但前端未展示验证过程
+5. **加密开关无实际作用** — toggle 切换 `cfg.Encryption.Enabled`，但 push/pull 不检查此字段，始终加密
 
 **方案**：
 
-1. **Onboarding 加强**：在 `InitJoinExisting` 中，先下载远程 HEAD 和第一个快照，尝试解密。解密失败则说明密码错误，提示用户重新输入
-2. **Settings 增加密钥验证**：加密设置页增加"验证密钥"按钮，尝试解密一个远程快照来验证当前密钥是否正确
-3. **导入密钥文件**：Settings 加密页增加"导入密钥"选项，允许从已有设备导出的密钥文件直接导入（绕过密码记忆）
+Settings 加密页重构为"密码与密钥管理"面板：
+
+1. **密钥指纹显示**：调用 `crypto.KeyFingerprint(key)`，显示当前密钥 SHA-256 前 8 位。两台设备指纹一致 = 密钥一致 = 可以互相解密
+2. **验证密钥按钮**：下载远程最新快照 → 尝试解密 → 成功/失败反馈。确认本地密钥与云端数据兼容
+3. **修改密码**：对齐 CLI `config rekey` 流程——输入旧密码验证 → 输入新密码 → 新 salt → 轮换所有远程加密数据（snapshots/objects/projects）→ 更新本地密钥
+4. **加密状态指示**：显示"加密已启用"/"未启用"（修复 toggle 无实际作用的问题，或移除 toggle）
+5. **Onboarding 优化**：已有验证逻辑，仅优化前端提示文案（"请输入第一台设备设置的加密密码"）
+
+**不需要做的**：
+- ~~导入/导出密钥文件~~ — 密码 + salt 机制已覆盖，不需要额外传输密钥文件
+- ~~直接输入加密密钥~~ — 用户不需要知道原始密钥，密码即可
 
 **改动范围**：
-- `gui/init.go`（或 `gui/onboarding.go`）：`InitJoinExisting` 增加密钥验证步骤
-- `gui/frontend/src/pages/Onboarding.svelte`：加入流程增加验证反馈
-- `gui/frontend/src/pages/Settings.svelte`：加密 tab 增加验证和导入按钮
-- `gui/pages.go`：新增 `VerifyEncryptionKey`、`ExportKey`、`ImportKey` 方法
+- `gui/pages.go`：新增 `GetEncryptionStatus`（返回指纹+启用状态）、`VerifyEncryptionKey`、`ChangeEncryptionPassword` 方法
+- `gui/frontend/src/pages/Settings.svelte`：加密 tab 重构为密码管理面板
+- `gui/frontend/src/pages/Onboarding.svelte`：加入流程优化提示文案
 
 **设计思路**：
 
-密码错误的场景必须尽早发现——不在加入时验证，就会在第一次 pull 时崩溃。加入流程中的验证步骤应该是阻塞式的：连接成功 → 输入密码 → **验证解密** → 完成。验证通过才允许进入主界面。
+密钥管理的核心是让用户确信"我的设备密钥是对的"。指纹显示是最轻量的验证手段——两台设备对比 8 个字符即可。修改密码是重度操作（需要轮换所有远程加密数据），应该有明确的确认步骤和进度反馈。
+
+加密 toggle（`Encryption.Enabled`）当前无实际作用，建议移除或让它真正生效（未启用时跳过加密直接上传明文）。倾向保留并实现——某些私有 WebDAV 场景不需要加密。
 
 **验证标准**：
-- 输入错误密码时，Onboarding 显示明确的错误提示
-- Settings 加密页可验证当前密钥是否与远程数据兼容
-- 密钥导出/导入流程可在两台设备间迁移
+- Settings 加密页显示当前密钥指纹
+- 两台设备指纹一致可确认密钥兼容
+- 验证密钥按钮可测试本地密钥能否解密远程数据
+- 可修改加密密码（旧密码验证 → 新密码 → 远程数据轮换 + 进度）
+- 修改密码后所有设备需重新输入新密码才能同步
 
 ---
-
 ## Sprint 3：体验打磨（P2 — 视觉与交互）
 
 ### 7. WebDAV 连接信息安全
