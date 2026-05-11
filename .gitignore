@@ -4,3 +4,12 @@ gui/frontend/dist/
 gui/frontend/node_modules/
 gui/frontend/.svelte-kit/
 gui/build/bin/
+
+# 敏感文件
+*.key
+*.pem
+key.bin
+salt.bin
+config.toml
+config.yaml
+.cc-box/
