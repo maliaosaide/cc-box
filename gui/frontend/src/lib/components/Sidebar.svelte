@@ -2,6 +2,7 @@
   import { createEventDispatcher } from 'svelte'
 
   export let currentPage = 'dashboard'
+  export let syncState = 'idle'
   const dispatch = createEventDispatcher()
 
   const navItems = [
@@ -63,9 +64,14 @@
   </div>
 
   <!-- Sync status -->
-  <div class="sidebar-status">
-    <div class="status-dot"></div>
-    <span class="status-text">已同步</span>
+  <div class="sidebar-status" class:syncing={syncState === 'syncing'} class:warn={syncState === 'conflict'} class:err={syncState === 'error'}>
+    <div class="status-dot" class:syncing={syncState === 'syncing'} class:warn={syncState === 'conflict'} class:err={syncState === 'error'}></div>
+    <span class="status-text">
+      {#if syncState === 'syncing'}同步中...
+      {:else if syncState === 'conflict'}存在冲突
+      {:else if syncState === 'error'}连接异常
+      {:else}已同步{/if}
+    </span>
     <span class="status-time">刚刚</span>
   </div>
 </nav>
@@ -166,6 +172,13 @@
     border-radius: 50%;
     background: rgb(var(--state-ok));
   }
+  .status-dot.syncing { background: rgb(var(--state-sync)); }
+  .status-dot.warn { background: rgb(var(--state-warn)); }
+  .status-dot.err { background: rgb(var(--state-err)); }
+
+  .sidebar-status.syncing .status-text { color: rgb(var(--state-sync)); }
+  .sidebar-status.warn .status-text { color: rgb(var(--state-warn)); }
+  .sidebar-status.err .status-text { color: rgb(var(--state-err)); }
 
   .status-text {
     font-size: 11px;

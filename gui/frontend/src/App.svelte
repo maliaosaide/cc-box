@@ -2,7 +2,6 @@
   import { onMount } from 'svelte'
   import { IsInitialized, GetAppInfo } from '../wailsjs/go/main/App.js'
   import Sidebar from './lib/components/Sidebar.svelte'
-  import StatusBar from './lib/components/StatusBar.svelte'
   import Onboarding from './pages/Onboarding.svelte'
   import Dashboard from './pages/Dashboard.svelte'
   import Files from './pages/Files.svelte'
@@ -44,7 +43,7 @@
 {:else}
   <div class="h-full flex flex-col">
     <div class="flex-1 flex overflow-hidden">
-      <Sidebar bind:currentPage={currentPage} on:navigate={() => {}} />
+      <Sidebar bind:currentPage={currentPage} {syncState} on:navigate={() => {}} />
       <main class="main-content">
         <div class="page-panel" class:active={currentPage === 'dashboard'}>
           <Dashboard bind:syncState on:navigate={navigate} />
@@ -66,7 +65,6 @@
         </div>
       </main>
     </div>
-    <StatusBar {syncState} />
   </div>
 {/if}
 
