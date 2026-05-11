@@ -64,6 +64,28 @@
     }
     return false
   }
+
+  function aggregateStatus(n) {
+    let hasConflict = false, hasModified = false, hasAdded = false, hasDeleted = false, hasSynced = false
+    function walk(node) {
+      if (!node.children) return
+      for (const c of node.children) {
+        if (c.isDir) { walk(c); continue }
+        switch (c.status) {
+          case 'conflict': hasConflict = true; break
+          case 'modified': hasModified = true; break
+          case 'added': hasAdded = true; break
+          case 'deleted': hasDeleted = true; break
+          default: hasSynced = true
+        }
+      }
+    }
+    walk(n)
+    if (hasConflict) return 'conflict'
+    if (hasModified || hasAdded) return 'modified'
+    if (hasDeleted) return 'deleted'
+    return 'synced'
+  }
 </script>
 
 {#if node.isDir}
@@ -71,6 +93,7 @@
     <span class="dir-arrow" class:open={isExpanded}>▶</span>
     <span class="dir-icon">📁</span>
     <span class="tree-name">{node.name}</span>
+    <span class="status-badge {statusClass(aggregateStatus(node))}">{statusIcon(aggregateStatus(node))}</span>
   </div>
   {#if isExpanded && filteredChildren.length > 0}
     <div class="tree-children">
