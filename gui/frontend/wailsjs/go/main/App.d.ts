@@ -32,6 +32,8 @@ export function GetConflictDetail(arg1:string):Promise<main.ConflictDetail>;
 
 export function GetDashboard():Promise<main.DashboardData>;
 
+export function GetLocalSnapshotList(arg1:number):Promise<Array<main.SnapshotEntry>>;
+
 export function GetFileContent(arg1:string):Promise<main.FileDetail>;
 
 export function GetFileDiff(arg1:string):Promise<main.DiffResult>;
@@ -73,6 +75,8 @@ export function SetWebDAVPassword(arg1:string):Promise<void>;
 export function StartAsync(arg1:string,arg2:any):Promise<number>;
 
 export function SwitchBinaryVersion(arg1:string,arg2:string):Promise<void>;
+
+export function RevertToSnapshot(arg1:string):Promise<void>;
 
 export function TestConnection():Promise<main.ConnectionTest>;
 

@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte'
-  import { GetSnapshotList, GetSnapshotDetail, RevertToSnapshot } from '../../wailsjs/go/main/App.js'
+  import { EventsOn } from '../../wailsjs/runtime/runtime.js'
+  import { GetLocalSnapshotList, GetSnapshotList, GetSnapshotDetail, RevertToSnapshot } from '../../wailsjs/go/main/App.js'
 
   export let syncState = 'idle'
 
@@ -18,13 +19,16 @@
 
   onMount(async () => {
     await refresh()
+    EventsOn('op:complete', () => refresh())
   })
 
   async function refresh() {
     loading = true; error = ''
     try {
-      snapshots = await GetSnapshotList(loadCount) || []
-      // 提取设备列表
+      snapshots = await GetLocalSnapshotList(loadCount) || []
+      if (!snapshots.length) {
+        snapshots = await GetSnapshotList(loadCount) || []
+      }
       const devSet = new Set()
       snapshots.forEach(s => { if (s.device) devSet.add(s.device) })
       devices = [...devSet]

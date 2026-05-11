@@ -62,6 +62,10 @@ export function GetDashboard() {
   return window['go']['main']['App']['GetDashboard']();
 }
 
+export function GetLocalSnapshotList(arg1) {
+  return window['go']['main']['App']['GetLocalSnapshotList'](arg1);
+}
+
 export function GetFileContent(arg1) {
   return window['go']['main']['App']['GetFileContent'](arg1);
 }
@@ -144,6 +148,10 @@ export function StartAsync(arg1, arg2) {
 
 export function SwitchBinaryVersion(arg1, arg2) {
   return window['go']['main']['App']['SwitchBinaryVersion'](arg1, arg2);
+}
+
+export function RevertToSnapshot(arg1) {
+  return window['go']['main']['App']['RevertToSnapshot'](arg1);
 }
 
 export function TestConnection() {

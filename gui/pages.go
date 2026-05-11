@@ -48,8 +48,28 @@ type FileEntry struct {
 	Modified string `json:"modified"`
 }
 
+// GetLocalSnapshotList 返回本地快照历史列表
+func (a *App) GetLocalSnapshotList(limit int) ([]SnapshotEntry, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+
+	headID, err := readLocalHeadID()
+	if err != nil || headID == "" {
+		return nil, nil
+	}
+
+	return a.buildSnapshotEntries(headID, limit, func(id string) (*snapshot.Snapshot, error) {
+		return a.loadLocalSnapByID(id)
+	})
+}
+
 // GetSnapshotList 返回快照历史列表
 func (a *App) GetSnapshotList(limit int) ([]SnapshotEntry, error) {
+	if entries, err := a.GetLocalSnapshotList(limit); err == nil && len(entries) > 0 {
+		return entries, nil
+	}
+
 	_, client, key, err := a.loadClients()
 	if err != nil {
 		return nil, err
@@ -64,14 +84,71 @@ func (a *App) GetSnapshotList(limit int) ([]SnapshotEntry, error) {
 		return nil, nil
 	}
 
-	if limit <= 0 {
-		limit = 20
+	return a.buildSnapshotEntries(currentID, limit, func(id string) (*snapshot.Snapshot, error) {
+		return a.loadSnapByID(client, key, id)
+	})
+}
+
+// GetSnapshotDetail 返回快照详情
+func (a *App) GetSnapshotDetail(id string) (*SnapshotDetail, error) {
+	_, client, key, err := a.loadClients()
+	if err != nil {
+		return nil, err
 	}
 
+	snap, err := a.loadLocalSnapByID(id)
+	if err != nil {
+		snap, err = a.loadSnapByID(client, key, id)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	files := make(map[string]FileEntry)
+	for path, entry := range snap.Files {
+		files[path] = FileEntry{
+			Hash:     entry.Hash[:16],
+			Size:     entry.Size,
+			Modified: entry.Modified.Local().Format("2006-01-02 15:04"),
+		}
+	}
+
+	return &SnapshotDetail{
+		ID:        snap.ID,
+		Timestamp: snap.Timestamp.Local().Format("2006-01-02 15:04:05"),
+		Device:    snap.Device,
+		Message:   snap.Message,
+		Parent:    snap.Parent,
+		Files:     files,
+		Binary:    snap.Binary,
+	}, nil
+}
+
+// loadLocalSnapByID 按 ID 加载本地缓存快照
+func (a *App) loadLocalSnapByID(id string) (*snapshot.Snapshot, error) {
+	snapDir := config.CCBoxDir() + "/snapshots/"
+	data, err := os.ReadFile(snapDir + id + ".json")
+	if err != nil {
+		return nil, err
+	}
+	return snapshot.Deserialize(data)
+}
+
+// readLocalHeadID 读取本地 HEAD 指向的快照 ID
+func readLocalHeadID() (string, error) {
+	data, err := os.ReadFile(config.CCBoxDir() + "/HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+// buildSnapshotEntries 沿快照链构建列表
+func (a *App) buildSnapshotEntries(headID string, limit int, loader func(id string) (*snapshot.Snapshot, error)) ([]SnapshotEntry, error) {
 	var entries []SnapshotEntry
-	snapID := currentID
+	snapID := headID
 	for i := 0; i < limit && snapID != ""; i++ {
-		snap, err := a.loadSnapByID(client, key, snapID)
+		snap, err := loader(snapID)
 		if err != nil {
 			break
 		}
@@ -96,45 +173,10 @@ func (a *App) GetSnapshotList(limit int) ([]SnapshotEntry, error) {
 	return entries, nil
 }
 
-// GetSnapshotDetail 返回快照详情
-func (a *App) GetSnapshotDetail(id string) (*SnapshotDetail, error) {
-	_, client, key, err := a.loadClients()
-	if err != nil {
-		return nil, err
-	}
-
-	snap, err := a.loadSnapByID(client, key, id)
-	if err != nil {
-		return nil, err
-	}
-
-	files := make(map[string]FileEntry)
-	for path, entry := range snap.Files {
-		files[path] = FileEntry{
-			Hash:     entry.Hash[:16],
-			Size:     entry.Size,
-			Modified: entry.Modified.Local().Format("2006-01-02 15:04"),
-		}
-	}
-
-	return &SnapshotDetail{
-		ID:        snap.ID,
-		Timestamp: snap.Timestamp.Local().Format("2006-01-02 15:04:05"),
-		Device:    snap.Device,
-		Message:   snap.Message,
-		Parent:    snap.Parent,
-		Files:     files,
-		Binary:    snap.Binary,
-	}, nil
-}
-
 // loadSnapByID 按ID加载快照
 func (a *App) loadSnapByID(client *webdav.Client, key []byte, id string) (*snapshot.Snapshot, error) {
-	// 先本地缓存
-	snapDir := config.CCBoxDir() + "/snapshots/"
-	data, err := os.ReadFile(snapDir + id + ".json")
-	if err == nil {
-		return snapshot.Deserialize(data)
+	if snap, err := a.loadLocalSnapByID(id); err == nil {
+		return snap, nil
 	}
 	// 从远程下载
 	snapPath := "snapshots/" + id + ".json.enc"
@@ -152,7 +194,7 @@ func (a *App) loadSnapByID(client *webdav.Client, key []byte, id string) (*snaps
 	}
 	// 缓存到本地
 	snapData, _ := snap.Serialize()
-	os.WriteFile(snapDir+id+".json", snapData, 0600)
+	os.WriteFile(config.CCBoxDir()+"/snapshots/"+id+".json", snapData, 0600)
 	return snap, nil
 }
 
