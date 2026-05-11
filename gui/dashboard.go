@@ -66,6 +66,7 @@ type BinaryInfo struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
 	Latest  bool   `json:"latest"`
+	Installed bool `json:"installed"`
 }
 
 // GetDashboard 返回概览页数据
@@ -99,12 +100,7 @@ func (a *App) GetDashboard() (*DashboardData, error) {
 		IsCurrent:  true,
 	})
 
-	// 检测 claude 二进制版本
-	binPath := binary.GetBinaryPath("claude")
-	data, _ = fillBinaryVersion(data, binPath)
-	data.Binaries = []BinaryInfo{
-		{Name: "uv", Version: "-", Latest: true},
-	}
+	data.Binaries = collectInstalledBinaries()
 
 	// 尝试加载真实数据
 	client, key, err := a.loadClientKey(cfg)
@@ -169,7 +165,6 @@ func (a *App) fillDashboardFromSnapshots(data *DashboardData, cfg *config.Config
 			if err == nil {
 				currentSnap := snapshot.CreateSnapshot("", cfg.Device.ID, "", scanResult.Files)
 				changes := localSnap.Diff(currentSnap)
-				changeTime := localSnap.Timestamp.Local().Format("15:04")
 				for i, c := range changes {
 					if i >= 5 {
 						break
@@ -184,12 +179,14 @@ func (a *App) fillDashboardFromSnapshots(data *DashboardData, cfg *config.Config
 					data.RecentChanges = append(data.RecentChanges, ChangeInfo{
 						Status: status,
 						Path:   c.Path,
-						Time:   changeTime,
+						Time:   localSnap.Timestamp.Local().Format("15:04"),
 					})
 				}
 			}
 		}
 	}
+
+	data.Binaries = collectInstalledBinaries()
 
 	// 冲突
 // 从远程加载设备列表
@@ -463,6 +460,24 @@ func fillBinaryVersion(d *DashboardData, binPath string) (*DashboardData, error)
 		d.ClaudeVersion = ver
 	}
 	return d, nil
+}
+
+func collectInstalledBinaries() []BinaryInfo {
+	tools := []string{"claude", "codex", "gemini"}
+	versions := make([]BinaryInfo, 0, len(tools))
+	for _, name := range tools {
+		binPath := binary.GetBinaryPath(name)
+		if _, err := os.Stat(binPath); err != nil {
+			continue
+		}
+		versions = append(versions, BinaryInfo{
+			Name:      name,
+			Version:   detectBinVersion(binPath),
+			Latest:    true,
+			Installed: true,
+		})
+	}
+	return versions
 }
 
 func detectBinVersion(binPath string) string {

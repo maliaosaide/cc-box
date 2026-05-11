@@ -183,7 +183,7 @@ func TestComputeFileStatus(t *testing.T) {
 	}
 
 	t.Run("no snapshots", func(t *testing.T) {
-		got := computeFileStatus("settings.json", currentFiles, nil, nil)
+		got := computeFileStatus("settings.json", currentFiles, nil, nil, "")
 		if got != "added" {
 			t.Errorf("expected added, got %s", got)
 		}
@@ -195,7 +195,7 @@ func TestComputeFileStatus(t *testing.T) {
 				"settings.json": {Hash: "hash1", Size: 100},
 			},
 		}
-		got := computeFileStatus("settings.json", currentFiles, localSnap, nil)
+		got := computeFileStatus("settings.json", currentFiles, localSnap, nil, "")
 		if got != "synced" {
 			t.Errorf("expected synced, got %s", got)
 		}
@@ -207,7 +207,7 @@ func TestComputeFileStatus(t *testing.T) {
 				"settings.json": {Hash: "old-hash", Size: 100},
 			},
 		}
-		got := computeFileStatus("settings.json", currentFiles, localSnap, nil)
+		got := computeFileStatus("settings.json", currentFiles, localSnap, nil, "")
 		if got != "modified" {
 			t.Errorf("expected modified, got %s", got)
 		}
@@ -219,7 +219,7 @@ func TestComputeFileStatus(t *testing.T) {
 				"settings.json": {Hash: "hash1", Size: 100},
 			},
 		}
-		got := computeFileStatus("new-file.md", currentFiles, localSnap, nil)
+		got := computeFileStatus("new-file.md", currentFiles, localSnap, nil, "")
 		if got != "added" {
 			t.Errorf("expected added, got %s", got)
 		}
