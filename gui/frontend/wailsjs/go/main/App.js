@@ -26,6 +26,10 @@ export function DeleteLocalVersion(arg1) {
   return window['go']['main']['App']['DeleteLocalVersion'](arg1);
 }
 
+export function DeleteCloudBinaryVersion(arg1) {
+  return window['go']['main']['App']['DeleteCloudBinaryVersion'](arg1);
+}
+
 export function DeleteOrphan(arg1) {
   return window['go']['main']['App']['DeleteOrphan'](arg1);
 }

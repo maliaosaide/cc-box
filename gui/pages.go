@@ -567,6 +567,7 @@ type BinaryVersionInfo struct {
 // BinaryPageData 二进制页面数据
 type BinaryPageData struct {
 	CurrentVersion string              `json:"currentVersion"`
+	AllVersions    []BinaryVersionInfo `json:"allVersions"`
 	Versions       []BinaryVersionInfo `json:"versions"`
 	LocalVersions  []BinaryVersionInfo `json:"localVersions"`
 	Platform       string              `json:"platform"`
@@ -630,6 +631,9 @@ func (a *App) GetBinaryPage() (*BinaryPageData, error) {
 		})
 	}
 
+	// 合并本地+云端为统一列表
+	data.AllVersions = mergeBinaryVersions(data.LocalVersions, data.Versions, data.CurrentVersion)
+
 	return data, nil
 }
 
@@ -664,6 +668,35 @@ func scanLocalVersions(dir string, currentVersion string) []BinaryVersionInfo {
 		})
 	}
 	return versions
+}
+
+// mergeBinaryVersions 按版本号合并本地和云端列表
+func mergeBinaryVersions(local, remote []BinaryVersionInfo, currentVer string) []BinaryVersionInfo {
+	merged := make(map[string]*BinaryVersionInfo)
+	for _, v := range local {
+		cp := v
+		merged[cp.Version] = &cp
+	}
+	for _, v := range remote {
+		if existing, ok := merged[v.Version]; ok {
+			existing.IsRemote = true
+			existing.UploadedBy = v.UploadedBy
+			existing.UploadedAt = v.UploadedAt
+			existing.Refs = v.Refs
+			if existing.Size == 0 {
+				existing.Size = v.Size
+			}
+		} else {
+			cp := v
+			merged[cp.Version] = &cp
+		}
+	}
+	result := make([]BinaryVersionInfo, 0, len(merged))
+	for _, v := range merged {
+		v.IsCurrent = (v.Version == currentVer)
+		result = append(result, *v)
+	}
+	return result
 }
 
 // SwitchBinaryVersion 切换本地 Claude 版本
@@ -789,6 +822,15 @@ func (a *App) GetBinaryStorage() (*BinaryStorageInfo, error) {
 func (a *App) DeleteLocalVersion(version string) error {
 	verDir := config.VersionsDir()
 	return os.Remove(filepath.Join(verDir, version))
+}
+
+// DeleteCloudBinaryVersion 删除云端二进制版本
+func (a *App) DeleteCloudBinaryVersion(version string) error {
+	_, client, key, err := a.loadClients()
+	if err != nil {
+		return err
+	}
+	return binary.DeleteRemoteVersion(client, key, "claude", version, config.Platform())
 }
 
 // RevertToSnapshot 回滚到指定快照版本

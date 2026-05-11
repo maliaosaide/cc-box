@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { EventsOn } from '../../wailsjs/runtime/runtime.js'
-  import { GetBinaryPage, SwitchBinaryVersion, UploadBinaryVersion, GetBinaryStorage, DeleteLocalVersion } from '../../wailsjs/go/main/App.js'
+  import { GetBinaryPage, SwitchBinaryVersion, UploadBinaryVersion, GetBinaryStorage, DeleteLocalVersion, DeleteCloudBinaryVersion } from '../../wailsjs/go/main/App.js'
 
   export let syncState = 'idle'
   let activeTab = 'claude'
@@ -84,6 +84,17 @@
     try {
       await DeleteLocalVersion(version)
       msg = `已删除本地版本 ${version}`
+      await loadBinary()
+    } catch (e) {
+      error = e.message || String(e)
+    }
+  }
+
+  async function deleteCloud(version) {
+    msg = ''; error = ''
+    try {
+      await DeleteCloudBinaryVersion(version)
+      msg = `已删除云端版本 ${version}`
       await loadBinary()
     } catch (e) {
       error = e.message || String(e)
@@ -188,7 +199,78 @@
       </div>
     {/if}
 
-    {#if binData.localVersions && binData.localVersions.length > 0}
+    {#if binData.allVersions && binData.allVersions.length > 0}
+      <div class="card animate-fade-in stagger-2">
+        <div class="section-label-row">
+          <span class="section-label">所有版本</span>
+          <span class="text-xs text-txt-muted">{binData.allVersions.length} 个</span>
+        </div>
+        <div class="item-list">
+          {#each binData.allVersions as ver}
+            <div class="item-row">
+              <div class="ver-dot" class:current={ver.isCurrent}></div>
+              <div class="item-main">
+                <span class="item-name font-mono">{ver.version}</span>
+                <span class="item-detail">
+                  {formatSize(ver.size)}
+                  {#if ver.uploadedBy || ver.uploadedAt} · {ver.uploadedBy || '-'} · {ver.uploadedAt}{/if}
+                </span>
+              </div>
+              <div class="item-tags">
+                {#if ver.isLocal}<span class="loc-tag">本地</span>{/if}
+                {#if ver.isRemote}<span class="cloud-tag">云端</span>{/if}
+              </div>
+              <div class="item-actions">
+                {#if !ver.isCurrent}
+                  {#if ver.isLocal}
+                    <button class="btn-sm"
+                            disabled={switching === ver.version + '-local'}
+                            on:click={() => switchTo(ver.version, 'local')}>
+                      {switching === ver.version + '-local' ? '切换中...' : '切换'}
+                    </button>
+                  {/if}
+                  {#if ver.isRemote && !ver.isLocal}
+                    <button class="btn-sm"
+                            disabled={switching === ver.version + '-remote'}
+                            on:click={() => switchTo(ver.version, 'remote')}>
+                      {switching === ver.version + '-remote' ? '下载中...' : '下载切换'}
+                    </button>
+                  {/if}
+                {/if}
+                {#if ver.isLocal && !ver.isRemote}
+                  <button class="btn-sm btn-upload"
+                          disabled={!!uploadProgress}
+                          on:click={() => upload(ver.version)}>
+                    {uploadProgress && uploading === ver.version ? '上传中...' : '上传'}
+                  </button>
+                {:else if ver.isLocal && ver.isRemote}
+                  <button class="btn-sm btn-upload" disabled>
+                    已上传
+                  </button>
+                {/if}
+                {#if !ver.isCurrent}
+                  {#if ver.isLocal}
+                    <button class="btn-del-sm" on:click|stopPropagation={() => deleteVersion(ver.version)} title="删除本地">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="12" height="12">
+                        <path d="M18 6L6 18M6 6l12 12"/>
+                      </svg>
+                    </button>
+                  {/if}
+                  {#if ver.isRemote}
+                    <button class="btn-del-sm" on:click|stopPropagation={() => deleteCloud(ver.version)} title="删除云端">
+                      <svg viewBox="0 0 20 20" fill="currentColor" width="12" height="12">
+                        <path d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z"/>
+                      </svg>
+                    </button>
+                  {/if}
+                {/if}
+              </div>
+            </div>
+          {/each}
+        </div>
+      </div>
+    {:else if binData.localVersions && binData.localVersions.length > 0}
+      <!-- fallback: allVersions 为空但 localVersions 有数据 -->
       <div class="card animate-fade-in stagger-2">
         <div class="section-label-row">
           <span class="section-label">本地版本</span>
@@ -213,44 +295,8 @@
                 <button class="btn-sm btn-upload"
                         disabled={!!uploadProgress}
                         on:click={() => upload(ver.version)}>
-                  {uploadProgress && uploading === ver.version ? '上传中...' : '上传'}
+                  上传
                 </button>
-                {#if !ver.isCurrent}
-                  <button class="btn-del-sm" on:click|stopPropagation={() => deleteVersion(ver.version)}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="12" height="12">
-                      <path d="M18 6L6 18M6 6l12 12"/>
-                    </svg>
-                  </button>
-                {/if}
-              </div>
-            </div>
-          {/each}
-        </div>
-      </div>
-    {/if}
-
-    {#if binData.versions && binData.versions.length > 0}
-      <div class="card animate-fade-in stagger-3">
-        <div class="section-label-row">
-          <span class="section-label">云端版本</span>
-          <span class="text-xs text-txt-muted">{binData.versions.length} 个</span>
-        </div>
-        <div class="item-list">
-          {#each binData.versions as ver}
-            <div class="item-row">
-              <div class="ver-dot" class:current={ver.isCurrent}></div>
-              <div class="item-main">
-                <span class="item-name font-mono">{ver.version}</span>
-                <span class="item-detail">{formatSize(ver.size)} · {ver.uploadedBy || '-'} · {ver.uploadedAt}</span>
-              </div>
-              <div class="item-actions">
-                {#if !ver.isCurrent}
-                  <button class="btn-sm"
-                          disabled={switching === ver.version + '-remote'}
-                          on:click={() => switchTo(ver.version, 'remote')}>
-                    {switching === ver.version + '-remote' ? '下载中...' : '切换'}
-                  </button>
-                {/if}
               </div>
             </div>
           {/each}
@@ -258,7 +304,7 @@
       </div>
     {:else}
       <div class="card animate-fade-in stagger-2">
-        <div class="empty-compact">暂无云端版本记录</div>
+        <div class="empty-compact">暂无版本记录</div>
       </div>
     {/if}
   {/if}
@@ -347,6 +393,17 @@
   .item-name { font-size: 12px; color: rgb(var(--text-primary)); }
   .item-detail { font-size: 11px; color: rgb(var(--text-muted)); opacity: 0.7; }
   .item-actions { display: flex; gap: 4px; flex-shrink: 0; }
+  .item-tags { display: flex; gap: 3px; flex-shrink: 0; }
+  .loc-tag, .cloud-tag {
+    font-size: 9px; padding: 1px 5px; border-radius: 3px;
+    font-family: 'DM Mono', monospace;
+  }
+  .loc-tag {
+    background: rgb(var(--surface-2)); color: rgb(var(--text-secondary));
+  }
+  .cloud-tag {
+    background: rgba(196,112,78,0.08); color: rgb(var(--accent));
+  }
   .version-tag {
     font-size: 10px; font-family: 'DM Mono', monospace;
     padding: 2px 7px; border-radius: 3px;

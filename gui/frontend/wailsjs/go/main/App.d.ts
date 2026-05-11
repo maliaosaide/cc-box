@@ -14,6 +14,8 @@ export function CancelOperation(arg1:number):Promise<void>;
 
 export function DeleteLocalVersion(arg1:string):Promise<void>;
 
+export function DeleteCloudBinaryVersion(arg1:string):Promise<void>;
+
 export function DeleteOrphan(arg1:string):Promise<void>;
 
 export function DetectExistingSetup(arg1:string,arg2:string,arg3:string,arg4:string):Promise<boolean>;
