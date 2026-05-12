@@ -889,6 +889,16 @@ func (a *App) RevertToSnapshot(snapID string) error {
 		}
 	}
 
+	// 恢复二进制文件
+	if snap.Binary != nil {
+		platform := config.Platform()
+		if tools, ok := snap.Binary[platform]; ok {
+			if ver, ok := tools["claude"]; ok && ver != "" {
+				a.revertBinary("claude", ver, client, key)
+			}
+		}
+	}
+
 	// 创建恢复快照
 	newSnap := snapshot.CreateSnapshot(snap.ID, cfg.Device.ID, "revert to "+snapID[:12], snap.Files)
 	snapData, _ := newSnap.Serialize()
@@ -901,4 +911,24 @@ func (a *App) RevertToSnapshot(snapID string) error {
 	os.WriteFile(config.CCBoxDir()+"/snapshots/"+newSnap.ID+".json", snapData, 0600)
 
 	return nil
+}
+
+// revertBinary 恢复二进制到指定版本（best-effort）
+func (a *App) revertBinary(name, targetVer string, client *webdav.Client, key []byte) {
+	binPath := binary.GetBinaryPath(name)
+	currentVer := detectBinVersion(binPath)
+	if currentVer == targetVer {
+		return
+	}
+
+	// 先尝试本地版本目录
+	verDir := config.VersionsDir()
+	localPath := filepath.Join(verDir, targetVer)
+	if data, err := os.ReadFile(localPath); err == nil {
+		os.WriteFile(binPath, data, 0755)
+		return
+	}
+
+	// 再尝试从云端下载
+	_ = binary.Download(client, key, name, targetVer, binPath, nil)
 }
