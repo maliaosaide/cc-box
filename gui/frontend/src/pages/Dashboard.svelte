@@ -113,16 +113,6 @@
         <button class="link-btn" on:click={() => navigateTo('binaries')}>管理二进制</button>
       </div>
       <div class="item-list">
-        <div class="item-row">
-          <div class="item-badge accent">C</div>
-          <div class="item-main">
-            <span class="item-name">claude</span>
-            <span class="item-detail font-mono">{data.claudeVersion || '未安装'}</span>
-          </div>
-          <span class="version-tag" class:latest={data.claudeLatest}>
-            {data.claudeLatest ? '最新' : '可更新'}
-          </span>
-        </div>
         {#if hasBinaries}
           {#each data.binaries as bin}
             <div class="item-row">
@@ -132,10 +122,21 @@
                 <span class="item-detail font-mono">{bin.version || '未安装'}</span>
               </div>
               <span class="version-tag" class:latest={bin.latest}>
-                {bin.latest ? '最新' : '可更新'}
+                {bin.installed ? (bin.latest ? '最新' : '可更新') : '未安装'}
               </span>
             </div>
           {/each}
+        {:else}
+          <div class="item-row">
+            <div class="item-badge accent">C</div>
+            <div class="item-main">
+              <span class="item-name">claude</span>
+              <span class="item-detail font-mono">{data.claudeVersion || '未安装'}</span>
+            </div>
+            <span class="version-tag" class:latest={data.claudeLatest}>
+              {data.claudeLatest ? '最新' : '可更新'}
+            </span>
+          </div>
         {/if}
       </div>
     </div>
