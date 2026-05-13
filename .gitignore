@@ -12,4 +12,5 @@ key.bin
 salt.bin
 config.toml
 config.yaml
+secrets.json
 .cc-box/

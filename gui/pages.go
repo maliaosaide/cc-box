@@ -33,12 +33,12 @@ type SnapshotEntry struct {
 
 // SnapshotDetail 快照详情
 type SnapshotDetail struct {
-	ID        string                 `json:"id"`
-	Timestamp string                 `json:"timestamp"`
-	Device    string                 `json:"device"`
-	Message   string                 `json:"message"`
-	Parent    string                 `json:"parent"`
-	Files     map[string]FileEntry   `json:"files"`
+	ID        string                       `json:"id"`
+	Timestamp string                       `json:"timestamp"`
+	Device    string                       `json:"device"`
+	Message   string                       `json:"message"`
+	Parent    string                       `json:"parent"`
+	Files     map[string]FileEntry         `json:"files"`
 	Binary    map[string]map[string]string `json:"binary"`
 }
 
@@ -184,7 +184,7 @@ func (a *App) loadSnapByID(client *webdav.Client, key []byte, id string) (*snaps
 	if err != nil {
 		return nil, err
 	}
-	decrypted, err := crypto.Decrypt(encrypted, key)
+	decrypted, err := decryptRemoteData(encrypted, key)
 	if err != nil {
 		return nil, err
 	}
@@ -196,6 +196,28 @@ func (a *App) loadSnapByID(client *webdav.Client, key []byte, id string) (*snaps
 	snapData, _ := snap.Serialize()
 	os.WriteFile(config.CCBoxDir()+"/snapshots/"+id+".json", snapData, 0600)
 	return snap, nil
+}
+
+func remoteEncryptionEnabled() bool {
+	cfg, err := config.Load()
+	if err != nil {
+		return true
+	}
+	return cfg.Encryption.Enabled
+}
+
+func encryptRemoteData(data, key []byte) ([]byte, error) {
+	if !remoteEncryptionEnabled() {
+		return data, nil
+	}
+	return crypto.Encrypt(data, key)
+}
+
+func decryptRemoteData(data, key []byte) ([]byte, error) {
+	if !remoteEncryptionEnabled() {
+		return data, nil
+	}
+	return crypto.Decrypt(data, key)
 }
 
 // GetConfig 返回当前完整配置
@@ -238,10 +260,10 @@ func (a *App) GetConfig() (*ConfigView, error) {
 			AutoUpload:       cfg.Binary.AutoUpload,
 		},
 		Sync: SyncView{
-			SnapshotLimit:     cfg.Sync.SnapshotLimit,
-			ConflictStrategy:  cfg.Sync.ConflictStrategy,
-			MergeRetryMax:     cfg.Sync.MergeRetryMax,
-			AutoSyncInterval:  cfg.Sync.AutoSyncInterval,
+			SnapshotLimit:    cfg.Sync.SnapshotLimit,
+			ConflictStrategy: cfg.Sync.ConflictStrategy,
+			MergeRetryMax:    cfg.Sync.MergeRetryMax,
+			AutoSyncInterval: cfg.Sync.AutoSyncInterval,
 		},
 		Exclude:        cfg.Exclude.Patterns,
 		ClaudeDir:      config.ClaudeDir(),
@@ -477,6 +499,7 @@ func (a *App) DeleteOrphan(remote string) error {
 	idx.Orphans = filtered
 	return project.SaveOrphanIndex(idx)
 }
+
 type ProjectListResult struct {
 	Projects []ProjectInfo `json:"projects"`
 	Orphans  []OrphanInfo  `json:"orphans"`
@@ -523,16 +546,16 @@ type BinaryView struct {
 }
 
 type SyncView struct {
-	SnapshotLimit     int    `json:"snapshotLimit"`
-	ConflictStrategy  string `json:"conflictStrategy"`
-	MergeRetryMax     int    `json:"mergeRetryMax"`
-	AutoSyncInterval  string `json:"autoSyncInterval"`
+	SnapshotLimit    int    `json:"snapshotLimit"`
+	ConflictStrategy string `json:"conflictStrategy"`
+	MergeRetryMax    int    `json:"mergeRetryMax"`
+	AutoSyncInterval string `json:"autoSyncInterval"`
 }
 
 type ConnectionTest struct {
-	Success  bool   `json:"success"`
-	Error    string `json:"error,omitempty"`
-	Latency  int64  `json:"latency"`
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+	Latency int64  `json:"latency"`
 }
 
 type ProjectInfo struct {
@@ -773,6 +796,30 @@ func (a *App) UploadBinaryVersion(version string) int64 {
 	})
 }
 
+// UploadCurrentBinary 上传当前正在使用的 Claude 二进制到云端
+func (a *App) UploadCurrentBinary() int64 {
+	return a.StartAsync("binary-upload", func(ctx context.Context, opID int64) error {
+		_, client, key, err := a.loadClients()
+		if err != nil {
+			return err
+		}
+
+		binPath := binary.GetBinaryPath("claude")
+		data, err := os.ReadFile(binPath)
+		if err != nil {
+			return fmt.Errorf("读取当前二进制失败: %w", err)
+		}
+
+		version := detectBinVersion(binPath)
+		if version == "" {
+			return fmt.Errorf("无法识别当前 Claude 版本")
+		}
+
+		a.emitProgress(opID, "binary-upload", 0, int64(len(data)), 0, 1, "正在上传当前版本 "+version+"...")
+		return binary.Upload(client, key, "claude", data, version, a.progressCallback(opID, "binary-upload"))
+	})
+}
+
 // BinaryStorageInfo 二进制存储空间统计
 type BinaryStorageInfo struct {
 	LocalTotal int64 `json:"localTotal"`
@@ -861,10 +908,6 @@ func (a *App) RevertToSnapshot(snapID string) error {
 		}
 	}
 
-	if len(toRestore) == 0 {
-		return nil
-	}
-
 	// 下载并恢复文件
 	store := object.NewStore(client, key, config.CCBoxDir()+"/cache/objects")
 	for _, path := range toRestore {
@@ -893,16 +936,19 @@ func (a *App) RevertToSnapshot(snapID string) error {
 	if snap.Binary != nil {
 		platform := config.Platform()
 		if tools, ok := snap.Binary[platform]; ok {
-			if ver, ok := tools["claude"]; ok && ver != "" {
-				a.revertBinary("claude", ver, client, key)
+			for name, ver := range tools {
+				if ver != "" {
+					a.revertBinary(name, ver, client, key)
+				}
 			}
 		}
 	}
 
 	// 创建恢复快照
 	newSnap := snapshot.CreateSnapshot(snap.ID, cfg.Device.ID, "revert to "+snapID[:12], snap.Files)
+	newSnap.Binary = currentBinaryVersions()
 	snapData, _ := newSnap.Serialize()
-	encrypted, _ := crypto.Encrypt(snapData, key)
+	encrypted, _ := encryptRemoteData(snapData, key)
 	client.EnsureDir("snapshots/")
 	client.PUT("snapshots/"+newSnap.ID+".json.enc", encrypted, "")
 
@@ -932,7 +978,6 @@ func (a *App) revertBinary(name, targetVer string, client *webdav.Client, key []
 	// 再尝试从云端下载
 	_ = binary.Download(client, key, name, targetVer, binPath, nil)
 }
-
 
 // EncryptionStatus 加密状态信息
 type EncryptionStatus struct {
@@ -975,39 +1020,82 @@ func (a *App) VerifyEncryptionKey() (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("无法下载远程快照: %w", err)
 	}
-	_, err = crypto.Decrypt(encData, key)
+	_, err = decryptRemoteData(encData, key)
 	return err == nil, nil
 }
 
-// rotateRemoteData 用旧密钥解密所有远程快照并用新密钥重新加密
+// rotateRemoteData 用旧密钥解密远程加密数据并用新密钥重新加密
 func (a *App) rotateRemoteData(client *webdav.Client, oldKey, newKey []byte) error {
-	headData, _, err := client.GET("HEAD")
-	if err != nil {
-		return nil
-	}
-	headID := strings.TrimSpace(string(headData))
-	for headID != "" {
-		snapPath := "snapshots/" + headID + ".json.enc"
-		encData, _, err := client.GET(snapPath)
+	roots := []string{"snapshots/", "objects/", "projects/"}
+	for _, root := range roots {
+		files, err := listRemoteFilesRecursive(client, root)
 		if err != nil {
-			break
+			return err
 		}
-		plainData, err := crypto.Decrypt(encData, oldKey)
-		if err != nil {
-			break
+		for _, remotePath := range files {
+			if !strings.HasSuffix(remotePath, ".enc") {
+				continue
+			}
+			_ = rotateEncryptedRemoteFile(client, remotePath, oldKey, newKey)
 		}
-		newEncData, err := crypto.Encrypt(plainData, newKey)
-		if err != nil {
-			break
-		}
-		client.PUT(snapPath, newEncData, "")
-		var snap struct {
-			Parent string `json:"parent"`
-		}
-		json.Unmarshal(plainData, &snap)
-		headID = snap.Parent
 	}
 	return nil
+}
+
+func rotateEncryptedRemoteFile(client *webdav.Client, remotePath string, oldKey, newKey []byte) error {
+	encData, _, err := client.GET(remotePath)
+	if err != nil {
+		return err
+	}
+	plainData, err := crypto.Decrypt(encData, oldKey)
+	if err != nil {
+		return err
+	}
+	newEncData, err := crypto.Encrypt(plainData, newKey)
+	if err != nil {
+		return err
+	}
+	_, err = client.PUT(remotePath, newEncData, "")
+	return err
+}
+
+func listRemoteFilesRecursive(client *webdav.Client, dir string) ([]string, error) {
+	entries, err := client.PROPFIND(dir, 1)
+	if err == webdav.ErrNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, entry := range entries {
+		remotePath := normalizeRemoteChildPath(dir, entry.Path)
+		if strings.TrimSuffix(remotePath, "/") == strings.TrimSuffix(strings.TrimPrefix(dir, "/"), "/") {
+			continue
+		}
+		if entry.IsDir {
+			if !strings.HasSuffix(remotePath, "/") {
+				remotePath += "/"
+			}
+			children, err := listRemoteFilesRecursive(client, remotePath)
+			if err != nil {
+				return nil, err
+			}
+			files = append(files, children...)
+			continue
+		}
+		files = append(files, remotePath)
+	}
+	return files, nil
+}
+
+func normalizeRemoteChildPath(dir, child string) string {
+	child = strings.TrimPrefix(child, "/")
+	dir = strings.TrimPrefix(dir, "/")
+	if strings.HasPrefix(child, dir) {
+		return child
+	}
+	return dir + child
 }
 
 // ChangeEncryptionPassword 修改加密密码
@@ -1041,6 +1129,9 @@ func (a *App) ChangeEncryptionPassword(oldPassword, newPassword string) error {
 	err = a.rotateRemoteData(client, keyData, newKey)
 	if err != nil {
 		return fmt.Errorf("轮换远程数据失败: %w", err)
+	}
+	if _, err := client.PUT("salt.bin", newSalt, ""); err != nil {
+		return fmt.Errorf("上传新 salt 失败: %w", err)
 	}
 	// 保存新 salt 和密钥
 	os.WriteFile(saltPath, newSalt, 0600)

@@ -22,6 +22,7 @@ export namespace main {
 	    name: string;
 	    version: string;
 	    latest: boolean;
+	    installed: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new BinaryInfo(source);
@@ -32,6 +33,7 @@ export namespace main {
 	        this.name = source["name"];
 	        this.version = source["version"];
 	        this.latest = source["latest"];
+	        this.installed = source["installed"];
 	    }
 	}
 	export class BinaryVersionInfo {
@@ -62,6 +64,7 @@ export namespace main {
 	}
 	export class BinaryPageData {
 	    currentVersion: string;
+	    allVersions: BinaryVersionInfo[];
 	    versions: BinaryVersionInfo[];
 	    localVersions: BinaryVersionInfo[];
 	    platform: string;
@@ -76,6 +79,7 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.currentVersion = source["currentVersion"];
+	        this.allVersions = this.convertValues(source["allVersions"], BinaryVersionInfo);
 	        this.versions = this.convertValues(source["versions"], BinaryVersionInfo);
 	        this.localVersions = this.convertValues(source["localVersions"], BinaryVersionInfo);
 	        this.platform = source["platform"];
@@ -185,22 +189,6 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.enabled = source["enabled"];
-	    }
-	}
-	export class EncryptionStatus {
-	    enabled: boolean;
-	    fingerprint: string;
-	    hasKey: boolean;
-
-	    static createFrom(source: any = {}) {
-	        return new EncryptionStatus(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.enabled = source["enabled"];
-	        this.fingerprint = source["fingerprint"];
-	        this.hasKey = source["hasKey"];
 	    }
 	}
 	export class DeviceView {
@@ -464,6 +452,22 @@ export namespace main {
 		    }
 		    return a;
 		}
+	}
+	export class EncryptionStatus {
+	    enabled: boolean;
+	    fingerprint: string;
+	    hasKey: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new EncryptionStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.fingerprint = source["fingerprint"];
+	        this.hasKey = source["hasKey"];
+	    }
 	}
 	
 	export class FileDetail {

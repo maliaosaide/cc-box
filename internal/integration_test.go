@@ -16,17 +16,24 @@ import (
 	"github.com/user/cc-box/internal/webdav"
 )
 
-const (
-	testWebDAVURL  = "http://192.168.10.9/alist/dav/webdav-test/"
-	testUsername   = "devtest"
-	testPassword   = "Dev2026!"
-	testRootPrefix = "cc-box-test/" // 测试用的独立目录，避免与正式数据冲突
-)
+const testRootPrefix = "cc-box-test/" // 测试用的独立目录，避免与正式数据冲突
+
+func testWebDAVConfig(t *testing.T) (string, string, string) {
+	t.Helper()
+	url := os.Getenv("CC_BOX_TEST_WEBDAV_URL")
+	username := os.Getenv("CC_BOX_TEST_WEBDAV_USERNAME")
+	password := os.Getenv("CC_BOX_TEST_WEBDAV_PASSWORD")
+	if url == "" || username == "" || password == "" {
+		t.Skip("需要设置 CC_BOX_TEST_WEBDAV_URL、CC_BOX_TEST_WEBDAV_USERNAME、CC_BOX_TEST_WEBDAV_PASSWORD 才运行集成测试")
+	}
+	return url, username, password
+}
 
 // newTestClient 创建测试用 WebDAV 客户端
 func newTestClient(t *testing.T) *webdav.Client {
 	t.Helper()
-	client := webdav.NewClient(testWebDAVURL, testUsername, testPassword)
+	url, username, password := testWebDAVConfig(t)
+	client := webdav.NewClient(url, username, password)
 	client.SetTimeout(30e9) // 30 秒
 	return client
 }
@@ -219,8 +226,7 @@ func TestFullSyncFlow(t *testing.T) {
 	t.Logf("扫描到 %d 个文件", scanResult.Stats.TotalFiles)
 
 	// 上传文件 objects
-	testClient := webdav.NewClient(testWebDAVURL, testUsername, testPassword)
-	testClient.SetTimeout(30e9)
+	testClient := newTestClient(t)
 	uploaded := 0
 	for path, entry := range scanResult.Files {
 		data, err := os.ReadFile(filepath.Join(tmpDir, filepath.FromSlash(path)))

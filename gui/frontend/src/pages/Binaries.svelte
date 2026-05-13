@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { EventsOn } from '../../wailsjs/runtime/runtime.js'
-  import { GetBinaryPage, SwitchBinaryVersion, UploadBinaryVersion, GetBinaryStorage, DeleteLocalVersion, DeleteCloudBinaryVersion } from '../../wailsjs/go/main/App.js'
+  import { GetBinaryPage, SwitchBinaryVersion, UploadBinaryVersion, UploadCurrentBinary, GetBinaryStorage, DeleteLocalVersion, DeleteCloudBinaryVersion } from '../../wailsjs/go/main/App.js'
 
   export let syncState = 'idle'
   let activeTab = 'claude'
@@ -24,6 +24,11 @@
     codex: { name: 'OpenAI Codex CLI', desc: 'OpenAI 编码助手命令行工具' },
     gemini: { name: 'Google Gemini CLI', desc: 'Google Gemini 命令行工具' },
   }
+
+  $: currentVersionEntry = binData && binData.allVersions
+    ? binData.allVersions.find(v => v.version === binData.currentVersion)
+    : null
+  $: currentUploaded = !!(currentVersionEntry && currentVersionEntry.isRemote)
 
   onMount(async () => {
     await loadBinary()
@@ -77,6 +82,12 @@
     msg = ''; error = ''
     uploading = version
     UploadBinaryVersion(version)
+  }
+
+  function uploadCurrent() {
+    msg = ''; error = ''
+    uploading = 'current'
+    UploadCurrentBinary()
   }
 
   async function deleteVersion(version) {
@@ -179,6 +190,15 @@
         <span class="version-tag" class:latest={binData.localExists} class:!latest={!binData.localExists}>
           {binData.localExists ? '已安装' : '未安装'}
         </span>
+        <div class="item-actions">
+          <button class="btn-sm btn-upload"
+                  disabled={!binData.localExists || currentUploaded || !!uploadProgress}
+                  on:click={uploadCurrent}>
+            {#if currentUploaded}已上传
+            {:else if uploadProgress && uploading === 'current'}上传中...
+            {:else}上传到云端{/if}
+          </button>
+        </div>
       </div>
       {#if binData.binaryPath}
         <div class="path-row font-mono">{binData.binaryPath}</div>

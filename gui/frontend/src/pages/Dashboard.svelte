@@ -4,6 +4,7 @@
   import { GetDashboard, QuickPush, QuickPull, QuickSync } from '../../wailsjs/go/main/App.js'
 
   export let syncState = 'idle'
+  export let theme = 'dark'
   const dispatch = createEventDispatcher()
 
   let dashboard = null
@@ -64,6 +65,15 @@
     <div class="toolbar animate-fade-in">
       <h1 class="section-title">概览</h1>
       <div class="toolbar-right">
+        <button class="theme-switch" on:click={() => dispatch('toggleTheme')} title={theme === 'dark' ? '切换亮色' : '切换暗色'}>
+          {#if theme === 'dark'}
+            <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.46 4.95l.7.7a1 1 0 001.42-1.41l-.71-.7a1 1 0 00-1.41 1.41zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zM10 15a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.46A1 1 0 106.46 5.05l-.7-.71a1 1 0 00-1.42 1.42l.71.7zM4 11a1 1 0 100-2H3a1 1 0 100 2h1z"/></svg>
+            <span>亮色</span>
+          {:else}
+            <svg viewBox="0 0 20 20" fill="currentColor"><path d="M17.29 13.29A8 8 0 016.71 2.71a8 8 0 1010.58 10.58z"/></svg>
+            <span>暗色</span>
+          {/if}
+        </button>
         <div class="status-pill" class:conflict={hasConflicts}>
           <div class="status-dot" class:ok={!hasConflicts} class:err={hasConflicts}></div>
           <span class="status-text">
@@ -239,6 +249,26 @@
     align-items: center;
     gap: 10px;
   }
+  .theme-switch {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border-radius: 8px;
+    border: 1px solid rgb(var(--border));
+    background: rgb(var(--surface-1));
+    color: rgb(var(--text-secondary));
+    font-size: 12px;
+    font-family: 'DM Mono', monospace;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .theme-switch:hover {
+    color: rgb(var(--accent));
+    border-color: rgba(196,112,78,0.35);
+    background: rgba(196,112,78,0.06);
+  }
+  .theme-switch svg { width: 14px; height: 14px; }
   .status-pill {
     display: flex;
     align-items: center;

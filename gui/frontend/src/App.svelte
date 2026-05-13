@@ -56,7 +56,7 @@
       <Sidebar bind:currentPage={currentPage} {syncState} {theme} on:navigate={() => {}} on:toggleTheme={toggleTheme} />
       <main class="main-content">
         <div class="page-panel" class:active={currentPage === 'dashboard'}>
-          <Dashboard bind:syncState on:navigate={navigate} />
+          <Dashboard bind:syncState {theme} on:navigate={navigate} on:toggleTheme={toggleTheme} />
         </div>
         <div class="page-panel" class:active={currentPage === 'files'}>
           <Files bind:syncState on:navigate={navigate} />

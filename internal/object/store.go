@@ -7,24 +7,31 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/user/cc-box/internal/config"
 	"github.com/user/cc-box/internal/crypto"
 	"github.com/user/cc-box/internal/webdav"
 )
 
 // Store Object 存储管理器
 type Store struct {
-	client         *webdav.Client
-	key            []byte
-	cache          string // 本地缓存目录
-	knownHashes    map[string]bool // 已知在远程存在的哈希（跳过 Exists 检查）
+	client      *webdav.Client
+	key         []byte
+	cache       string // 本地缓存目录
+	encrypt     bool
+	knownHashes map[string]bool // 已知在远程存在的哈希（跳过 Exists 检查）
 }
 
 // NewStore 创建 Store 实例
 func NewStore(client *webdav.Client, key []byte, cacheDir string) *Store {
+	encrypt := true
+	if cfg, err := config.Load(); err == nil {
+		encrypt = cfg.Encryption.Enabled
+	}
 	return &Store{
 		client:      client,
 		key:         key,
 		cache:       cacheDir,
+		encrypt:     encrypt,
 		knownHashes: make(map[string]bool),
 	}
 }
@@ -59,10 +66,13 @@ func (s *Store) Upload(data []byte) (string, error) {
 		return hash, nil
 	}
 
-	// 加密
-	encrypted, err := crypto.Encrypt(data, s.key)
-	if err != nil {
-		return "", fmt.Errorf("加密失败: %w", err)
+	payload := data
+	if s.encrypt {
+		encrypted, err := crypto.Encrypt(data, s.key)
+		if err != nil {
+			return "", fmt.Errorf("加密失败: %w", err)
+		}
+		payload = encrypted
 	}
 
 	// 确保目录存在
@@ -71,7 +81,7 @@ func (s *Store) Upload(data []byte) (string, error) {
 	}
 
 	// 上传
-	if _, err := s.client.PUT(objPath, encrypted, ""); err != nil {
+	if _, err := s.client.PUT(objPath, payload, ""); err != nil {
 		return "", fmt.Errorf("上传 object 失败: %w", err)
 	}
 
@@ -89,6 +99,9 @@ func (s *Store) Download(hash string) ([]byte, error) {
 	if s.cache != "" {
 		cached := s.cachePath(hash)
 		if data, err := os.ReadFile(cached); err == nil {
+			if !s.encrypt {
+				return data, nil
+			}
 			decrypted, err := crypto.Decrypt(data, s.key)
 			if err == nil {
 				return decrypted, nil
@@ -103,9 +116,13 @@ func (s *Store) Download(hash string) ([]byte, error) {
 		return nil, fmt.Errorf("下载 object 失败: %w", err)
 	}
 
-	decrypted, err := crypto.Decrypt(encrypted, s.key)
-	if err != nil {
-		return nil, fmt.Errorf("解密失败: %w", err)
+	decrypted := encrypted
+	if s.encrypt {
+		var err error
+		decrypted, err = crypto.Decrypt(encrypted, s.key)
+		if err != nil {
+			return nil, fmt.Errorf("解密失败: %w", err)
+		}
 	}
 
 	// 写入缓存

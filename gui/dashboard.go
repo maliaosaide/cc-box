@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -63,10 +64,10 @@ type BackupInfo struct {
 }
 
 type BinaryInfo struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
-	Latest  bool   `json:"latest"`
-	Installed bool `json:"installed"`
+	Name      string `json:"name"`
+	Version   string `json:"version"`
+	Latest    bool   `json:"latest"`
+	Installed bool   `json:"installed"`
 }
 
 // GetDashboard 返回概览页数据
@@ -100,7 +101,7 @@ func (a *App) GetDashboard() (*DashboardData, error) {
 		IsCurrent:  true,
 	})
 
-	data.Binaries = collectInstalledBinaries()
+	data.Binaries = collectInstalledBinaries(nil)
 
 	// 尝试加载真实数据
 	client, key, err := a.loadClientKey(cfg)
@@ -186,10 +187,10 @@ func (a *App) fillDashboardFromSnapshots(data *DashboardData, cfg *config.Config
 		}
 	}
 
-	data.Binaries = collectInstalledBinaries()
+	data.Binaries = collectInstalledBinaries(client)
 
 	// 冲突
-// 从远程加载设备列表
+	// 从远程加载设备列表
 	a.loadRemoteDevices(data, cfg, client)
 
 	conflictFiles := listConflicts()
@@ -236,7 +237,9 @@ func (a *App) QuickPush() int64 {
 			localSnap, _ = a.loadSnapByID(client, key, localHeadStr)
 		}
 
+		currentBins := currentBinaryVersions()
 		var changes []snapshot.Change
+		binaryChanged := localSnap == nil || !binaryVersionsEqual(localSnap.Binary, currentBins)
 		if localSnap != nil {
 			currentSnap := snapshot.CreateSnapshot("", cfg.Device.ID, "", scanResult.Files)
 			changes = localSnap.Diff(currentSnap)
@@ -246,7 +249,7 @@ func (a *App) QuickPush() int64 {
 			}
 		}
 
-		if len(changes) == 0 {
+		if len(changes) == 0 && !binaryChanged {
 			a.emitProgress(opID, "quick-push", 1, 1, 1, 1, "没有变更需要推送")
 			return nil
 		}
@@ -278,8 +281,9 @@ func (a *App) QuickPush() int64 {
 
 		// 创建新快照
 		newSnap := snapshot.CreateSnapshot(localHeadStr, cfg.Device.ID, "gui push", scanResult.Files)
+		newSnap.Binary = currentBins
 		snapData, _ := newSnap.Serialize()
-		encrypted, err := crypto.Encrypt(snapData, key)
+		encrypted, err := encryptRemoteData(snapData, key)
 		if err != nil {
 			return fmt.Errorf("加密快照失败: %w", err)
 		}
@@ -462,22 +466,143 @@ func fillBinaryVersion(d *DashboardData, binPath string) (*DashboardData, error)
 	return d, nil
 }
 
-func collectInstalledBinaries() []BinaryInfo {
-	tools := []string{"claude", "codex", "gemini"}
+func collectInstalledBinaries(client *webdav.Client) []BinaryInfo {
+	tools := []string{"claude", "uv", "uvx", "codex", "gemini"}
 	versions := make([]BinaryInfo, 0, len(tools))
+	var idx *binary.Index
+	if client != nil {
+		idx, _ = binary.LoadIndex(client)
+	}
+	platform := config.Platform()
 	for _, name := range tools {
 		binPath := binary.GetBinaryPath(name)
 		if _, err := os.Stat(binPath); err != nil {
 			continue
 		}
+		version := detectBinVersion(binPath)
+		latest := true
+		if idx != nil {
+			if info := idx.GetBinaryInfo(platform, name); info != nil {
+				latest = !hasNewerBinaryVersion(version, info.Versions)
+			}
+		}
 		versions = append(versions, BinaryInfo{
 			Name:      name,
-			Version:   detectBinVersion(binPath),
-			Latest:    true,
+			Version:   version,
+			Latest:    latest,
 			Installed: true,
 		})
 	}
 	return versions
+}
+
+func currentBinaryVersions() map[string]map[string]string {
+	platform := config.Platform()
+	tools := []string{"claude", "uv", "uvx", "codex", "gemini"}
+	versions := make(map[string]string)
+	for _, name := range tools {
+		binPath := binary.GetBinaryPath(name)
+		if _, err := os.Stat(binPath); err != nil {
+			continue
+		}
+		version := detectBinVersion(binPath)
+		if version != "" {
+			versions[name] = version
+		}
+	}
+	if len(versions) == 0 {
+		return nil
+	}
+	return map[string]map[string]string{platform: versions}
+}
+
+func binaryVersionsEqual(a, b map[string]map[string]string) bool {
+	if len(a) == 0 && len(b) == 0 {
+		return true
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for platform, aTools := range a {
+		bTools, ok := b[platform]
+		if !ok || len(aTools) != len(bTools) {
+			return false
+		}
+		for name, aVersion := range aTools {
+			if bTools[name] != aVersion {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func hasNewerBinaryVersion(current string, versions map[string]binary.Version) bool {
+	if len(versions) == 0 {
+		return false
+	}
+	if current == "" {
+		return true
+	}
+	for remote := range versions {
+		if remote == current {
+			continue
+		}
+		cmp, ok := compareVersion(remote, current)
+		if !ok || cmp > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func compareVersion(a, b string) (int, bool) {
+	aParts, okA := versionParts(a)
+	bParts, okB := versionParts(b)
+	if !okA || !okB {
+		return 0, false
+	}
+	maxLen := len(aParts)
+	if len(bParts) > maxLen {
+		maxLen = len(bParts)
+	}
+	for i := 0; i < maxLen; i++ {
+		var av, bv int
+		if i < len(aParts) {
+			av = aParts[i]
+		}
+		if i < len(bParts) {
+			bv = bParts[i]
+		}
+		if av > bv {
+			return 1, true
+		}
+		if av < bv {
+			return -1, true
+		}
+	}
+	return 0, true
+}
+
+func versionParts(version string) ([]int, bool) {
+	version = cleanVersionToken(version)
+	if version == "" {
+		return nil, false
+	}
+	segments := strings.Split(version, ".")
+	parts := make([]int, 0, len(segments))
+	for _, segment := range segments {
+		segment = leadingDigits(segment)
+		if segment == "" {
+			break
+		}
+		value, err := strconv.Atoi(segment)
+		if err != nil {
+			return nil, false
+		}
+		parts = append(parts, value)
+	}
+	return parts, len(parts) > 0
 }
 
 func detectBinVersion(binPath string) string {
@@ -489,11 +614,33 @@ func detectBinVersion(binPath string) string {
 	if err != nil {
 		return ""
 	}
-	fields := strings.Fields(string(output))
-	if len(fields) > 0 {
-		return fields[0]
+	for _, field := range strings.Fields(string(output)) {
+		if version := cleanVersionToken(field); version != "" {
+			return version
+		}
 	}
 	return ""
+}
+
+func cleanVersionToken(token string) string {
+	token = strings.Trim(token, " \t\r\n,;()[]{}")
+	token = strings.TrimPrefix(token, "v")
+	if token == "" {
+		return ""
+	}
+	if token[0] < '0' || token[0] > '9' {
+		return ""
+	}
+	return token
+}
+
+func leadingDigits(value string) string {
+	for i, r := range value {
+		if r < '0' || r > '9' {
+			return value[:i]
+		}
+	}
+	return value
 }
 
 func hideWindowAttr() *syscall.SysProcAttr {

@@ -22,12 +22,16 @@ export function CancelOperation(arg1) {
   return window['go']['main']['App']['CancelOperation'](arg1);
 }
 
-export function DeleteLocalVersion(arg1) {
-  return window['go']['main']['App']['DeleteLocalVersion'](arg1);
+export function ChangeEncryptionPassword(arg1, arg2) {
+  return window['go']['main']['App']['ChangeEncryptionPassword'](arg1, arg2);
 }
 
 export function DeleteCloudBinaryVersion(arg1) {
   return window['go']['main']['App']['DeleteCloudBinaryVersion'](arg1);
+}
+
+export function DeleteLocalVersion(arg1) {
+  return window['go']['main']['App']['DeleteLocalVersion'](arg1);
 }
 
 export function DeleteOrphan(arg1) {
@@ -70,10 +74,6 @@ export function GetEncryptionStatus() {
   return window['go']['main']['App']['GetEncryptionStatus']();
 }
 
-export function GetLocalSnapshotList(arg1) {
-  return window['go']['main']['App']['GetLocalSnapshotList'](arg1);
-}
-
 export function GetFileContent(arg1) {
   return window['go']['main']['App']['GetFileContent'](arg1);
 }
@@ -84,6 +84,10 @@ export function GetFileDiff(arg1) {
 
 export function GetFileTree() {
   return window['go']['main']['App']['GetFileTree']();
+}
+
+export function GetLocalSnapshotList(arg1) {
+  return window['go']['main']['App']['GetLocalSnapshotList'](arg1);
 }
 
 export function GetProjectDetail(arg1) {
@@ -138,6 +142,10 @@ export function ResolveConflict(arg1, arg2) {
   return window['go']['main']['App']['ResolveConflict'](arg1, arg2);
 }
 
+export function RevertToSnapshot(arg1) {
+  return window['go']['main']['App']['RevertToSnapshot'](arg1);
+}
+
 export function SaveMergedConflict(arg1, arg2) {
   return window['go']['main']['App']['SaveMergedConflict'](arg1, arg2);
 }
@@ -150,24 +158,12 @@ export function SetWebDAVPassword(arg1) {
   return window['go']['main']['App']['SetWebDAVPassword'](arg1);
 }
 
-export function VerifyEncryptionKey() {
-  return window['go']['main']['App']['VerifyEncryptionKey']();
-}
-
-export function ChangeEncryptionPassword(arg1, arg2) {
-  return window['go']['main']['App']['ChangeEncryptionPassword'](arg1, arg2);
-}
-
 export function StartAsync(arg1, arg2) {
   return window['go']['main']['App']['StartAsync'](arg1, arg2);
 }
 
 export function SwitchBinaryVersion(arg1, arg2) {
   return window['go']['main']['App']['SwitchBinaryVersion'](arg1, arg2);
-}
-
-export function RevertToSnapshot(arg1) {
-  return window['go']['main']['App']['RevertToSnapshot'](arg1);
 }
 
 export function TestConnection() {
@@ -180,4 +176,12 @@ export function TestWebDAVConnection(arg1, arg2, arg3, arg4) {
 
 export function UploadBinaryVersion(arg1) {
   return window['go']['main']['App']['UploadBinaryVersion'](arg1);
+}
+
+export function UploadCurrentBinary() {
+  return window['go']['main']['App']['UploadCurrentBinary']();
+}
+
+export function VerifyEncryptionKey() {
+  return window['go']['main']['App']['VerifyEncryptionKey']();
 }

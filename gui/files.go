@@ -117,7 +117,7 @@ func (a *App) loadLocalSnap(client *webdav.Client, key []byte) (*snapshot.Snapsh
 	if err != nil {
 		return nil, err
 	}
-	decrypted, err := crypto.Decrypt(encrypted, key)
+	decrypted, err := decryptRemoteData(encrypted, key)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +147,7 @@ func (a *App) loadRemoteSnap(client *webdav.Client, key []byte) (*snapshot.Snaps
 	if err != nil {
 		return nil, err
 	}
-	decrypted, err := crypto.Decrypt(encrypted, key)
+	decrypted, err := decryptRemoteData(encrypted, key)
 	if err != nil {
 		return nil, err
 	}
@@ -588,7 +588,9 @@ func (a *App) doBulkPush(ctx context.Context, opID int64, cfg *config.Config, cl
 	}
 
 	// 计算变更
+	currentBins := currentBinaryVersions()
 	var changes []snapshot.Change
+	binaryChanged := localSnap == nil || !binaryVersionsEqual(localSnap.Binary, currentBins)
 	if localSnap != nil {
 		currentSnap := snapshot.CreateSnapshot("", cfg.Device.ID, "", scanResult.Files)
 		changes = localSnap.Diff(currentSnap)
@@ -598,7 +600,7 @@ func (a *App) doBulkPush(ctx context.Context, opID int64, cfg *config.Config, cl
 		}
 	}
 
-	if len(changes) == 0 {
+	if len(changes) == 0 && !binaryChanged {
 		a.emitProgress(opID, "bulk-push", 1, 1, 1, 1, "没有变更需要推送")
 		return nil
 	}
@@ -630,8 +632,9 @@ func (a *App) doBulkPush(ctx context.Context, opID int64, cfg *config.Config, cl
 	}
 
 	newSnap := snapshot.CreateSnapshot(string(localHead), cfg.Device.ID, "gui push", scanResult.Files)
+	newSnap.Binary = currentBins
 	snapData, _ := newSnap.Serialize()
-	encrypted, err := crypto.Encrypt(snapData, key)
+	encrypted, err := encryptRemoteData(snapData, key)
 	if err != nil {
 		return fmt.Errorf("encrypt snap: %w", err)
 	}
@@ -709,7 +712,6 @@ func (a *App) doBulkPull(ctx context.Context, opID int64, cfg *config.Config, cl
 		os.WriteFile(fullPath, data, 0600)
 		a.emitProgress(opID, "bulk-pull", int64(i+1), total, int(i+1), int(total), fmt.Sprintf("pull %s", path))
 	}
-
 
 	// 更新本地 HEAD
 	os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(remoteSnap.ID), 0600)

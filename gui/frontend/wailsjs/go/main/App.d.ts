@@ -12,9 +12,11 @@ export function BulkSync(arg1:string):Promise<number>;
 
 export function CancelOperation(arg1:number):Promise<void>;
 
-export function DeleteLocalVersion(arg1:string):Promise<void>;
+export function ChangeEncryptionPassword(arg1:string,arg2:string):Promise<void>;
 
 export function DeleteCloudBinaryVersion(arg1:string):Promise<void>;
+
+export function DeleteLocalVersion(arg1:string):Promise<void>;
 
 export function DeleteOrphan(arg1:string):Promise<void>;
 
@@ -30,19 +32,19 @@ export function GetBinaryStorage():Promise<main.BinaryStorageInfo>;
 
 export function GetConfig():Promise<main.ConfigView>;
 
-export function GetEncryptionStatus():Promise<main.EncryptionStatus>;
-
 export function GetConflictDetail(arg1:string):Promise<main.ConflictDetail>;
 
 export function GetDashboard():Promise<main.DashboardData>;
 
-export function GetLocalSnapshotList(arg1:number):Promise<Array<main.SnapshotEntry>>;
+export function GetEncryptionStatus():Promise<main.EncryptionStatus>;
 
 export function GetFileContent(arg1:string):Promise<main.FileDetail>;
 
 export function GetFileDiff(arg1:string):Promise<main.DiffResult>;
 
 export function GetFileTree():Promise<main.FileTreeResult>;
+
+export function GetLocalSnapshotList(arg1:number):Promise<Array<main.SnapshotEntry>>;
 
 export function GetProjectDetail(arg1:string):Promise<string>;
 
@@ -70,6 +72,8 @@ export function RemoveExcludePattern(arg1:string):Promise<void>;
 
 export function ResolveConflict(arg1:string,arg2:string):Promise<void>;
 
+export function RevertToSnapshot(arg1:string):Promise<void>;
+
 export function SaveMergedConflict(arg1:string,arg2:string):Promise<void>;
 
 export function SetConfigField(arg1:string,arg2:string,arg3:string):Promise<void>;
@@ -80,14 +84,12 @@ export function StartAsync(arg1:string,arg2:any):Promise<number>;
 
 export function SwitchBinaryVersion(arg1:string,arg2:string):Promise<void>;
 
-export function RevertToSnapshot(arg1:string):Promise<void>;
-
 export function TestConnection():Promise<main.ConnectionTest>;
-
-export function VerifyEncryptionKey():Promise<boolean>;
-
-export function ChangeEncryptionPassword(arg1:string,arg2:string):Promise<void>;
 
 export function TestWebDAVConnection(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
 export function UploadBinaryVersion(arg1:string):Promise<number>;
+
+export function UploadCurrentBinary():Promise<number>;
+
+export function VerifyEncryptionKey():Promise<boolean>;

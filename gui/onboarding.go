@@ -101,11 +101,12 @@ func (a *App) InitNewDevice(url, username, password, root, encPassword, deviceNa
 
 	// 创建初始快照
 	snap := snapshot.CreateSnapshot("", cfg.Device.ID, "initial sync", scanResult.Files)
+	snap.Binary = currentBinaryVersions()
 	snapData, err := snap.Serialize()
 	if err != nil {
 		return fmt.Errorf("serialize snapshot: %w", err)
 	}
-	encrypted, err := crypto.Encrypt(snapData, key)
+	encrypted, err := encryptRemoteData(snapData, key)
 	if err != nil {
 		return fmt.Errorf("encrypt snapshot: %w", err)
 	}
@@ -165,7 +166,7 @@ func (a *App) InitJoinExisting(url, username, password, root, encPassword, devic
 	if err != nil {
 		return fmt.Errorf("下载快照失败: %w", err)
 	}
-	_, err = crypto.Decrypt(encData, key)
+	_, err = decryptRemoteData(encData, key)
 	if err != nil {
 		return fmt.Errorf("密码验证失败：与远程数据不匹配")
 	}
@@ -176,7 +177,7 @@ func (a *App) InitJoinExisting(url, username, password, root, encPassword, devic
 	}
 
 	// 拉取最新快照的文件到本地
-	decrypted, _ := crypto.Decrypt(encData, key)
+	decrypted, _ := decryptRemoteData(encData, key)
 	remoteSnap, err := snapshot.Deserialize(decrypted)
 	if err != nil {
 		return fmt.Errorf("解析快照失败: %w", err)
