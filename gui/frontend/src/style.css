@@ -20,6 +20,32 @@
   --state-sync: 91 127 165;
 }
 
+[data-theme="light"] {
+  --surface-0: 249 247 244;
+  --surface-1: 255 255 255;
+  --surface-2: 242 240 236;
+  --surface-3: 228 226 222;
+  --accent: 180 95 55;
+  --accent-dim: 155 80 45;
+  --accent-bright: 200 120 75;
+  --text-primary: 28 27 24;
+  --text-secondary: 95 92 88;
+  --text-muted: 145 141 136;
+  --border: 218 216 212;
+  --state-ok: 75 130 95;
+  --state-warn: 175 140 45;
+  --state-err: 175 65 65;
+  --state-sync: 70 110 160;
+}
+
+[data-theme="light"] #app::before {
+  opacity: 0.012;
+}
+
+[data-theme="light"] .card {
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.6), 0 1px 3px rgba(0,0,0,0.04);
+}
+
 * {
   margin: 0;
   padding: 0;

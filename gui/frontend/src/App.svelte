@@ -14,13 +14,23 @@
   let loading = true
   let currentPage = 'dashboard'
   let syncState = 'idle'
+  let theme = 'dark'
 
   onMount(async () => {
+    const saved = localStorage.getItem('cc-box-theme')
+    if (saved) theme = saved
+    document.documentElement.dataset.theme = theme
     try {
       initialized = await IsInitialized()
     } catch (e) { console.error('init check failed:', e) }
     loading = false
   })
+
+  function toggleTheme() {
+    theme = theme === 'dark' ? 'light' : 'dark'
+    document.documentElement.dataset.theme = theme
+    localStorage.setItem('cc-box-theme', theme)
+  }
 
   function handleInitComplete() { initialized = true; currentPage = 'dashboard' }
   function navigate(e) { if (e.detail?.page) currentPage = e.detail.page }
@@ -43,7 +53,7 @@
 {:else}
   <div class="h-full flex flex-col">
     <div class="flex-1 flex overflow-hidden">
-      <Sidebar bind:currentPage={currentPage} {syncState} on:navigate={() => {}} />
+      <Sidebar bind:currentPage={currentPage} {syncState} {theme} on:navigate={() => {}} on:toggleTheme={toggleTheme} />
       <main class="main-content">
         <div class="page-panel" class:active={currentPage === 'dashboard'}>
           <Dashboard bind:syncState on:navigate={navigate} />
