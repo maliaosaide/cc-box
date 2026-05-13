@@ -66,6 +66,10 @@ export function GetDashboard() {
   return window['go']['main']['App']['GetDashboard']();
 }
 
+export function GetEncryptionStatus() {
+  return window['go']['main']['App']['GetEncryptionStatus']();
+}
+
 export function GetLocalSnapshotList(arg1) {
   return window['go']['main']['App']['GetLocalSnapshotList'](arg1);
 }
@@ -144,6 +148,14 @@ export function SetConfigField(arg1, arg2, arg3) {
 
 export function SetWebDAVPassword(arg1) {
   return window['go']['main']['App']['SetWebDAVPassword'](arg1);
+}
+
+export function VerifyEncryptionKey() {
+  return window['go']['main']['App']['VerifyEncryptionKey']();
+}
+
+export function ChangeEncryptionPassword(arg1, arg2) {
+  return window['go']['main']['App']['ChangeEncryptionPassword'](arg1, arg2);
 }
 
 export function StartAsync(arg1, arg2) {

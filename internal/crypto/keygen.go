@@ -145,3 +145,16 @@ func readSecretFile(path string) ([]byte, error) {
 	}
 	return data, nil
 }
+
+
+// ConstantTimeEqual 常量时间比较两个字节切片
+func ConstantTimeEqual(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	var result byte
+	for i := 0; i < len(a); i++ {
+		result |= a[i] ^ b[i]
+	}
+	return result == 0
+}

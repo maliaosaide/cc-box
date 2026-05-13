@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import { GetConfig, SetConfigField, TestConnection, SetWebDAVPassword, AddExcludePattern, RemoveExcludePattern } from '../../wailsjs/go/main/App.js'
+  import { GetConfig, SetConfigField, TestConnection, SetWebDAVPassword, AddExcludePattern, RemoveExcludePattern, GetEncryptionStatus, VerifyEncryptionKey, ChangeEncryptionPassword } from '../../wailsjs/go/main/App.js'
 
   export let syncState = 'idle'
   let activeTab = 'connection'
@@ -42,6 +42,13 @@
   let versionsDirRaw = ''
   let newPattern = ''
   let excludeList = []
+  let encStatus = null
+  let verifyResult = null
+  let verifyLoading = false
+  let oldEncPass = ''
+  let newEncPass = ''
+  let confirmEncPass = ''
+  let changePassLoading = false
 
   const defaultPatterns = ['sessions/', 'cache/', 'debug/', 'telemetry/', 'downloads/', 'paste-cache/', 'shell-snapshots/', 'file-history/', 'session-env/', 'ide/', 'backups/', 'plans/', 'tasks/', 'teams/', 'plugins/data/', '*.lock']
 
@@ -72,6 +79,7 @@
         versionsDirRaw = cfg.versionsDirRaw || ''
         excludeList = [...(cfg.exclude || [])]
       }
+      try { encStatus = await GetEncryptionStatus() } catch (e) { }
     } catch (e) {
       error = e.message || String(e)
     }
@@ -150,6 +158,34 @@
     } catch (e) {
       error = e.message || String(e)
     }
+  }
+
+  async function verifyKey() {
+    verifyLoading = true; verifyResult = null
+    try {
+      const ok = await VerifyEncryptionKey()
+      verifyResult = ok ? 'success' : 'fail'
+    } catch (e) {
+      verifyResult = 'error: ' + (e.message || String(e))
+    }
+    verifyLoading = false
+  }
+
+  async function changePassword() {
+    if (!oldEncPass || !newEncPass || !confirmEncPass) { error = '请填写所有密码字段'; return }
+    if (newEncPass !== confirmEncPass) { error = '新密码两次输入不一致'; return }
+    if (newEncPass.length < 6) { error = '新密码至少 6 个字符'; return }
+    changePassLoading = true; error = ''
+    try {
+      await ChangeEncryptionPassword(oldEncPass, newEncPass)
+      saved = '密码已修改'
+      oldEncPass = ''; newEncPass = ''; confirmEncPass = ''
+      encStatus = await GetEncryptionStatus()
+      setTimeout(() => saved = '', 2000)
+    } catch (e) {
+      error = e.message || String(e)
+    }
+    changePassLoading = false
   }
 
   async function testConn() {
@@ -263,10 +299,61 @@
           <span class="info-label">密钥派生</span>
           <span class="info-value font-mono">Argon2id</span>
         </div>
-        <div class="warn-box">
-          禁用加密后新上传的数据将不加密。已有的加密数据在下次同步时会被重新写入。
-        </div>
       </div>
+
+      <div class="card animate-fade-in">
+        <div class="section-label-row">
+          <span class="section-label">密钥管理</span>
+        </div>
+        {#if encStatus && encStatus.hasKey}
+          <div class="info-row">
+            <span class="info-label">密钥指纹</span>
+            <span class="fingerprint font-mono">{encStatus.fingerprint}</span>
+          </div>
+          <div class="form-actions">
+            {#if verifyResult === 'success'}
+              <span class="test-result ok">密钥有效，可以解密远程数据</span>
+            {:else if verifyResult === 'fail'}
+              <span class="test-result err">密钥无法解密远程数据</span>
+            {:else if verifyResult && verifyResult.startsWith('error')}
+              <span class="test-result err">{verifyResult}</span>
+            {/if}
+            <button class="btn-sm" disabled={verifyLoading} on:click={verifyKey}>
+              {verifyLoading ? '验证中...' : '验证密钥'}
+            </button>
+          </div>
+        {:else}
+          <div class="empty-compact">未检测到本地密钥</div>
+        {/if}
+      </div>
+
+      {#if encStatus && encStatus.hasKey}
+        <div class="card animate-fade-in">
+          <div class="section-label-row">
+            <span class="section-label">修改密码</span>
+          </div>
+          <div class="form-group">
+            <label class="label">当前密码</label>
+            <input class="input" type="password" bind:value={oldEncPass} placeholder="输入当前加密密码" />
+          </div>
+          <div class="form-group">
+            <label class="label">新密码</label>
+            <input class="input" type="password" bind:value={newEncPass} placeholder="至少 6 个字符" />
+          </div>
+          <div class="form-group">
+            <label class="label">确认新密码</label>
+            <input class="input" type="password" bind:value={confirmEncPass} placeholder="再次输入新密码" />
+          </div>
+          <div class="form-actions">
+            <button class="btn-primary" disabled={changePassLoading} on:click={changePassword}>
+              {changePassLoading ? '修改中...' : '修改密码'}
+            </button>
+          </div>
+          <div class="warn-box">
+            修改密码将重新加密所有远程数据，其他设备需重新输入新密码。
+          </div>
+        </div>
+      {/if}
     {/if}
 
     <!-- 二进制 -->
@@ -512,6 +599,10 @@
   .info-row:last-child { border-bottom: none; }
   .info-label { font-size: 12px; color: rgb(var(--text-secondary)); }
   .info-value { font-size: 12px; color: rgb(var(--text-primary)); }
+  .fingerprint {
+    font-size: 14px; font-weight: 600; letter-spacing: 0.1em;
+    color: rgb(var(--accent));
+  }
 
   .warn-box {
     margin-top: 12px; padding: 10px 14px; border-radius: 6px;

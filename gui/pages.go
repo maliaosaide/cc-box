@@ -932,3 +932,118 @@ func (a *App) revertBinary(name, targetVer string, client *webdav.Client, key []
 	// 再尝试从云端下载
 	_ = binary.Download(client, key, name, targetVer, binPath, nil)
 }
+
+
+// EncryptionStatus 加密状态信息
+type EncryptionStatus struct {
+	Enabled     bool   `json:"enabled"`
+	Fingerprint string `json:"fingerprint"`
+	HasKey      bool   `json:"hasKey"`
+}
+
+// GetEncryptionStatus 返回加密状态和密钥指纹
+func (a *App) GetEncryptionStatus() (*EncryptionStatus, error) {
+	status := &EncryptionStatus{}
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	status.Enabled = cfg.Encryption.Enabled
+	keyPath := config.CCBoxDir() + "/key.bin"
+	keyData, err := os.ReadFile(keyPath)
+	if err != nil {
+		status.HasKey = false
+		return status, nil
+	}
+	status.HasKey = true
+	status.Fingerprint = crypto.KeyFingerprint(keyData)
+	return status, nil
+}
+
+// VerifyEncryptionKey 验证本地密钥能否解密远程数据
+func (a *App) VerifyEncryptionKey() (bool, error) {
+	_, client, key, err := a.loadClients()
+	if err != nil {
+		return false, err
+	}
+	headData, _, err := client.GET("HEAD")
+	if err != nil || string(headData) == "" {
+		return false, fmt.Errorf("无法读取远程 HEAD")
+	}
+	snapID := strings.TrimSpace(string(headData))
+	encData, _, err := client.GET("snapshots/" + snapID + ".json.enc")
+	if err != nil {
+		return false, fmt.Errorf("无法下载远程快照: %w", err)
+	}
+	_, err = crypto.Decrypt(encData, key)
+	return err == nil, nil
+}
+
+// rotateRemoteData 用旧密钥解密所有远程快照并用新密钥重新加密
+func (a *App) rotateRemoteData(client *webdav.Client, oldKey, newKey []byte) error {
+	headData, _, err := client.GET("HEAD")
+	if err != nil {
+		return nil
+	}
+	headID := strings.TrimSpace(string(headData))
+	for headID != "" {
+		snapPath := "snapshots/" + headID + ".json.enc"
+		encData, _, err := client.GET(snapPath)
+		if err != nil {
+			break
+		}
+		plainData, err := crypto.Decrypt(encData, oldKey)
+		if err != nil {
+			break
+		}
+		newEncData, err := crypto.Encrypt(plainData, newKey)
+		if err != nil {
+			break
+		}
+		client.PUT(snapPath, newEncData, "")
+		var snap struct {
+			Parent string `json:"parent"`
+		}
+		json.Unmarshal(plainData, &snap)
+		headID = snap.Parent
+	}
+	return nil
+}
+
+// ChangeEncryptionPassword 修改加密密码
+func (a *App) ChangeEncryptionPassword(oldPassword, newPassword string) error {
+	keyPath := config.CCBoxDir() + "/key.bin"
+	saltPath := config.CCBoxDir() + "/salt.bin"
+	keyData, err := os.ReadFile(keyPath)
+	if err != nil {
+		return fmt.Errorf("无法读取密钥: %w", err)
+	}
+	saltData, err := os.ReadFile(saltPath)
+	if err != nil {
+		return fmt.Errorf("无法读取 salt: %w", err)
+	}
+	// 验证旧密码
+	oldKey := crypto.DeriveKey(oldPassword, saltData)
+	if !crypto.ConstantTimeEqual(oldKey, keyData) {
+		return fmt.Errorf("旧密码不正确")
+	}
+	// 生成新 salt 和密钥
+	newSalt, err := crypto.GenerateSalt()
+	if err != nil {
+		return err
+	}
+	newKey := crypto.DeriveKey(newPassword, newSalt)
+	// 轮换远程加密数据
+	_, client, _, err := a.loadClients()
+	if err != nil {
+		return err
+	}
+	err = a.rotateRemoteData(client, keyData, newKey)
+	if err != nil {
+		return fmt.Errorf("轮换远程数据失败: %w", err)
+	}
+	// 保存新 salt 和密钥
+	os.WriteFile(saltPath, newSalt, 0600)
+	os.WriteFile(keyPath, newKey, 0600)
+	return nil
+}

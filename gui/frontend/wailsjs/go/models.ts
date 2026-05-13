@@ -187,6 +187,22 @@ export namespace main {
 	        this.enabled = source["enabled"];
 	    }
 	}
+	export class EncryptionStatus {
+	    enabled: boolean;
+	    fingerprint: string;
+	    hasKey: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new EncryptionStatus(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.fingerprint = source["fingerprint"];
+	        this.hasKey = source["hasKey"];
+	    }
+	}
 	export class DeviceView {
 	    id: string;
 	    name: string;

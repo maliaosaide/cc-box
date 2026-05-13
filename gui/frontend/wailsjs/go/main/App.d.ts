@@ -30,6 +30,8 @@ export function GetBinaryStorage():Promise<main.BinaryStorageInfo>;
 
 export function GetConfig():Promise<main.ConfigView>;
 
+export function GetEncryptionStatus():Promise<main.EncryptionStatus>;
+
 export function GetConflictDetail(arg1:string):Promise<main.ConflictDetail>;
 
 export function GetDashboard():Promise<main.DashboardData>;
@@ -81,6 +83,10 @@ export function SwitchBinaryVersion(arg1:string,arg2:string):Promise<void>;
 export function RevertToSnapshot(arg1:string):Promise<void>;
 
 export function TestConnection():Promise<main.ConnectionTest>;
+
+export function VerifyEncryptionKey():Promise<boolean>;
+
+export function ChangeEncryptionPassword(arg1:string,arg2:string):Promise<void>;
 
 export function TestWebDAVConnection(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
 
