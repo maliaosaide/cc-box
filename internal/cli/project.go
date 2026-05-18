@@ -138,7 +138,7 @@ func runProjectPull(cmd *cobra.Command, args []string) error {
 	}
 
 	// 列出云端项目
-	files, err := client.PROPFIND("projects/", 1)
+	files, err := listRemoteFilesRecursive(client, "projects/")
 	if err != nil {
 		if strings.Contains(err.Error(), "404") {
 			fmt.Println("云端没有项目配置")
@@ -158,23 +158,21 @@ func runProjectPull(cmd *cobra.Command, args []string) error {
 	orphanIdx, _ := project.LoadOrphanIndex()
 
 	pulled := 0
-	for _, f := range files {
-		if f.IsDir {
-			continue
-		}
-		if !strings.HasSuffix(f.Path, ".claude.json.enc") {
+	for _, remotePath := range files {
+		if !strings.HasSuffix(remotePath, ".claude.json.enc") {
 			continue
 		}
 
 		// 从路径提取 encoded remote
-		parts := strings.Split(f.Path, "/")
+		relPath := strings.TrimPrefix(remotePath, "projects/")
+		parts := strings.Split(relPath, "/")
 		if len(parts) < 2 {
 			continue
 		}
 		encoded := parts[0]
 
 		// 下载并解密
-		encrypted, _, err := client.GET("projects/" + f.Path)
+		encrypted, _, err := client.GET(remotePath)
 		if err != nil {
 			fmt.Printf("  下载失败: %v\n", err)
 			continue

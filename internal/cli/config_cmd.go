@@ -124,93 +124,26 @@ func runConfigRekey(cmd *cobra.Command, args []string) error {
 	}
 	newKey := crypto.DeriveKey(newPassword, newSalt)
 
-	// 轮转所有 objects 和 snapshots
 	fmt.Println("开始密钥轮转...")
-
-	// 列出所有 snapshots
-	files, err := client.PROPFIND("snapshots/", 1)
+	rotated, err := rotateRemoteEncryptedData(client, oldKey, newKey)
 	if err != nil {
-		return fmt.Errorf("列出快照失败: %w", err)
+		return err
 	}
 
-	rotated := 0
-	for _, f := range files {
-		if f.IsDir || !strings.HasSuffix(f.Path, ".enc") {
-			continue
-		}
-
-		// 下载 → 旧密钥解密 → 新密钥加密 → 上传
-		encrypted, _, err := client.GET("snapshots/" + f.Path)
-		if err != nil {
-			fmt.Printf("  跳过 %s: %v\n", f.Path, err)
-			continue
-		}
-
-		plaintext, err := crypto.Decrypt(encrypted, oldKey)
-		if err != nil {
-			fmt.Printf("  解密失败 %s: %v\n", f.Path, err)
-			continue
-		}
-
-		newEncrypted, err := crypto.Encrypt(plaintext, newKey)
-		if err != nil {
-			fmt.Printf("  加密失败 %s: %v\n", f.Path, err)
-			continue
-		}
-
-		if _, err := client.PUT("snapshots/"+f.Path, newEncrypted, ""); err != nil {
-			fmt.Printf("  上传失败 %s: %v\n", f.Path, err)
-			continue
-		}
-		rotated++
+	if _, err := client.PUT("salt.bin", newSalt, ""); err != nil {
+		_, _ = rotateRemoteEncryptedData(client, newKey, oldKey)
+		return fmt.Errorf("上传新 salt 失败: %w", err)
 	}
-
-	// 轮转 objects
-	objFiles, _ := client.PROPFIND("objects/", 1)
-	for _, f := range objFiles {
-		if f.IsDir || !strings.HasSuffix(f.Path, ".enc") {
-			continue
-		}
-
-		encrypted, _, err := client.GET("objects/" + f.Path)
-		if err != nil {
-			continue
-		}
-
-		plaintext, err := crypto.Decrypt(encrypted, oldKey)
-		if err != nil {
-			continue
-		}
-
-		newEncrypted, _ := crypto.Encrypt(plaintext, newKey)
-		client.PUT("objects/"+f.Path, newEncrypted, "")
-		rotated++
+	if err := os.WriteFile(config.CCBoxDir()+"/salt.bin", newSalt, 0600); err != nil {
+		_, _ = rotateRemoteEncryptedData(client, newKey, oldKey)
+		_, _ = client.PUT("salt.bin", salt, "")
+		return fmt.Errorf("保存新 salt 失败: %w", err)
 	}
-
-	// 上传新 salt
-	client.PUT("salt.bin", newSalt, "")
-
-	// 轮转 projects/ 下的加密文件
-	projFiles, _ := client.PROPFIND("projects/", 2)
-	for _, f := range projFiles {
-		if f.IsDir || !strings.HasSuffix(f.Path, ".enc") {
-			continue
-		}
-		encData, _, err := client.GET("projects/" + f.Path)
-		if err != nil {
-			continue
-		}
-		plain, err := crypto.Decrypt(encData, oldKey)
-		if err != nil {
-			continue
-		}
-		newEnc, _ := crypto.Encrypt(plain, newKey)
-		client.PUT("projects/"+f.Path, newEnc, "")
-		rotated++
+	if err := crypto.SaveKey(newKey, config.KeyPath()); err != nil {
+		_, _ = rotateRemoteEncryptedData(client, newKey, oldKey)
+		_, _ = client.PUT("salt.bin", salt, "")
+		return fmt.Errorf("保存新密钥失败: %w", err)
 	}
-
-	// 更新本地密钥
-	crypto.SaveKey(newKey, config.KeyPath())
 
 	fmt.Printf("密钥轮转完成，已处理 %d 个文件\n", rotated)
 	_ = cfg
@@ -247,7 +180,7 @@ func runConfigWebdav(cmd *cobra.Command, args []string) error {
 	// 测试连接
 	fmt.Print("测试连接... ")
 	testPass, _ := config.LoadWebDAVPassword()
-	client := webdav.NewClient(cfg.WebDAV.URL, cfg.WebDAV.Username, testPass)
+	client := webdav.NewClient(config.ConfiguredWebDAVURL(cfg), cfg.WebDAV.Username, testPass)
 	if _, err := client.Exists("/"); err != nil {
 		return fmt.Errorf("连接失败: %w", err)
 	}
@@ -271,6 +204,107 @@ func getConfigValue(cfg *config.Config, key string) string {
 	default:
 		return ""
 	}
+}
+
+func rotateRemoteEncryptedData(client *webdav.Client, oldKey, newKey []byte) (int, error) {
+	type rotationFile struct {
+		path    string
+		oldData []byte
+		oldETag string
+		newData []byte
+		newETag string
+	}
+
+	roots := []string{"snapshots/", "objects/", "projects/", "binaries/"}
+	var rotations []rotationFile
+	for _, root := range roots {
+		files, err := listRemoteFilesRecursive(client, root)
+		if err != nil {
+			return 0, err
+		}
+		for _, remotePath := range files {
+			if !strings.HasSuffix(remotePath, ".enc") {
+				continue
+			}
+			encData, etag, err := client.GET(remotePath)
+			if err != nil {
+				return 0, fmt.Errorf("读取 %s 失败: %w", remotePath, err)
+			}
+			plainData, err := crypto.Decrypt(encData, oldKey)
+			if err != nil {
+				return 0, fmt.Errorf("解密 %s 失败: %w", remotePath, err)
+			}
+			newEncData, err := crypto.Encrypt(plainData, newKey)
+			if err != nil {
+				return 0, fmt.Errorf("加密 %s 失败: %w", remotePath, err)
+			}
+			rotations = append(rotations, rotationFile{path: remotePath, oldData: encData, oldETag: etag, newData: newEncData})
+		}
+	}
+
+	rollback := func(applied []rotationFile) error {
+		var rollbackErr error
+		for i := len(applied) - 1; i >= 0; i-- {
+			file := applied[i]
+			if _, err := client.PUT(file.path, file.oldData, file.newETag); err != nil && rollbackErr == nil {
+				rollbackErr = fmt.Errorf("回滚 %s 失败: %w", file.path, err)
+			}
+		}
+		return rollbackErr
+	}
+
+	applied := make([]rotationFile, 0, len(rotations))
+	for _, file := range rotations {
+		newETag, err := client.PUT(file.path, file.newData, file.oldETag)
+		if err != nil {
+			if rollbackErr := rollback(applied); rollbackErr != nil {
+				return len(applied), fmt.Errorf("轮换 %s 失败: %w；%v", file.path, err, rollbackErr)
+			}
+			return len(applied), fmt.Errorf("轮换 %s 失败: %w", file.path, err)
+		}
+		file.newETag = newETag
+		applied = append(applied, file)
+	}
+	return len(applied), nil
+}
+
+func listRemoteFilesRecursive(client *webdav.Client, dir string) ([]string, error) {
+	entries, err := client.PROPFIND(dir, 1)
+	if err == webdav.ErrNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, entry := range entries {
+		remotePath := normalizeRemoteChildPath(dir, entry.Path)
+		if strings.TrimSuffix(remotePath, "/") == strings.TrimSuffix(strings.TrimPrefix(dir, "/"), "/") {
+			continue
+		}
+		if entry.IsDir {
+			if !strings.HasSuffix(remotePath, "/") {
+				remotePath += "/"
+			}
+			children, err := listRemoteFilesRecursive(client, remotePath)
+			if err != nil {
+				return nil, err
+			}
+			files = append(files, children...)
+			continue
+		}
+		files = append(files, remotePath)
+	}
+	return files, nil
+}
+
+func normalizeRemoteChildPath(dir, child string) string {
+	child = strings.TrimPrefix(child, "/")
+	dir = strings.TrimPrefix(dir, "/")
+	if strings.HasPrefix(child, dir) {
+		return child
+	}
+	return dir + child
 }
 
 func setConfigValue(cfg *config.Config, key, value string) error {

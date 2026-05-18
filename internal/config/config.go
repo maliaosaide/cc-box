@@ -35,10 +35,10 @@ type EncryptionConfig struct {
 }
 
 type SyncConfig struct {
-	SnapshotLimit     int    `mapstructure:"snapshot_limit"`
-	ConflictStrategy  string `mapstructure:"conflict_strategy"`
-	MergeRetryMax     int    `mapstructure:"merge_retry_max"`
-	AutoSyncInterval  string `mapstructure:"auto_sync_interval"`
+	SnapshotLimit    int    `mapstructure:"snapshot_limit"`
+	ConflictStrategy string `mapstructure:"conflict_strategy"`
+	MergeRetryMax    int    `mapstructure:"merge_retry_max"`
+	AutoSyncInterval string `mapstructure:"auto_sync_interval"`
 }
 
 type DeviceConfig struct {
@@ -102,7 +102,7 @@ func DefaultConfig() *Config {
 			ID:   GenerateDeviceID(),
 			Name: hostname(),
 		},
-			Binary: BinaryConfig{
+		Binary: BinaryConfig{
 			Encrypt:          false,
 			ChunkMode:        "auto",
 			ChunkSizeMB:      10,
@@ -154,6 +154,9 @@ func ClaudeDir() string {
 // 直接用 viper 读取，绕过 Unmarshal 对 PascalCase key 的匹配问题
 func LocalBinDir() string {
 	v := loadViper()
+	if val := v.GetString("binary.bin_dir"); val != "" {
+		return expandHome(val)
+	}
 	if val := v.GetString("binary.bindir"); val != "" {
 		return expandHome(val)
 	}
@@ -164,11 +167,27 @@ func LocalBinDir() string {
 // VersionsDir 返回版本存档目录路径
 func VersionsDir() string {
 	v := loadViper()
+	if val := v.GetString("binary.versions_dir"); val != "" {
+		return expandHome(val)
+	}
 	if val := v.GetString("binary.versionsdir"); val != "" {
 		return expandHome(val)
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".local", "share", "claude", "versions")
+}
+
+func WebDAVBaseURL(url, root string) string {
+	base := strings.TrimRight(url, "/")
+	root = strings.Trim(root, "/")
+	if root != "" {
+		base += "/" + root
+	}
+	return base + "/"
+}
+
+func ConfiguredWebDAVURL(cfg *Config) string {
+	return WebDAVBaseURL(cfg.WebDAV.URL, cfg.WebDAV.Root)
 }
 
 // loadViper 加载配置文件的 viper 实例
@@ -220,6 +239,12 @@ func Load() (*Config, error) {
 	if err := v.Unmarshal(cfg); err != nil {
 		return nil, fmt.Errorf("解析配置失败: %w", err)
 	}
+	if cfg.Binary.BinDir == "" {
+		cfg.Binary.BinDir = v.GetString("binary.bindir")
+	}
+	if cfg.Binary.VersionsDir == "" {
+		cfg.Binary.VersionsDir = v.GetString("binary.versionsdir")
+	}
 	return cfg, nil
 }
 
@@ -235,13 +260,39 @@ func Save(cfg *Config) error {
 	v.SetConfigType("toml")
 	v.AddConfigPath(dir)
 
-	v.Set("webdav", cfg.WebDAV)
-	v.Set("encryption", cfg.Encryption)
-	v.Set("sync", cfg.Sync)
-	v.Set("device", cfg.Device)
-	v.Set("claude", cfg.Claude)
-	v.Set("binary", cfg.Binary)
-	v.Set("exclude", cfg.Exclude)
+	v.Set("webdav", map[string]interface{}{
+		"url":      cfg.WebDAV.URL,
+		"username": cfg.WebDAV.Username,
+		"root":     cfg.WebDAV.Root,
+	})
+	v.Set("encryption", map[string]interface{}{
+		"enabled": cfg.Encryption.Enabled,
+	})
+	v.Set("sync", map[string]interface{}{
+		"snapshot_limit":     cfg.Sync.SnapshotLimit,
+		"conflict_strategy":  cfg.Sync.ConflictStrategy,
+		"merge_retry_max":    cfg.Sync.MergeRetryMax,
+		"auto_sync_interval": cfg.Sync.AutoSyncInterval,
+	})
+	v.Set("device", map[string]interface{}{
+		"id":   cfg.Device.ID,
+		"name": cfg.Device.Name,
+	})
+	v.Set("claude", map[string]interface{}{
+		"path": cfg.Claude.Path,
+	})
+	v.Set("binary", map[string]interface{}{
+		"encrypt":            cfg.Binary.Encrypt,
+		"chunk_mode":         cfg.Binary.ChunkMode,
+		"chunk_size_mb":      cfg.Binary.ChunkSizeMB,
+		"chunk_threshold_mb": cfg.Binary.ChunkThresholdMB,
+		"auto_upload":        cfg.Binary.AutoUpload,
+		"bin_dir":            cfg.Binary.BinDir,
+		"versions_dir":       cfg.Binary.VersionsDir,
+	})
+	v.Set("exclude", map[string]interface{}{
+		"patterns": cfg.Exclude.Patterns,
+	})
 
 	configPath := filepath.Join(dir, "config.toml")
 	return v.WriteConfigAs(configPath)

@@ -3,12 +3,15 @@
 package binary
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/user/cc-box/internal/config"
 	"github.com/user/cc-box/internal/crypto"
+	"github.com/user/cc-box/internal/object"
 	"github.com/user/cc-box/internal/webdav"
 )
 
@@ -43,6 +46,9 @@ func Download(client *webdav.Client, key []byte, name string, version string, ta
 	if err != nil {
 		return err
 	}
+	if !object.ValidateHash(data, v.Hash) {
+		return fmt.Errorf("二进制 hash 校验失败: %s", v.Hash)
+	}
 
 	os.MkdirAll(filepath.Dir(targetPath), 0755)
 	if err := os.WriteFile(targetPath, data, 0755); err != nil {
@@ -63,6 +69,15 @@ func downloadChunked(client *webdav.Client, key []byte, hash string, totalSize i
 	manifest, err := DeserializeManifest(manifestData)
 	if err != nil {
 		return nil, err
+	}
+	if manifest.Hash != hash {
+		return nil, fmt.Errorf("manifest hash 不匹配: %s", manifest.Hash)
+	}
+	if manifest.TotalSize != totalSize {
+		return nil, fmt.Errorf("manifest size 不匹配: %d", manifest.TotalSize)
+	}
+	if len(manifest.PartHashes) != manifest.TotalParts {
+		return nil, fmt.Errorf("manifest 分块 hash 数量不匹配")
 	}
 
 	ext := extForEncrypted(encrypted)
@@ -85,6 +100,11 @@ func downloadChunked(client *webdav.Client, key []byte, hash string, totalSize i
 			chunk = payload
 		}
 
+		partHash := sha256.Sum256(chunk)
+		if hex.EncodeToString(partHash[:]) != manifest.PartHashes[i] {
+			return nil, fmt.Errorf("分块 %d hash 校验失败", i)
+		}
+
 		result = append(result, chunk...)
 
 		if progress != nil {
@@ -92,6 +112,9 @@ func downloadChunked(client *webdav.Client, key []byte, hash string, totalSize i
 		}
 	}
 
+	if int64(len(result)) != totalSize {
+		return nil, fmt.Errorf("下载大小不匹配: %d", len(result))
+	}
 	return result, nil
 }
 

@@ -2,7 +2,6 @@
   import { onMount } from 'svelte'
   import { GetProjectList, GetProjectDetail, AddProjectPath, BrowseFolder, DeleteOrphan } from '../../wailsjs/go/main/App.js'
 
-  export let syncState = 'idle'
   let data = null
   let loading = true
   let error = ''
@@ -99,7 +98,7 @@
         </div>
         <div class="project-list">
           {#each data.projects as proj, i}
-            <div class="proj-row" on:click={() => toggleExpand(i, proj.path)}>
+            <button class="proj-row" type="button" on:click={() => toggleExpand(i, proj.path)}>
               <div class="proj-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16">
                   <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
@@ -113,7 +112,7 @@
                 <span class="proj-mcp">{proj.mcpCount} MCP</span>
               {/if}
               <span class="proj-arrow" class:open={expandedIdx === i}>▶</span>
-            </div>
+            </button>
 
             {#if expandedIdx === i}
               <div class="proj-detail animate-fade-in">
@@ -188,8 +187,9 @@
 
   .project-list { display: flex; flex-direction: column; }
   .proj-row {
-    display: flex; align-items: center; gap: 10px;
-    padding: 10px 0; border-bottom: 1px solid rgba(46,45,51,0.4);
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    padding: 10px 0; border: 0; border-bottom: 1px solid rgba(46,45,51,0.4);
+    background: transparent; color: inherit; font: inherit; text-align: left;
     cursor: pointer; transition: all 0.2s;
   }
   .proj-row:last-child { border-bottom: none; }

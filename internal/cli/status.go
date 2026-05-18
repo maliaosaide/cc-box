@@ -4,6 +4,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/user/cc-box/internal/config"
@@ -40,7 +41,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	client := webdav.NewClient(cfg.WebDAV.URL, cfg.WebDAV.Username, pass)
+	client := webdav.NewClient(config.ConfiguredWebDAVURL(cfg), cfg.WebDAV.Username, pass)
 
 	// 读取本地 HEAD
 	localHead, err := loadLocalHEAD()
@@ -53,19 +54,12 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	if err != nil && err != webdav.ErrNotFound {
 		return fmt.Errorf("读取远程 HEAD 失败: %w", err)
 	}
-	remoteHead := string(remoteHeadData)
+	remoteHead := strings.TrimSpace(string(remoteHeadData))
 
 	// 基本状态
 	fmt.Printf("设备: %s (%s)\n", cfg.Device.Name, cfg.Device.ID)
 	fmt.Printf("本地快照: %s\n", headDisplay(localHead))
 	fmt.Printf("远程快照: %s\n", headDisplay(remoteHead))
-
-	if localHead == remoteHead {
-		fmt.Println("\n状态: 已同步 ✓")
-		return nil
-	}
-
-	fmt.Println("\n状态: 待同步")
 
 	// 扫描本地文件
 	scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
@@ -92,15 +86,24 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// 本地变更（相对于本地 HEAD）
+	var localChanges []snapshot.Change
 	if localSnap != nil {
 		currentSnap := snapshot.CreateSnapshot("", cfg.Device.ID, "", scanResult.Files)
-		localChanges := localSnap.Diff(currentSnap)
-		if len(localChanges) > 0 {
-			fmt.Printf("\n本地变更 (%d):\n", len(localChanges))
-			for _, c := range localChanges {
-				fmt.Printf("  %s %s\n", changeIcon(c.Type), c.Path)
-			}
+		localChanges = localSnap.Diff(currentSnap)
+	}
+
+	if localHead == remoteHead && len(localChanges) == 0 {
+		fmt.Println("\n状态: 已同步 ✓")
+		return nil
+	}
+
+	fmt.Println("\n状态: 待同步")
+
+	// 本地变更（相对于本地 HEAD）
+	if len(localChanges) > 0 {
+		fmt.Printf("\n本地变更 (%d):\n", len(localChanges))
+		for _, c := range localChanges {
+			fmt.Printf("  %s %s\n", changeIcon(c.Type), c.Path)
 		}
 	}
 

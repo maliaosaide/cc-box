@@ -5,11 +5,13 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/user/cc-box/internal/config"
 	"github.com/user/cc-box/internal/crypto"
+	"github.com/user/cc-box/internal/normalize"
 	"github.com/user/cc-box/internal/object"
 	"github.com/user/cc-box/internal/snapshot"
 	"github.com/user/cc-box/internal/webdav"
@@ -45,7 +47,7 @@ func runPush(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	client := webdav.NewClient(cfg.WebDAV.URL, cfg.WebDAV.Username, pass)
+	client := webdav.NewClient(config.ConfiguredWebDAVURL(cfg), cfg.WebDAV.Username, pass)
 
 	localHead, err := loadLocalHEAD()
 	if err != nil {
@@ -118,17 +120,22 @@ func runPush(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		fullPath := config.ClaudeDir() + "/" + c.Path
+		fullPath, err := safeClaudePath(c.Path)
+		if err != nil {
+			return err
+		}
 		data, err := os.ReadFile(fullPath)
 		if err != nil {
-			fmt.Printf("  跳过 %s: %v\n", c.Path, err)
-			continue
+			return fmt.Errorf("读取文件 %s 失败: %w", c.Path, err)
 		}
 
-		normData := normalizeContent(data)
-		if _, err := store.Upload(normData); err != nil {
-			fmt.Printf("  上传失败 %s: %v\n", c.Path, err)
-			continue
+		normData := normalize.HashContent(data)
+		hash, err := store.Upload(normData)
+		if err != nil {
+			return fmt.Errorf("上传文件 %s 失败: %w", c.Path, err)
+		}
+		if hash != c.NewHash {
+			return fmt.Errorf("文件 %s hash 不一致", c.Path)
 		}
 		uploaded++
 	}
@@ -140,7 +147,7 @@ func runPush(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("上传快照失败: %w", err)
 	}
 
-	if err := pushUpdateHEAD(client, cfg, newSnap.ID); err != nil {
+	if err := pushUpdateHEAD(client, cfg, newSnap.ID, localHead); err != nil {
 		return err
 	}
 
@@ -160,14 +167,25 @@ func runPush(cmd *cobra.Command, args []string) error {
 }
 
 // pushUpdateHEAD 带重试的乐观锁更新远程 HEAD
-func pushUpdateHEAD(client *webdav.Client, cfg *config.Config, newID string) error {
+func pushUpdateHEAD(client *webdav.Client, cfg *config.Config, newID, expectedHead string) error {
 	for attempt := 0; attempt < cfg.Sync.MergeRetryMax; attempt++ {
 		currentData, currentETag, err := client.GET("HEAD")
-		if err != nil && err != webdav.ErrNotFound {
+		if err == webdav.ErrNotFound {
+			if expectedHead != "" {
+				return fmt.Errorf("远程 HEAD 不存在，请先 pull")
+			}
+		} else if err != nil {
 			return fmt.Errorf("读取远程 HEAD 失败: %w", err)
 		}
 
-		_ = currentData
+		currentHead := strings.TrimSpace(string(currentData))
+		if currentHead != expectedHead {
+			return fmt.Errorf("远程 HEAD 已更新为 %s，请先 pull", headDisplay(currentHead))
+		}
+		if currentHead != "" && currentETag == "" {
+			return fmt.Errorf("远程服务未返回 HEAD ETag，无法安全更新")
+		}
+
 		result, err := client.CompareAndSwapHEAD("HEAD", newID, currentETag)
 		if err != nil {
 			return fmt.Errorf("更新 HEAD 失败: %w", err)

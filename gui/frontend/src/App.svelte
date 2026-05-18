@@ -62,16 +62,16 @@
           <Files bind:syncState on:navigate={navigate} />
         </div>
         <div class="page-panel" class:active={currentPage === 'binaries'}>
-          <Binaries bind:syncState on:navigate={navigate} />
+          <Binaries on:navigate={navigate} />
         </div>
         <div class="page-panel" class:active={currentPage === 'projects'}>
-          <Projects bind:syncState on:navigate={navigate} />
+          <Projects on:navigate={navigate} />
         </div>
         <div class="page-panel" class:active={currentPage === 'history'}>
-          <History bind:syncState on:navigate={navigate} />
+          <History on:navigate={navigate} />
         </div>
         <div class="page-panel" class:active={currentPage === 'settings'}>
-          <Settings bind:syncState on:navigate={navigate} />
+          <Settings on:navigate={navigate} />
         </div>
       </main>
     </div>

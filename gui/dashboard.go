@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -211,7 +210,7 @@ func (a *App) loadClientKey(cfg *config.Config) (*webdav.Client, []byte, error) 
 	if err != nil {
 		return nil, nil, err
 	}
-	client := webdav.NewClient(cfg.WebDAV.URL, cfg.WebDAV.Username, pass)
+	client := newConfiguredWebDAVClient(cfg, pass)
 	return client, key, nil
 }
 
@@ -254,6 +253,11 @@ func (a *App) QuickPush() int64 {
 			return nil
 		}
 
+		_, headETag, err := remoteHeadETagForUpdate(client, localHeadStr)
+		if err != nil {
+			return err
+		}
+
 		total := int64(len(changes))
 		store := object.NewStore(client, key, config.CCBoxDir()+"/cache/objects")
 		uploaded := 0
@@ -267,13 +271,18 @@ func (a *App) QuickPush() int64 {
 			if c.Type == snapshot.Deleted {
 				continue
 			}
-			fullPath := filepath.Join(config.ClaudeDir(), filepath.FromSlash(c.Path))
-			data, err := os.ReadFile(fullPath)
+			fullPath, err := safeClaudePath(c.Path)
 			if err != nil {
-				continue
+				return err
 			}
-			if _, err := store.Upload(data); err != nil {
-				continue
+			data, err := readObjectData(fullPath)
+			if err != nil {
+				return fmt.Errorf("读取文件 %s 失败: %w", c.Path, err)
+			}
+			if hash, err := store.Upload(data); err != nil {
+				return fmt.Errorf("上传文件 %s 失败: %w", c.Path, err)
+			} else if hash != c.NewHash {
+				return fmt.Errorf("文件 %s hash 不一致", c.Path)
 			}
 			uploaded++
 			a.emitProgress(opID, "quick-push", int64(i+1), total, int(i+1), int(total), fmt.Sprintf("推送 %s", c.Path))
@@ -287,33 +296,29 @@ func (a *App) QuickPush() int64 {
 		if err != nil {
 			return fmt.Errorf("加密快照失败: %w", err)
 		}
-		client.EnsureDir("snapshots/")
+		if err := client.EnsureDir("snapshots/"); err != nil {
+			return fmt.Errorf("创建快照目录失败: %w", err)
+		}
 		if _, err := client.PUT("snapshots/"+newSnap.ID+".json.enc", encrypted, ""); err != nil {
 			return fmt.Errorf("上传快照失败: %w", err)
 		}
 
 		// 乐观锁更新 HEAD
-		for attempt := 0; attempt < cfg.Sync.MergeRetryMax; attempt++ {
-			_, currentETag, err := client.GET("HEAD")
-			if err != nil && err != webdav.ErrNotFound {
-				return fmt.Errorf("读取远程 HEAD 失败: %w", err)
-			}
-			result, err := client.CompareAndSwapHEAD("HEAD", newSnap.ID, currentETag)
-			if err != nil {
-				return fmt.Errorf("更新 HEAD 失败: %w", err)
-			}
-			if result.Success {
-				break
-			}
-			time.Sleep(time.Duration(attempt+1) * time.Second)
-			if attempt == cfg.Sync.MergeRetryMax-1 {
-				return fmt.Errorf("推送冲突，请先拉取")
-			}
+		result, err := client.CompareAndSwapHEAD("HEAD", newSnap.ID, headETag)
+		if err != nil {
+			return fmt.Errorf("更新 HEAD 失败: %w", err)
+		}
+		if !result.Success {
+			return fmt.Errorf("远程 HEAD 已变化，请先拉取")
 		}
 
 		// 更新本地
-		os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(newSnap.ID), 0600)
-		os.WriteFile(config.CCBoxDir()+"/snapshots/"+newSnap.ID+".json", snapData, 0600)
+		if err := os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(newSnap.ID), 0600); err != nil {
+			return fmt.Errorf("更新本地 HEAD 失败: %w", err)
+		}
+		if err := os.WriteFile(config.CCBoxDir()+"/snapshots/"+newSnap.ID+".json", snapData, 0600); err != nil {
+			return fmt.Errorf("缓存快照失败: %w", err)
+		}
 
 		UpdateTrayState(TraySynced)
 		a.emitProgress(opID, "quick-push", total, total, int(total), int(total), fmt.Sprintf("已推送 %d 个变更", uploaded))
@@ -349,59 +354,22 @@ func (a *App) QuickPull() int64 {
 			return fmt.Errorf("加载远程快照失败: %w", err)
 		}
 
-		// 扫描本地，计算需要下载的文件
-		scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
-		scanResult, err := scanner.Scan()
+		UpdateTrayState(TraySyncing)
+		result, err := a.applyRemoteSnapshot(ctx, opID, "quick-pull", cfg, client, key, remoteHead, remoteSnap)
 		if err != nil {
-			return fmt.Errorf("扫描失败: %w", err)
+			return err
+		}
+		if result.Conflicts > 0 {
+			UpdateTrayState(TrayConflict)
+			return fmt.Errorf("发现 %d 个冲突，请在文件页选择以本地或远程为准", result.Conflicts)
 		}
 
-		var toDownload []string
-		for path, remoteEntry := range remoteSnap.Files {
-			localEntry, exists := scanResult.Files[path]
-			if !exists || localEntry.Hash != remoteEntry.Hash {
-				toDownload = append(toDownload, path)
-			}
-		}
-
-		if len(toDownload) == 0 {
-			os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(remoteHead), 0600)
+		UpdateTrayState(TraySynced)
+		if result.Applied == 0 {
 			a.emitProgress(opID, "quick-pull", 1, 1, 1, 1, "已是最新")
 			return nil
 		}
-
-		UpdateTrayState(TraySyncing)
-		store := object.NewStore(client, key, config.CCBoxDir()+"/cache/objects")
-		total := int64(len(toDownload))
-		applied := 0
-
-		for i, path := range toDownload {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-			remoteEntry, ok := remoteSnap.Files[path]
-			if !ok {
-				continue
-			}
-			data, err := store.Download(remoteEntry.Hash)
-			if err != nil {
-				continue
-			}
-			fullPath := filepath.Join(config.ClaudeDir(), filepath.FromSlash(path))
-			os.MkdirAll(filepath.Dir(fullPath), 0755)
-			os.WriteFile(fullPath, data, 0600)
-			applied++
-			a.emitProgress(opID, "quick-pull", int64(i+1), total, int(i+1), int(total), fmt.Sprintf("拉取 %s", path))
-		}
-
-		os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(remoteHead), 0600)
-		snapData, _ := remoteSnap.Serialize()
-		os.WriteFile(config.CCBoxDir()+"/snapshots/"+remoteHead+".json", snapData, 0600)
-
-		UpdateTrayState(TraySynced)
-		a.emitProgress(opID, "quick-pull", total, total, int(total), int(total), fmt.Sprintf("已拉取 %d 个文件", applied))
+		a.emitProgress(opID, "quick-pull", int64(result.Applied), int64(result.Total), result.Applied, result.Total, fmt.Sprintf("已拉取 %d 个文件", result.Applied))
 		return nil
 	})
 }

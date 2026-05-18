@@ -62,7 +62,7 @@ func (a *App) StartAsync(operation string, fn func(ctx context.Context, opID int
 			result.Status = "error"
 			result.Error = err.Error()
 		}
-		runtime.EventsEmit(a.ctx, "op:complete", result)
+		a.eventsEmit("op:complete", result)
 	}()
 
 	return opID
@@ -76,18 +76,25 @@ func (a *App) CancelOperation(opID int64) {
 
 	if ok {
 		cancel()
-		runtime.EventsEmit(a.ctx, "op:cancelled", OpResult{OpID: opID, Status: "error", Error: "已取消"})
+		a.eventsEmit("op:cancelled", OpResult{OpID: opID, Status: "error", Error: "已取消"})
 	}
 }
 
 // emitProgress 推送进度事件
+func (a *App) eventsEmit(event string, payload interface{}) {
+	if a.ctx == nil {
+		return
+	}
+	runtime.EventsEmit(a.ctx, event, payload)
+}
+
 func (a *App) emitProgress(opID int64, operation string, current, total int64, part, totalPart int, msg string) {
 	var pct float64
 	if total > 0 {
 		pct = float64(current) / float64(total) * 100
 	}
 
-	runtime.EventsEmit(a.ctx, "op:progress", ProgressEvent{
+	a.eventsEmit("op:progress", ProgressEvent{
 		OpID:      opID,
 		Operation: operation,
 		Current:   current,

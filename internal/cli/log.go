@@ -152,7 +152,7 @@ func loadClientAndKey() (*config.Config, *webdav.Client, []byte, error) {
 		return nil, nil, nil, err
 	}
 
-	client := webdav.NewClient(cfg.WebDAV.URL, cfg.WebDAV.Username, pass)
+	client := webdav.NewClient(config.ConfiguredWebDAVURL(cfg), cfg.WebDAV.Username, pass)
 	return cfg, client, key, nil
 }
 

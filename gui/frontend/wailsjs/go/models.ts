@@ -279,6 +279,11 @@ export namespace main {
 	    path: string;
 	    local: string;
 	    remote: string;
+	    localModified: string;
+	    remoteModified: string;
+	    recommended: string;
+	    localExists: boolean;
+	    remoteExists: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new ConflictDetail(source);
@@ -289,6 +294,11 @@ export namespace main {
 	        this.path = source["path"];
 	        this.local = source["local"];
 	        this.remote = source["remote"];
+	        this.localModified = source["localModified"];
+	        this.remoteModified = source["remoteModified"];
+	        this.recommended = source["recommended"];
+	        this.localExists = source["localExists"];
+	        this.remoteExists = source["remoteExists"];
 	    }
 	}
 	export class ConflictRef {

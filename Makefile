@@ -7,7 +7,7 @@ clean:
 	rm -f cc-box.exe
 
 test:
-	go test ./internal/...
+	go test ./internal/... ./gui/...
 
 run: build
 	./cc-box.exe $(ARGS)

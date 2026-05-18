@@ -14,23 +14,23 @@ import (
 )
 
 const (
-	debounceDelay   = 3 * time.Second
-	minAutoSyncGap  = 2 * time.Minute
+	debounceDelay  = 3 * time.Second
+	minAutoSyncGap = 2 * time.Minute
 )
 
 // Watcher 文件变更监听器
 type Watcher struct {
-	fsw       *fsnotify.Watcher
-	dir       string
-	changed   bool
-	mu        sync.Mutex
-	cancel    context.CancelFunc
-	syncing   bool
+	fsw     *fsnotify.Watcher
+	dir     string
+	changed bool
+	mu      sync.Mutex
+	cancel  context.CancelFunc
+	syncing bool
 
 	// 自动同步
-	interval   time.Duration
-	lastSync   time.Time
-	timer      *time.Timer
+	interval time.Duration
+	lastSync time.Time
+	timer    *time.Timer
 }
 
 // NewWatcher 创建监听器
@@ -41,8 +41,8 @@ func NewWatcher() (*Watcher, error) {
 	}
 	dir := config.ClaudeDir()
 	return &Watcher{
-		fsw:     fsw,
-		dir:     dir,
+		fsw:      fsw,
+		dir:      dir,
 		interval: autoSyncInterval(),
 	}, nil
 }
@@ -145,11 +145,22 @@ func (w *Watcher) triggerAutoSync(ctx context.Context) {
 			default:
 			}
 		}
+		opCancelMu.Lock()
+		syncErr := opResults[opID]
+		opCancelMu.Unlock()
+
 		w.mu.Lock()
 		w.syncing = false
 		w.lastSync = time.Now()
-		w.changed = false
+		if syncErr == nil {
+			w.changed = false
+		}
 		w.mu.Unlock()
+
+		if syncErr != nil {
+			UpdateTrayState(TrayConflict)
+			return
+		}
 		UpdateTrayState(TraySynced)
 	}()
 

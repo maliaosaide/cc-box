@@ -16,11 +16,11 @@ import (
 
 // Client WebDAV 客户端
 type Client struct {
-	baseURL      string
-	baseURLPath  string // URL 路径部分，用于 PROPFIND href 匹配
-	username     string
-	password     string
-	http         *http.Client
+	baseURL     string
+	baseURLPath string // URL 路径部分，用于 PROPFIND href 匹配
+	username    string
+	password    string
+	http        *http.Client
 }
 
 // NewClient 创建 WebDAV 客户端
@@ -302,7 +302,7 @@ func parseMultiStatus(data []byte, c *Client) ([]FileInfo, error) {
 		}
 
 		prop := resp.PropStat[0].Prop
-		isDir := prop.ResourceType.Collection != ""
+		isDir := prop.ResourceType.Collection != nil
 
 		// 从 href 中提取相对路径
 		// href 可能是完整路径如 /alist/dav/webdav-test/cc-box-test/propfind-test/

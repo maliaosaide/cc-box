@@ -3,8 +3,6 @@
   import { EventsOn } from '../../wailsjs/runtime/runtime.js'
   import { GetLocalSnapshotList, GetSnapshotList, GetSnapshotDetail, RevertToSnapshot } from '../../wailsjs/go/main/App.js'
 
-  export let syncState = 'idle'
-
   let snapshots = []
   let filtered = []
   let loading = true
@@ -146,7 +144,7 @@
           </div>
 
           <div class="timeline-content">
-            <div class="snap-row" on:click={() => toggleDetail(snap.id)}>
+            <button class="snap-row" type="button" on:click={() => toggleDetail(snap.id)}>
               <div class="snap-main">
                 <span class="snap-id font-mono">{snap.shortId}</span>
                 <span class="snap-time">{snap.timestamp}</span>
@@ -157,7 +155,7 @@
                 <span class="snap-files">{snap.fileCount} 文件</span>
               </div>
               <span class="snap-arrow" class:open={expandedId === snap.id}>▶</span>
-            </div>
+            </button>
 
             {#if expandedId === snap.id}
               <div class="snap-detail animate-fade-in">
@@ -290,9 +288,10 @@
   .timeline-content { flex: 1; min-width: 0; padding-bottom: 4px; }
 
   .snap-row {
-    display: flex; align-items: center; gap: 12px;
+    display: flex; align-items: center; gap: 12px; width: 100%;
     padding: 10px 14px; border-radius: 8px;
     background: rgb(var(--surface-1)); border: 1px solid rgb(var(--border));
+    color: inherit; font: inherit; text-align: left;
     cursor: pointer; transition: all 0.2s;
   }
   .snap-row:hover { border-color: rgba(196,112,78,0.3); }

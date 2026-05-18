@@ -89,12 +89,12 @@
 </script>
 
 {#if node.isDir}
-  <div class="tree-dir" on:click={() => toggleDir(node.path)}>
+  <button class="tree-dir" type="button" on:click={() => toggleDir(node.path)}>
     <span class="dir-arrow" class:open={isExpanded}>▶</span>
     <span class="dir-icon">📁</span>
     <span class="tree-name">{node.name}</span>
     <span class="status-badge {statusClass(aggregateStatus(node))}">{statusIcon(aggregateStatus(node))}</span>
-  </div>
+  </button>
   {#if isExpanded && filteredChildren.length > 0}
     <div class="tree-children">
       {#each filteredChildren as child}
@@ -105,18 +105,19 @@
     </div>
   {/if}
 {:else}
-  <div class="tree-file" class:selected={selectedPath === node.path}
+  <button class="tree-file" class:selected={selectedPath === node.path} type="button"
        on:click={() => selectFile(node.path, node.status)}>
     <span class="status-badge {statusClass(node.status)}">{statusIcon(node.status)}</span>
     <span class="tree-name">{node.name}</span>
     <span class="tree-meta">{formatSize(node.size)}</span>
-  </div>
+  </button>
 {/if}
 
 <style>
   .tree-dir, .tree-file {
-    display: flex; align-items: center; gap: 6px;
-    padding: 4px 10px; cursor: pointer;
+    display: flex; align-items: center; gap: 6px; width: 100%;
+    padding: 4px 10px; border: 0; background: transparent;
+    color: inherit; font: inherit; text-align: left; cursor: pointer;
     transition: background 0.15s;
   }
   .tree-dir:hover, .tree-file:hover { background: rgba(196,112,78,0.04); }

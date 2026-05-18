@@ -126,6 +126,10 @@ func (a *App) GetSnapshotDetail(id string) (*SnapshotDetail, error) {
 
 // loadLocalSnapByID 按 ID 加载本地缓存快照
 func (a *App) loadLocalSnapByID(id string) (*snapshot.Snapshot, error) {
+	id = strings.TrimSpace(id)
+	if err := validateSnapshotID(id); err != nil {
+		return nil, err
+	}
 	snapDir := config.CCBoxDir() + "/snapshots/"
 	data, err := os.ReadFile(snapDir + id + ".json")
 	if err != nil {
@@ -175,6 +179,10 @@ func (a *App) buildSnapshotEntries(headID string, limit int, loader func(id stri
 
 // loadSnapByID 按ID加载快照
 func (a *App) loadSnapByID(client *webdav.Client, key []byte, id string) (*snapshot.Snapshot, error) {
+	id = strings.TrimSpace(id)
+	if err := validateSnapshotID(id); err != nil {
+		return nil, err
+	}
 	if snap, err := a.loadLocalSnapByID(id); err == nil {
 		return snap, nil
 	}
@@ -235,8 +243,14 @@ func (a *App) GetConfig() (*ConfigView, error) {
 	// 读取原始配置中的路径字段（用于编辑回显）
 	v := config.LoadRaw()
 	claudePath := v.GetString("claude.path")
-	binDir := v.GetString("binary.bindir")
-	verDir := v.GetString("binary.versionsdir")
+	binDir := v.GetString("binary.bin_dir")
+	if binDir == "" {
+		binDir = v.GetString("binary.bindir")
+	}
+	verDir := v.GetString("binary.versions_dir")
+	if verDir == "" {
+		verDir = v.GetString("binary.versionsdir")
+	}
 
 	return &ConfigView{
 		WebDAV: WebDAVView{
@@ -298,7 +312,10 @@ func (a *App) SetConfigField(section, key, value string) error {
 		}
 	case "encryption":
 		if key == "enabled" {
-			cfg.Encryption.Enabled = value == "true"
+			newValue := value == "true"
+			if cfg.Encryption.Enabled != newValue {
+				return fmt.Errorf("加密和明文同步互斥，初始化后不能直接切换，请新建同步组或执行完整迁移")
+			}
 		}
 	case "claude":
 		if key == "path" {
@@ -405,7 +422,7 @@ func (a *App) TestConnection() (*ConnectionTest, error) {
 		return &ConnectionTest{Success: false, Error: "未配置密码"}, nil
 	}
 
-	client := webdav.NewClient(cfg.WebDAV.URL, cfg.WebDAV.Username, pass)
+	client := newConfiguredWebDAVClient(cfg, pass)
 	start := time.Now()
 
 	_, _, err = client.GET("HEAD")
@@ -477,11 +494,7 @@ func (a *App) GetProjectDetail(projectPath string) (string, error) {
 
 // AddProjectPath 添加项目路径
 func (a *App) AddProjectPath(dir string) error {
-	claudeJSON := filepath.Join(dir, ".claude.json")
-	if _, err := os.Stat(claudeJSON); os.IsNotExist(err) {
-		return fmt.Errorf("该目录下没有 .claude.json 文件")
-	}
-	return nil
+	return project.AddTrackedProject(dir)
 }
 
 // DeleteOrphan 删除 orphan 记录
@@ -892,14 +905,18 @@ func (a *App) RevertToSnapshot(snapID string) error {
 		return fmt.Errorf("加载快照失败: %w", err)
 	}
 
-	// 扫描本地文件
 	scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
 	scanResult, err := scanner.Scan()
 	if err != nil {
 		return fmt.Errorf("扫描失败: %w", err)
 	}
 
-	// 计算需要恢复的文件
+	parentHead, _ := readLocalHeadID()
+	_, headETag, err := remoteHeadETagForUpdate(client, parentHead)
+	if err != nil {
+		return err
+	}
+
 	var toRestore []string
 	for path, entry := range snap.Files {
 		localEntry, exists := scanResult.Files[path]
@@ -908,75 +925,199 @@ func (a *App) RevertToSnapshot(snapID string) error {
 		}
 	}
 
-	// 下载并恢复文件
-	store := object.NewStore(client, key, config.CCBoxDir()+"/cache/objects")
-	for _, path := range toRestore {
-		entry, ok := snap.Files[path]
-		if !ok {
-			continue
-		}
-		data, err := store.Download(entry.Hash)
-		if err != nil {
-			continue
-		}
-		fullPath := filepath.Join(config.ClaudeDir(), filepath.FromSlash(path))
-		os.MkdirAll(filepath.Dir(fullPath), 0755)
-		os.WriteFile(fullPath, data, 0600)
-	}
-
-	// 删除快照中不存在的文件
+	var toDelete []string
 	for path := range scanResult.Files {
 		if _, exists := snap.Files[path]; !exists {
-			fullPath := filepath.Join(config.ClaudeDir(), filepath.FromSlash(path))
-			os.Remove(fullPath)
+			toDelete = append(toDelete, path)
 		}
 	}
 
-	// 恢复二进制文件
+	store := object.NewStore(client, key, config.CCBoxDir()+"/cache/objects")
+	restoreData := make(map[string][]byte, len(toRestore))
+	for _, path := range toRestore {
+		entry := snap.Files[path]
+		data, err := store.Download(entry.Hash)
+		if err != nil {
+			return fmt.Errorf("下载文件 %s 失败: %w", path, err)
+		}
+		restoreData[path] = data
+	}
+
+	type pathBackup struct {
+		path   string
+		data   []byte
+		mode   os.FileMode
+		exists bool
+	}
+	var backups []pathBackup
+	seenBackups := make(map[string]bool)
+	backupPath := func(path string) error {
+		if seenBackups[path] {
+			return nil
+		}
+		seenBackups[path] = true
+		info, err := os.Stat(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				backups = append(backups, pathBackup{path: path})
+				return nil
+			}
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		backups = append(backups, pathBackup{path: path, data: data, mode: info.Mode(), exists: true})
+		return nil
+	}
+	restoreBackups := func() {
+		for i := len(backups) - 1; i >= 0; i-- {
+			backup := backups[i]
+			if backup.exists {
+				_ = os.MkdirAll(filepath.Dir(backup.path), 0755)
+				_ = os.WriteFile(backup.path, backup.data, backup.mode)
+				continue
+			}
+			_ = os.Remove(backup.path)
+		}
+	}
+	fail := func(err error) error {
+		restoreBackups()
+		return err
+	}
+
+	for _, path := range toRestore {
+		fullPath, err := safeClaudePath(path)
+		if err != nil {
+			return err
+		}
+		if err := backupPath(fullPath); err != nil {
+			return fmt.Errorf("备份文件 %s 失败: %w", path, err)
+		}
+	}
+	for _, path := range toDelete {
+		fullPath, err := safeClaudePath(path)
+		if err != nil {
+			return err
+		}
+		if err := backupPath(fullPath); err != nil {
+			return fmt.Errorf("备份文件 %s 失败: %w", path, err)
+		}
+	}
 	if snap.Binary != nil {
 		platform := config.Platform()
 		if tools, ok := snap.Binary[platform]; ok {
 			for name, ver := range tools {
-				if ver != "" {
-					a.revertBinary(name, ver, client, key)
+				if ver == "" {
+					continue
+				}
+				if err := backupPath(binary.GetBinaryPath(name)); err != nil {
+					return fmt.Errorf("备份 %s 失败: %w", name, err)
 				}
 			}
 		}
 	}
 
-	// 创建恢复快照
-	newSnap := snapshot.CreateSnapshot(snap.ID, cfg.Device.ID, "revert to "+snapID[:12], snap.Files)
-	newSnap.Binary = currentBinaryVersions()
-	snapData, _ := newSnap.Serialize()
-	encrypted, _ := encryptRemoteData(snapData, key)
-	client.EnsureDir("snapshots/")
-	client.PUT("snapshots/"+newSnap.ID+".json.enc", encrypted, "")
+	for _, path := range toRestore {
+		fullPath, err := safeClaudePath(path)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+			return fail(fmt.Errorf("创建目录失败: %w", err))
+		}
+		if err := os.WriteFile(fullPath, restoreData[path], 0600); err != nil {
+			return fail(fmt.Errorf("恢复文件 %s 失败: %w", path, err))
+		}
+	}
+	for _, path := range toDelete {
+		fullPath, err := safeClaudePath(path)
+		if err != nil {
+			return err
+		}
+		if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+			return fail(fmt.Errorf("删除文件 %s 失败: %w", path, err))
+		}
+	}
 
-	// 更新本地 HEAD
-	os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(newSnap.ID), 0600)
-	os.WriteFile(config.CCBoxDir()+"/snapshots/"+newSnap.ID+".json", snapData, 0600)
+	if snap.Binary != nil {
+		platform := config.Platform()
+		if tools, ok := snap.Binary[platform]; ok {
+			for name, ver := range tools {
+				if ver != "" {
+					if err := a.revertBinary(name, ver, client, key); err != nil {
+						return fail(err)
+					}
+				}
+			}
+		}
+	}
+
+	newSnap := snapshot.CreateSnapshot(parentHead, cfg.Device.ID, "revert to "+shortSnapshotID(snapID), snap.Files)
+	newSnap.Binary = currentBinaryVersions()
+	snapData, err := newSnap.Serialize()
+	if err != nil {
+		return fail(fmt.Errorf("序列化恢复快照失败: %w", err))
+	}
+	encrypted, err := encryptRemoteData(snapData, key)
+	if err != nil {
+		return fail(fmt.Errorf("加密恢复快照失败: %w", err))
+	}
+	if err := client.EnsureDir("snapshots/"); err != nil {
+		return fail(fmt.Errorf("创建快照目录失败: %w", err))
+	}
+	if _, err := client.PUT("snapshots/"+newSnap.ID+".json.enc", encrypted, ""); err != nil {
+		return fail(fmt.Errorf("上传恢复快照失败: %w", err))
+	}
+	res, err := client.CompareAndSwapHEAD("HEAD", newSnap.ID, headETag)
+	if err != nil {
+		return fail(fmt.Errorf("更新远程 HEAD 失败: %w", err))
+	}
+	if !res.Success {
+		return fail(fmt.Errorf("远程 HEAD 已变化，请先拉取后再回滚"))
+	}
+
+	if err := os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(newSnap.ID), 0600); err != nil {
+		return fmt.Errorf("更新本地 HEAD 失败: %w", err)
+	}
+	if err := os.WriteFile(config.CCBoxDir()+"/snapshots/"+newSnap.ID+".json", snapData, 0600); err != nil {
+		return fmt.Errorf("缓存恢复快照失败: %w", err)
+	}
 
 	return nil
 }
 
-// revertBinary 恢复二进制到指定版本（best-effort）
-func (a *App) revertBinary(name, targetVer string, client *webdav.Client, key []byte) {
+// revertBinary 恢复二进制到指定版本
+func (a *App) revertBinary(name, targetVer string, client *webdav.Client, key []byte) error {
 	binPath := binary.GetBinaryPath(name)
 	currentVer := detectBinVersion(binPath)
 	if currentVer == targetVer {
-		return
+		return nil
 	}
 
 	// 先尝试本地版本目录
 	verDir := config.VersionsDir()
 	localPath := filepath.Join(verDir, targetVer)
 	if data, err := os.ReadFile(localPath); err == nil {
-		os.WriteFile(binPath, data, 0755)
-		return
+		if err := os.WriteFile(binPath, data, 0755); err != nil {
+			return fmt.Errorf("恢复 %s %s 失败: %w", name, targetVer, err)
+		}
+		return nil
 	}
 
 	// 再尝试从云端下载
-	_ = binary.Download(client, key, name, targetVer, binPath, nil)
+	if err := binary.Download(client, key, name, targetVer, binPath, nil); err != nil {
+		return fmt.Errorf("下载 %s %s 失败: %w", name, targetVer, err)
+	}
+	return nil
+}
+
+func shortSnapshotID(id string) string {
+	if len(id) <= 12 {
+		return id
+	}
+	return id[:12]
 }
 
 // EncryptionStatus 加密状态信息
@@ -1016,17 +1157,35 @@ func (a *App) VerifyEncryptionKey() (bool, error) {
 		return false, fmt.Errorf("无法读取远程 HEAD")
 	}
 	snapID := strings.TrimSpace(string(headData))
+	if err := validateSnapshotID(snapID); err != nil {
+		return false, err
+	}
 	encData, _, err := client.GET("snapshots/" + snapID + ".json.enc")
 	if err != nil {
 		return false, fmt.Errorf("无法下载远程快照: %w", err)
 	}
-	_, err = decryptRemoteData(encData, key)
-	return err == nil, nil
+	plainData, err := decryptRemoteData(encData, key)
+	if err != nil {
+		return false, nil
+	}
+	if _, err := snapshot.Deserialize(plainData); err != nil {
+		return false, nil
+	}
+	return true, nil
 }
 
 // rotateRemoteData 用旧密钥解密远程加密数据并用新密钥重新加密
 func (a *App) rotateRemoteData(client *webdav.Client, oldKey, newKey []byte) error {
-	roots := []string{"snapshots/", "objects/", "projects/"}
+	type rotationFile struct {
+		path    string
+		oldData []byte
+		oldETag string
+		newData []byte
+		newETag string
+	}
+
+	roots := []string{"snapshots/", "objects/", "projects/", "binaries/"}
+	var rotations []rotationFile
 	for _, root := range roots {
 		files, err := listRemoteFilesRecursive(client, root)
 		if err != nil {
@@ -1036,27 +1195,46 @@ func (a *App) rotateRemoteData(client *webdav.Client, oldKey, newKey []byte) err
 			if !strings.HasSuffix(remotePath, ".enc") {
 				continue
 			}
-			_ = rotateEncryptedRemoteFile(client, remotePath, oldKey, newKey)
+			encData, etag, err := client.GET(remotePath)
+			if err != nil {
+				return fmt.Errorf("读取 %s 失败: %w", remotePath, err)
+			}
+			plainData, err := crypto.Decrypt(encData, oldKey)
+			if err != nil {
+				return fmt.Errorf("解密 %s 失败: %w", remotePath, err)
+			}
+			newEncData, err := crypto.Encrypt(plainData, newKey)
+			if err != nil {
+				return fmt.Errorf("加密 %s 失败: %w", remotePath, err)
+			}
+			rotations = append(rotations, rotationFile{path: remotePath, oldData: encData, oldETag: etag, newData: newEncData})
 		}
 	}
-	return nil
-}
 
-func rotateEncryptedRemoteFile(client *webdav.Client, remotePath string, oldKey, newKey []byte) error {
-	encData, _, err := client.GET(remotePath)
-	if err != nil {
-		return err
+	rollback := func(applied []rotationFile) error {
+		var rollbackErr error
+		for i := len(applied) - 1; i >= 0; i-- {
+			file := applied[i]
+			if _, err := client.PUT(file.path, file.oldData, file.newETag); err != nil && rollbackErr == nil {
+				rollbackErr = fmt.Errorf("回滚 %s 失败: %w", file.path, err)
+			}
+		}
+		return rollbackErr
 	}
-	plainData, err := crypto.Decrypt(encData, oldKey)
-	if err != nil {
-		return err
+
+	applied := make([]rotationFile, 0, len(rotations))
+	for _, file := range rotations {
+		newETag, err := client.PUT(file.path, file.newData, file.oldETag)
+		if err != nil {
+			if rollbackErr := rollback(applied); rollbackErr != nil {
+				return fmt.Errorf("轮换 %s 失败: %w；%v", file.path, err, rollbackErr)
+			}
+			return fmt.Errorf("轮换 %s 失败: %w", file.path, err)
+		}
+		file.newETag = newETag
+		applied = append(applied, file)
 	}
-	newEncData, err := crypto.Encrypt(plainData, newKey)
-	if err != nil {
-		return err
-	}
-	_, err = client.PUT(remotePath, newEncData, "")
-	return err
+	return nil
 }
 
 func listRemoteFilesRecursive(client *webdav.Client, dir string) ([]string, error) {
@@ -1108,7 +1286,21 @@ func (a *App) ChangeEncryptionPassword(oldPassword, newPassword string) error {
 	}
 	saltData, err := os.ReadFile(saltPath)
 	if err != nil {
-		return fmt.Errorf("无法读取 salt: %w", err)
+		cfg, cfgErr := config.Load()
+		if cfgErr != nil {
+			return fmt.Errorf("无法读取 salt: %w", err)
+		}
+		pass, passErr := config.LoadWebDAVPassword()
+		if passErr != nil {
+			return fmt.Errorf("无法读取 salt: %w", err)
+		}
+		client := newConfiguredWebDAVClient(cfg, pass)
+		remoteSalt, _, saltErr := client.GET("salt.bin")
+		if saltErr != nil {
+			return fmt.Errorf("无法读取 salt: %w", err)
+		}
+		saltData = remoteSalt
+		_ = os.WriteFile(saltPath, saltData, 0600)
 	}
 	// 验证旧密码
 	oldKey := crypto.DeriveKey(oldPassword, saltData)
@@ -1130,11 +1322,23 @@ func (a *App) ChangeEncryptionPassword(oldPassword, newPassword string) error {
 	if err != nil {
 		return fmt.Errorf("轮换远程数据失败: %w", err)
 	}
-	if _, err := client.PUT("salt.bin", newSalt, ""); err != nil {
-		return fmt.Errorf("上传新 salt 失败: %w", err)
+	rollbackRemote := func(cause error) error {
+		if rollbackErr := a.rotateRemoteData(client, newKey, keyData); rollbackErr != nil {
+			return fmt.Errorf("%w；回滚远程数据失败: %v", cause, rollbackErr)
+		}
+		_, _ = client.PUT("salt.bin", saltData, "")
+		_ = os.WriteFile(saltPath, saltData, 0600)
+		_ = os.WriteFile(keyPath, keyData, 0600)
+		return cause
 	}
-	// 保存新 salt 和密钥
-	os.WriteFile(saltPath, newSalt, 0600)
-	os.WriteFile(keyPath, newKey, 0600)
+	if _, err := client.PUT("salt.bin", newSalt, ""); err != nil {
+		return rollbackRemote(fmt.Errorf("上传新 salt 失败: %w", err))
+	}
+	if err := os.WriteFile(saltPath, newSalt, 0600); err != nil {
+		return rollbackRemote(fmt.Errorf("保存新 salt 失败: %w", err))
+	}
+	if err := os.WriteFile(keyPath, newKey, 0600); err != nil {
+		return rollbackRemote(fmt.Errorf("保存新密钥失败: %w", err))
+	}
 	return nil
 }

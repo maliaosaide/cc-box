@@ -90,6 +90,10 @@
     catch (e) { error = e.message || String(e) }
   }
 
+  function closeExcludeModal(e) {
+    if (e.target === e.currentTarget) excludeConfirm = ''
+  }
+
   async function doBulkSync(action) {
     actionLoading = true; progress = null; syncState = 'syncing'
     try { await BulkSync(action) } catch (e) { console.error(action, e) }
@@ -109,6 +113,16 @@
     if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB'
     return (b / 1024 / 1024).toFixed(1) + ' MB'
   }
+
+  function matchesFilter(node, activeFilter) {
+    if (activeFilter === 'all') return true
+    if (node.isDir) return (node.children || []).some(child => matchesFilter(child, activeFilter))
+    if (activeFilter === 'changed') return node.status !== 'synced'
+    if (activeFilter === 'conflict') return node.status === 'conflict'
+    return true
+  }
+
+  $: rootChildren = tree?.root?.children ? tree.root.children.filter(node => matchesFilter(node, filter)) : []
 </script>
 
 <div class="files-page">
@@ -174,8 +188,8 @@
           </button>
         </div>
         <div class="tree-list">
-          {#if tree.root && tree.root.children && tree.root.children.length > 0}
-            {#each tree.root.children as node}
+          {#if rootChildren.length > 0}
+            {#each rootChildren as node}
               <TreeNode {node} {selectedPath} {expandedDirs} {filter}
                 on:toggle={handleToggle} on:select={handleSelect} />
             {/each}
@@ -200,26 +214,34 @@
                 <span class="status-badge st-conflict">C</span>
                 <span class="font-mono text-sm text-txt-primary">{selectedPath}</span>
               </div>
-              <span class="conflict-label">冲突 — 请选择版本</span>
+              <span class="conflict-label">
+                冲突 — {conflictDetail.recommended === 'local' ? '本地较新' : conflictDetail.recommended === 'remote' ? '远程较新' : '请比较两边'}，请选择以哪边为准
+              </span>
             </div>
             <div class="conflict-panels">
               <div class="conflict-col">
                 <div class="conflict-col-header">
-                  <button class="choice-btn" class:chosen={conflictChoice === 'local'} on:click={() => conflictChoice = 'local'}>本地版本</button>
+                  <button class="choice-btn" class:chosen={conflictChoice === 'local'} on:click={() => conflictChoice = 'local'}>
+                    本地版本{#if conflictDetail.recommended === 'local'}<span class="newer-tag">较新</span>{/if}
+                  </button>
+                  <span class="version-time">{conflictDetail.localExists ? (conflictDetail.localModified || '时间未知') : '本地已删除'}</span>
                 </div>
-                <pre class="conflict-code">{conflictDetail.local || '(空)'}</pre>
+                <pre class="conflict-code">{conflictDetail.localExists ? (conflictDetail.local || '(空)') : '(本地已删除)'}</pre>
               </div>
               <div class="conflict-col">
                 <div class="conflict-col-header">
-                  <button class="choice-btn" class:chosen={conflictChoice === 'remote'} on:click={() => conflictChoice = 'remote'}>远程版本</button>
+                  <button class="choice-btn" class:chosen={conflictChoice === 'remote'} on:click={() => conflictChoice = 'remote'}>
+                    远程版本{#if conflictDetail.recommended === 'remote'}<span class="newer-tag">较新</span>{/if}
+                  </button>
+                  <span class="version-time">{conflictDetail.remoteExists ? (conflictDetail.remoteModified || '时间未知') : '远程已删除'}</span>
                 </div>
-                <pre class="conflict-code">{conflictDetail.remote || '(空)'}</pre>
+                <pre class="conflict-code">{conflictDetail.remoteExists ? (conflictDetail.remote || '(空)') : '(远程已删除)'}</pre>
               </div>
             </div>
             <div class="conflict-actions">
               <button class="btn-ghost" on:click={() => { selectedPath = ''; conflictDetail = null }}>取消</button>
               <button class="btn-primary" disabled={!conflictChoice} on:click={() => resolveConflict(conflictChoice)}>
-                使用{conflictChoice === 'local' ? '本地' : '远程'}版本
+                {conflictChoice ? `以${conflictChoice === 'local' ? '本地' : '远程'}为准` : '请选择版本'}
               </button>
             </div>
           </div>
@@ -279,9 +301,9 @@
   {/if}
 
   {#if excludeConfirm}
-    <div class="modal-overlay" on:click={() => { excludeConfirm = '' }}>
-      <div class="modal-card" on:click|stopPropagation>
-        <p class="text-sm text-txt-primary">确认排除文件？</p>
+    <div class="modal-overlay" role="presentation" on:click={closeExcludeModal}>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="exclude-dialog-title">
+        <p id="exclude-dialog-title" class="text-sm text-txt-primary">确认排除文件？</p>
         <p class="text-xs text-txt-muted font-mono mt-1">{excludeConfirm}</p>
         <p class="text-xs text-txt-muted mt-2">排除后将不再参与同步</p>
         <div class="modal-actions">
@@ -416,7 +438,7 @@
   .conflict-panels { display: flex; flex: 1; min-height: 0; overflow: hidden; }
   .conflict-col { flex: 1; display: flex; flex-direction: column; border-right: 1px solid rgb(var(--border)); min-width: 0; }
   .conflict-col:last-child { border-right: none; }
-  .conflict-col-header { padding: 6px 10px; border-bottom: 1px solid rgb(var(--border)); background: rgb(var(--surface-1)); }
+  .conflict-col-header { padding: 6px 10px; border-bottom: 1px solid rgb(var(--border)); background: rgb(var(--surface-1)); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .choice-btn {
     font-size: 11px; font-weight: 500;
     font-family: 'Plus Jakarta Sans', sans-serif;
@@ -425,6 +447,8 @@
   }
   .choice-btn:hover { color: rgb(var(--text-secondary)); }
   .choice-btn.chosen { background: rgba(196,112,78,0.1); color: rgb(var(--accent)); }
+  .newer-tag { margin-left: 6px; padding: 1px 5px; border-radius: 3px; background: rgba(107,144,128,0.12); color: rgb(var(--state-ok)); font-size: 10px; }
+  .version-time { font-size: 10px; color: rgb(var(--text-muted)); font-family: 'DM Mono', monospace; white-space: nowrap; }
   .conflict-code {
     flex: 1; overflow: auto; padding: 10px;
     font-size: 12px; font-family: 'DM Mono', monospace;

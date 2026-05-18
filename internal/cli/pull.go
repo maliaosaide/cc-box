@@ -47,10 +47,15 @@ func runPull(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	client := webdav.NewClient(cfg.WebDAV.URL, cfg.WebDAV.Username, pass)
+	client := webdav.NewClient(config.ConfiguredWebDAVURL(cfg), cfg.WebDAV.Username, pass)
+
+	localHead, err := loadLocalHEAD()
+	if err != nil {
+		localHead = ""
+	}
 
 	// 坚果云优化：先 HEAD 检查 ETag，没变就跳过
-	if cachedETag := readCachedRemoteETag(); cachedETag != "" {
+	if cachedHead, cachedETag := readCachedRemoteHeadETag(); cachedHead != "" && cachedETag != "" && cachedHead == localHead {
 		info, err := client.HEAD("HEAD")
 		if err == nil && info.ETag == cachedETag {
 			fmt.Println("已是最新（ETag 未变）")
@@ -59,21 +64,17 @@ func runPull(cmd *cobra.Command, args []string) error {
 	}
 
 	// 读取远程 HEAD
-	remoteHeadData, _, err := client.GET("HEAD")
+	remoteHeadData, remoteHeadETag, err := client.GET("HEAD")
 	if err != nil {
 		if err == webdav.ErrNotFound {
 			return fmt.Errorf("远程没有数据")
 		}
 		return fmt.Errorf("读取远程 HEAD 失败: %w", err)
 	}
-	remoteHead := string(remoteHeadData)
-
-	localHead, err := loadLocalHEAD()
-	if err != nil {
-		localHead = ""
-	}
+	remoteHead := strings.TrimSpace(string(remoteHeadData))
 
 	if localHead == remoteHead {
+		cacheRemoteETag(remoteHead, remoteHeadETag)
 		fmt.Println("已是最新")
 		return nil
 	}
@@ -89,29 +90,29 @@ func runPull(cmd *cobra.Command, args []string) error {
 
 	// 无本地基线 → 首次拉取，直接全部下载
 	if localHead == "" {
-		return pullFirstTime(client, key, remoteSnap, remoteHead, dryRun)
+		return pullFirstTime(client, key, remoteSnap, remoteHead, remoteHeadETag, dryRun)
 	}
 
 	// 加载本地快照
 	localSnap, err := loadRemoteSnapshot(client, key, localHead)
 	if err != nil {
 		fmt.Printf("警告：加载本地快照失败，降级为文件级比较: %v\n", err)
-		return pullDegraded(client, key, remoteSnap, cfg, force, dryRun, remoteHead)
+		return pullDegraded(client, key, remoteSnap, cfg, force, dryRun, remoteHead, remoteHeadETag)
 	}
 
 	// 尝试找共同祖先
 	ancestorID, err := findAncestor(client, key, localHead, remoteHead)
 	if err != nil || ancestorID == "" {
 		fmt.Println("未找到共同祖先，使用文件级双向合并")
-		return pullDegraded(client, key, remoteSnap, cfg, force, dryRun, remoteHead)
+		return pullDegraded(client, key, remoteSnap, cfg, force, dryRun, remoteHead, remoteHeadETag)
 	}
 
 	// 有共同祖先，执行三方合并
-	return pullThreeWay(client, key, localSnap, remoteSnap, ancestorID, cfg, force, dryRun, remoteHead)
+	return pullThreeWay(client, key, localSnap, remoteSnap, ancestorID, cfg, force, dryRun, remoteHead, remoteHeadETag)
 }
 
 // pullFirstTime 首次拉取（无本地快照基线）
-func pullFirstTime(client *webdav.Client, key []byte, remoteSnap *snapshot.Snapshot, remoteHead string, dryRun bool) error {
+func pullFirstTime(client *webdav.Client, key []byte, remoteSnap *snapshot.Snapshot, remoteHead, remoteHeadETag string, dryRun bool) error {
 	fmt.Printf("\n首次拉取，下载 %d 个文件\n", len(remoteSnap.Files))
 
 	if dryRun {
@@ -123,21 +124,26 @@ func pullFirstTime(client *webdav.Client, key []byte, remoteSnap *snapshot.Snaps
 	}
 
 	store := object.NewStore(client, key, "")
-	applied := applyFiles(store, remoteSnap.Files)
+	applied, err := applyFiles(store, remoteSnap.Files)
+	if err != nil {
+		return err
+	}
 
-	updateLocalHEAD(remoteHead)
+	if err := updateLocalHEAD(remoteHead); err != nil {
+		return err
+	}
 	saveLocalSnapshot(remoteSnap)
-	cacheRemoteETag(remoteHead)
+	cacheRemoteETag(remoteHead, remoteHeadETag)
 	fmt.Printf("\n已拉取 %d 个文件\n", applied)
 	return nil
 }
 
 // pullThreeWay 基于共同祖先的三方合并
-func pullThreeWay(client *webdav.Client, key []byte, localSnap, remoteSnap *snapshot.Snapshot, ancestorID string, cfg *config.Config, force, dryRun bool, remoteHead string) error {
+func pullThreeWay(client *webdav.Client, key []byte, localSnap, remoteSnap *snapshot.Snapshot, ancestorID string, cfg *config.Config, force, dryRun bool, remoteHead, remoteHeadETag string) error {
 	ancestorSnap, err := loadRemoteSnapshot(client, key, ancestorID)
 	if err != nil {
 		fmt.Printf("警告：加载祖先快照失败，降级为文件级比较: %v\n", err)
-		return pullDegraded(client, key, remoteSnap, cfg, force, dryRun, remoteHead)
+		return pullDegraded(client, key, remoteSnap, cfg, force, dryRun, remoteHead, remoteHeadETag)
 	}
 
 	merger := sync.NewMerger(cfg.Sync.ConflictStrategy)
@@ -165,6 +171,8 @@ func pullThreeWay(client *webdav.Client, key []byte, localSnap, remoteSnap *snap
 	var toDownload []string
 	var toDelete []string
 	var conflictPaths []string
+	var mergedPaths []string
+	mergedFiles := make(map[string][]byte)
 
 	for path := range allPaths {
 		ancEntry, inAnc := ancestorSnap.Files[path]
@@ -222,10 +230,13 @@ func pullThreeWay(client *webdav.Client, key []byte, localSnap, remoteSnap *snap
 					// 不做任何事
 				} else {
 					// 尝试三方合并
-					resolved := tryThreeWayMerge(merger, store, path, ancEntry, localEntry, remoteEntry, localSnap)
+					resolved, mergedData := tryThreeWayMerge(merger, store, path, ancEntry, localEntry, remoteEntry)
 					switch resolved {
 					case "remote":
 						toDownload = append(toDownload, path)
+					case "merged":
+						mergedFiles[path] = mergedData
+						mergedPaths = append(mergedPaths, path)
 					case "conflict":
 						if force {
 							toDownload = append(toDownload, path)
@@ -245,6 +256,9 @@ func pullThreeWay(client *webdav.Client, key []byte, localSnap, remoteSnap *snap
 	}
 	for _, p := range toDelete {
 		fmt.Printf("  ✗ %s\n", p)
+	}
+	for _, p := range mergedPaths {
+		fmt.Printf("  ↔ %s\n", p)
 	}
 	if len(conflictPaths) > 0 {
 		fmt.Printf("\n冲突文件 (%d):\n", len(conflictPaths))
@@ -267,28 +281,39 @@ func pullThreeWay(client *webdav.Client, key []byte, localSnap, remoteSnap *snap
 	}
 
 	// 下载并应用
-	applied := applyFiles(store, collectEntries(remoteSnap.Files, toDownload))
+	applied, err := applyFiles(store, collectEntries(remoteSnap.Files, toDownload))
+	if err != nil {
+		return err
+	}
 
-	// 删除文件
-	for _, p := range toDelete {
-		fullPath := filepath.Join(config.ClaudeDir(), filepath.FromSlash(p))
-		os.Remove(fullPath)
+	merged, err := applyMergedFiles(mergedFiles)
+	if err != nil {
+		return err
+	}
+
+	deleted, err := applyDeletes(toDelete)
+	if err != nil {
+		return err
 	}
 
 	// 保存冲突文件
-	saveConflictFiles(store, remoteSnap.Files, scanResult.Files, conflictPaths, localSnap)
+	if err := saveConflictFiles(store, remoteSnap.Files, scanResult.Files, conflictPaths, localSnap); err != nil {
+		return err
+	}
 
 	// 更新本地 HEAD
-	updateLocalHEAD(remoteHead)
+	if err := updateLocalHEAD(remoteHead); err != nil {
+		return err
+	}
 	saveLocalSnapshot(remoteSnap)
-	cacheRemoteETag(remoteHead)
+	cacheRemoteETag(remoteHead, remoteHeadETag)
 
-	fmt.Printf("\n已拉取 %d 个文件，删除 %d 个，冲突 %d 个\n", applied, len(toDelete), len(conflictPaths))
+	fmt.Printf("\n已拉取 %d 个文件，合并 %d 个，删除 %d 个，冲突 %d 个\n", applied, merged, deleted, len(conflictPaths))
 	return nil
 }
 
 // pullDegraded 降级为文件级双向合并（无共同祖先）
-func pullDegraded(client *webdav.Client, key []byte, remoteSnap *snapshot.Snapshot, cfg *config.Config, force, dryRun bool, remoteHead string) error {
+func pullDegraded(client *webdav.Client, key []byte, remoteSnap *snapshot.Snapshot, cfg *config.Config, force, dryRun bool, remoteHead, remoteHeadETag string) error {
 	store := object.NewStore(client, key, "")
 
 	scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
@@ -334,8 +359,15 @@ func pullDegraded(client *webdav.Client, key []byte, remoteSnap *snapshot.Snapsh
 	}
 
 	if len(toDownload) == 0 && len(conflictPaths) == 0 {
-		updateLocalHEAD(remoteHead)
+		if dryRun {
+			fmt.Println("\n(dry-run 模式，未实际下载)")
+			return nil
+		}
+		if err := updateLocalHEAD(remoteHead); err != nil {
+			return err
+		}
 		saveLocalSnapshot(remoteSnap)
+		cacheRemoteETag(remoteHead, remoteHeadETag)
 		fmt.Println("已是最新")
 		return nil
 	}
@@ -346,7 +378,10 @@ func pullDegraded(client *webdav.Client, key []byte, remoteSnap *snapshot.Snapsh
 	}
 
 	// 下载非冲突文件
-	applied := applyFiles(store, collectEntries(remoteSnap.Files, toDownload))
+	applied, err := applyFiles(store, collectEntries(remoteSnap.Files, toDownload))
+	if err != nil {
+		return err
+	}
 
 	// 保存冲突文件
 	var localSnap *snapshot.Snapshot
@@ -354,11 +389,15 @@ func pullDegraded(client *webdav.Client, key []byte, remoteSnap *snapshot.Snapsh
 	if localHead != "" {
 		localSnap, _ = loadRemoteSnapshot(client, key, localHead)
 	}
-	saveConflictFiles(store, remoteSnap.Files, scanResult.Files, conflictPaths, localSnap)
+	if err := saveConflictFiles(store, remoteSnap.Files, scanResult.Files, conflictPaths, localSnap); err != nil {
+		return err
+	}
 
-	updateLocalHEAD(remoteHead)
+	if err := updateLocalHEAD(remoteHead); err != nil {
+		return err
+	}
 	saveLocalSnapshot(remoteSnap)
-	cacheRemoteETag(remoteHead)
+	cacheRemoteETag(remoteHead, remoteHeadETag)
 
 	fmt.Printf("\n已拉取 %d 个文件，冲突 %d 个已保存\n", applied, len(conflictPaths))
 	return nil
@@ -384,24 +423,31 @@ func findAncestor(client *webdav.Client, key []byte, localHead, remoteHead strin
 }
 
 // tryThreeWayMerge 对单个文件尝试三方合并
-func tryThreeWayMerge(merger *sync.Merger, store *object.Store, path string, ancEntry, localEntry, remoteEntry snapshot.FileEntry, localSnap *snapshot.Snapshot) string {
+func tryThreeWayMerge(merger *sync.Merger, store *object.Store, path string, ancEntry, localEntry, remoteEntry snapshot.FileEntry) (string, []byte) {
 	// 读取三方内容
 	var ancestorData, localData, remoteData []byte
 
 	if ancEntry.Hash != "" {
-		ancestorData, _ = store.Download(ancEntry.Hash)
+		var err error
+		ancestorData, err = store.Download(ancEntry.Hash)
+		if err != nil {
+			return "conflict", nil
+		}
 	}
 
 	// 本地文件从磁盘读取
-	localFilePath := config.ClaudeDir() + "/" + strings.ReplaceAll(path, "/", string(filepath.Separator))
-	localData, err := os.ReadFile(localFilePath)
+	localFilePath, err := safeClaudePath(path)
 	if err != nil {
-		return "remote"
+		return "conflict", nil
+	}
+	localData, err = os.ReadFile(localFilePath)
+	if err != nil {
+		return "remote", nil
 	}
 
-	remoteData, _ = store.Download(remoteEntry.Hash)
-	if remoteData == nil {
-		return "local"
+	remoteData, err = store.Download(remoteEntry.Hash)
+	if err != nil {
+		return "conflict", nil
 	}
 
 	input := &sync.ThreeWayInput{
@@ -412,71 +458,135 @@ func tryThreeWayMerge(merger *sync.Merger, store *object.Store, path string, anc
 
 	result, err := merger.MergeFile(path, input)
 	if err != nil {
-		return "conflict"
+		return "conflict", nil
 	}
 
 	switch result.Action {
 	case sync.ActionKeepLocal:
-		return "local"
+		return "local", nil
 	case sync.ActionKeepRemote:
-		return "remote"
+		return "remote", nil
 	case sync.ActionMerged:
-		// 写入合并结果到本地
-		os.WriteFile(localFilePath, result.Data, 0600)
-		return "local"
+		return "merged", result.Data
 	case sync.ActionConflict:
-		return "conflict"
+		return "conflict", nil
 	default:
-		return "remote"
+		return "remote", nil
 	}
 }
 
 // saveConflictFiles 将冲突文件保存到 conflicts 目录
-func saveConflictFiles(store *object.Store, remoteFiles map[string]snapshot.FileEntry, localFiles map[string]snapshot.FileEntry, conflictPaths []string, localSnap *snapshot.Snapshot) {
+func saveConflictFiles(store *object.Store, remoteFiles map[string]snapshot.FileEntry, localFiles map[string]snapshot.FileEntry, conflictPaths []string, localSnap *snapshot.Snapshot) error {
 	if len(conflictPaths) == 0 {
-		return
+		return nil
 	}
 
 	conflictDir := config.CCBoxDir() + "/conflicts"
-	os.MkdirAll(conflictDir, 0755)
+	if err := os.MkdirAll(conflictDir, 0755); err != nil {
+		return fmt.Errorf("创建冲突目录失败: %w", err)
+	}
 
 	for _, path := range conflictPaths {
 		// 保存本地版本
-		localFilePath := config.ClaudeDir() + "/" + strings.ReplaceAll(path, "/", string(filepath.Separator))
-		if localData, err := os.ReadFile(localFilePath); err == nil {
-			os.WriteFile(conflictDir+"/"+path+".local", localData, 0600)
+		localFilePath, err := safeClaudePath(path)
+		if err != nil {
+			return fmt.Errorf("冲突文件路径无效 %s: %w", path, err)
+		}
+		localData, err := os.ReadFile(localFilePath)
+		if err != nil {
+			return fmt.Errorf("读取本地冲突文件 %s 失败: %w", path, err)
+		}
+		conflictLocal, err := safeJoin(conflictDir, path+".local")
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(conflictLocal), 0755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(conflictLocal, localData, 0600); err != nil {
+			return fmt.Errorf("保存本地冲突文件 %s 失败: %w", path, err)
 		}
 
 		// 保存远程版本
-		if remoteEntry, ok := remoteFiles[path]; ok {
-			if remoteData, err := store.Download(remoteEntry.Hash); err == nil {
-				os.WriteFile(conflictDir+"/"+path+".remote", remoteData, 0600)
-			}
+		remoteEntry, ok := remoteFiles[path]
+		if !ok {
+			return fmt.Errorf("远程冲突文件不存在: %s", path)
+		}
+		remoteData, err := store.Download(remoteEntry.Hash)
+		if err != nil {
+			return fmt.Errorf("下载远程冲突文件 %s 失败: %w", path, err)
+		}
+		conflictRemote, err := safeJoin(conflictDir, path+".remote")
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(conflictRemote), 0755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(conflictRemote, remoteData, 0600); err != nil {
+			return fmt.Errorf("保存远程冲突文件 %s 失败: %w", path, err)
 		}
 	}
 
 	fmt.Printf("  冲突文件已保存到 %s\n", conflictDir)
+	return nil
 }
 
 // applyFiles 下载并应用文件到本地
-func applyFiles(store *object.Store, files map[string]snapshot.FileEntry) int {
+func applyFiles(store *object.Store, files map[string]snapshot.FileEntry) (int, error) {
 	applied := 0
 	for path, entry := range files {
 		data, err := store.Download(entry.Hash)
 		if err != nil {
-			fmt.Printf("  下载失败 %s: %v\n", path, err)
-			continue
+			return applied, fmt.Errorf("下载文件 %s 失败: %w", path, err)
 		}
 
-		fullPath := filepath.Join(config.ClaudeDir(), filepath.FromSlash(path))
-		os.MkdirAll(filepath.Dir(fullPath), 0700)
+		fullPath, err := safeClaudePath(path)
+		if err != nil {
+			return applied, err
+		}
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0700); err != nil {
+			return applied, fmt.Errorf("创建目录 %s 失败: %w", filepath.Dir(fullPath), err)
+		}
 		if err := os.WriteFile(fullPath, data, 0600); err != nil {
-			fmt.Printf("  写入失败 %s: %v\n", path, err)
-			continue
+			return applied, fmt.Errorf("写入文件 %s 失败: %w", path, err)
 		}
 		applied++
 	}
-	return applied
+	return applied, nil
+}
+
+func applyMergedFiles(files map[string][]byte) (int, error) {
+	applied := 0
+	for path, data := range files {
+		fullPath, err := safeClaudePath(path)
+		if err != nil {
+			return applied, err
+		}
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0700); err != nil {
+			return applied, fmt.Errorf("创建目录 %s 失败: %w", filepath.Dir(fullPath), err)
+		}
+		if err := os.WriteFile(fullPath, data, 0600); err != nil {
+			return applied, fmt.Errorf("写入合并文件 %s 失败: %w", path, err)
+		}
+		applied++
+	}
+	return applied, nil
+}
+
+func applyDeletes(paths []string) (int, error) {
+	deleted := 0
+	for _, p := range paths {
+		fullPath, err := safeClaudePath(p)
+		if err != nil {
+			return deleted, err
+		}
+		if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+			return deleted, fmt.Errorf("删除文件 %s 失败: %w", p, err)
+		}
+		deleted++
+	}
+	return deleted, nil
 }
 
 // collectEntries 从完整文件列表中收集指定路径的条目
@@ -496,19 +606,22 @@ func etagCachePath() string {
 	return config.CCBoxDir() + "/cache/remote-head-etag"
 }
 
-func readCachedRemoteETag() string {
+func readCachedRemoteHeadETag() (string, string) {
 	data, err := os.ReadFile(etagCachePath())
 	if err != nil {
-		return ""
+		return "", ""
 	}
-	parts := strings.SplitN(string(data), "\n", 2)
-	if len(parts) == 2 {
-		return parts[1]
+	parts := strings.SplitN(string(data), "\n", 3)
+	if len(parts) < 2 {
+		return "", ""
 	}
-	return ""
+	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
 }
 
-func cacheRemoteETag(headID string) {
+func cacheRemoteETag(headID, etag string) {
+	if headID == "" || etag == "" {
+		return
+	}
 	os.MkdirAll(filepath.Dir(etagCachePath()), 0755)
-	os.WriteFile(etagCachePath(), []byte(headID+"\n"), 0600)
+	os.WriteFile(etagCachePath(), []byte(headID+"\n"+etag+"\n"), 0600)
 }

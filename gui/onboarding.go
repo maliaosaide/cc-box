@@ -66,10 +66,23 @@ func (a *App) InitNewDevice(url, username, password, root, encPassword, deviceNa
 	// 构建 WebDAV 客户端
 	fullURL := buildWebDAVURL(url, root)
 	client := webdav.NewClient(fullURL, username, password)
+	if exists, err := client.Exists("salt.bin"); err != nil {
+		return fmt.Errorf("检查远程初始化状态失败: %w", err)
+	} else if exists {
+		return fmt.Errorf("远程已存在同步组，请选择加入已有同步组或更换根路径")
+	}
+	if exists, err := client.Exists("HEAD"); err != nil {
+		return fmt.Errorf("检查远程 HEAD 失败: %w", err)
+	} else if exists {
+		return fmt.Errorf("远程已存在同步组，请选择加入已有同步组或更换根路径")
+	}
 
 	// 上传 salt
 	if _, err := client.PUT("salt.bin", salt, ""); err != nil {
 		return fmt.Errorf("上传 salt 失败: %w", err)
+	}
+	if err := os.WriteFile(config.CCBoxDir()+"/salt.bin", salt, 0600); err != nil {
+		return fmt.Errorf("保存 salt 失败: %w", err)
 	}
 
 	// 保存密钥
@@ -87,16 +100,21 @@ func (a *App) InitNewDevice(url, username, password, root, encPassword, deviceNa
 	// 上传文件 objects
 	store := object.NewStore(client, key, config.CCBoxDir()+"/cache/objects")
 	for path, entry := range scanResult.Files {
-		fullPath := config.ClaudeDir() + "/" + path
-		data, err := os.ReadFile(fullPath)
+		fullPath, err := safeClaudePath(path)
 		if err != nil {
-			continue
+			return err
 		}
-		normData := normalizeContent(data)
-		hash := object.ComputeHash(normData)
-		entry.Hash = hash
-		scanResult.Files[path] = entry
-		store.Upload(normData)
+		data, err := readObjectData(fullPath)
+		if err != nil {
+			return fmt.Errorf("读取文件 %s 失败: %w", path, err)
+		}
+		hash := object.ComputeHash(data)
+		if hash != entry.Hash {
+			return fmt.Errorf("文件 %s hash 不一致", path)
+		}
+		if _, err := store.Upload(data); err != nil {
+			return fmt.Errorf("上传文件 %s 失败: %w", path, err)
+		}
 	}
 
 	// 创建初始快照
@@ -116,6 +134,16 @@ func (a *App) InitNewDevice(url, username, password, root, encPassword, deviceNa
 	if _, err := client.PUT("snapshots/"+snap.ID+".json.enc", encrypted, ""); err != nil {
 		return fmt.Errorf("upload snapshot: %w", err)
 	}
+	if _, err := client.PUT("HEAD", []byte(snap.ID), ""); err != nil {
+		return fmt.Errorf("upload HEAD: %w", err)
+	}
+	if err := os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(snap.ID), 0600); err != nil {
+		return fmt.Errorf("保存本地 HEAD 失败: %w", err)
+	}
+	if err := os.WriteFile(config.CCBoxDir()+"/snapshots/"+snap.ID+".json", snapData, 0600); err != nil {
+		return fmt.Errorf("缓存快照失败: %w", err)
+	}
+	registerDeviceInfo(client, cfg)
 	if err := config.Save(cfg); err != nil {
 		return fmt.Errorf("保存配置失败: %w", err)
 	}
@@ -151,6 +179,9 @@ func (a *App) InitJoinExisting(url, username, password, root, encPassword, devic
 	if err != nil {
 		return fmt.Errorf("下载远程 salt 失败: %w", err)
 	}
+	if err := os.WriteFile(config.CCBoxDir()+"/salt.bin", remoteSalt, 0600); err != nil {
+		return fmt.Errorf("保存 salt 失败: %w", err)
+	}
 
 	key := crypto.DeriveKey(encPassword, remoteSalt)
 
@@ -160,6 +191,9 @@ func (a *App) InitJoinExisting(url, username, password, root, encPassword, devic
 		return fmt.Errorf("远程没有数据或无法读取")
 	}
 	remoteHead := strings.TrimSpace(string(headData))
+	if err := validateSnapshotID(remoteHead); err != nil {
+		return err
+	}
 
 	snapPath := "snapshots/" + remoteHead + ".json.enc"
 	encData, _, err := client.GET(snapPath)
@@ -187,16 +221,27 @@ func (a *App) InitJoinExisting(url, username, password, root, encPassword, devic
 	for path, entry := range remoteSnap.Files {
 		data, err := store.Download(entry.Hash)
 		if err != nil {
-			continue
+			return fmt.Errorf("下载文件 %s 失败: %w", path, err)
 		}
-		fullPath := filepath.Join(config.ClaudeDir(), filepath.FromSlash(path))
-		os.MkdirAll(filepath.Dir(fullPath), 0755)
-		os.WriteFile(fullPath, data, 0600)
+		fullPath, err := safeClaudePath(path)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+			return fmt.Errorf("创建目录失败: %w", err)
+		}
+		if err := os.WriteFile(fullPath, data, 0600); err != nil {
+			return fmt.Errorf("写入文件 %s 失败: %w", path, err)
+		}
 	}
 
 	// 更新本地 HEAD
-	os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(remoteHead), 0600)
-	os.WriteFile(config.CCBoxDir()+"/snapshots/"+remoteHead+".json", decrypted, 0600)
+	if err := os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(remoteHead), 0600); err != nil {
+		return fmt.Errorf("写入本地 HEAD 失败: %w", err)
+	}
+	if err := os.WriteFile(config.CCBoxDir()+"/snapshots/"+remoteHead+".json", decrypted, 0600); err != nil {
+		return fmt.Errorf("缓存快照失败: %w", err)
+	}
 
 	// 注册设备
 	registerDeviceInfo(client, cfg)
@@ -232,30 +277,11 @@ func registerDeviceInfo(client *webdav.Client, cfg *config.Config) {
 	client.PUT(devicePath, data, "")
 }
 
-// buildWebDAVURL 拼接完整的 WebDAV 地址（URL + root path）
-func buildWebDAVURL(url, root string) string {
-	base := strings.TrimRight(url, "/")
-	root = strings.TrimLeft(root, "/")
-	if root != "" {
-		base += "/" + root
-	}
-	return base + "/"
+func newConfiguredWebDAVClient(cfg *config.Config, password string) *webdav.Client {
+	return webdav.NewClient(config.ConfiguredWebDAVURL(cfg), cfg.WebDAV.Username, password)
 }
 
-// normalizeContent CRLF -> LF
-func normalizeContent(data []byte) []byte {
-	result := make([]byte, 0, len(data))
-	for i := 0; i < len(data); i++ {
-		if data[i] == '\r' {
-			if i+1 < len(data) && data[i+1] == '\n' {
-				result = append(result, '\n')
-				i++
-			} else {
-				result = append(result, '\n')
-			}
-		} else {
-			result = append(result, data[i])
-		}
-	}
-	return result
+// buildWebDAVURL 拼接完整的 WebDAV 地址（URL + root path）
+func buildWebDAVURL(url, root string) string {
+	return config.WebDAVBaseURL(url, root)
 }

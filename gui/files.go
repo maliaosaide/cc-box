@@ -14,6 +14,7 @@ import (
 
 	"github.com/user/cc-box/internal/config"
 	"github.com/user/cc-box/internal/crypto"
+	"github.com/user/cc-box/internal/normalize"
 	"github.com/user/cc-box/internal/object"
 	"github.com/user/cc-box/internal/snapshot"
 	"github.com/user/cc-box/internal/webdav"
@@ -63,9 +64,22 @@ type DiffHunk struct {
 
 // ConflictDetail 冲突详情
 type ConflictDetail struct {
-	Path   string `json:"path"`
-	Local  string `json:"local"`
-	Remote string `json:"remote"`
+	Path           string `json:"path"`
+	Local          string `json:"local"`
+	Remote         string `json:"remote"`
+	LocalModified  string `json:"localModified"`
+	RemoteModified string `json:"remoteModified"`
+	Recommended    string `json:"recommended"`
+	LocalExists    bool   `json:"localExists"`
+	RemoteExists   bool   `json:"remoteExists"`
+}
+
+type conflictMetadata struct {
+	LocalModified  time.Time `json:"local_modified"`
+	RemoteModified time.Time `json:"remote_modified"`
+	Recommended    string    `json:"recommended"`
+	LocalExists    bool      `json:"local_exists"`
+	RemoteExists   bool      `json:"remote_exists"`
 }
 
 // FileTreeResult 文件树返回结果
@@ -93,26 +107,94 @@ func (a *App) loadClients() (*config.Config, *webdav.Client, []byte, error) {
 		return nil, nil, nil, err
 	}
 
-	client := webdav.NewClient(cfg.WebDAV.URL, cfg.WebDAV.Username, pass)
+	client := newConfiguredWebDAVClient(cfg, pass)
 	return cfg, client, key, nil
+}
+
+func readObjectData(fullPath string) ([]byte, error) {
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		return nil, err
+	}
+	return normalize.HashContent(data), nil
+}
+
+func safeJoin(root, relPath string) (string, error) {
+	if relPath == "" || strings.ContainsRune(relPath, 0) {
+		return "", fmt.Errorf("无效路径: %s", relPath)
+	}
+	clean := filepath.Clean(filepath.FromSlash(relPath))
+	if filepath.IsAbs(clean) || filepath.VolumeName(clean) != "" || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("路径越界: %s", relPath)
+	}
+	fullPath := filepath.Join(root, clean)
+	rel, err := filepath.Rel(root, fullPath)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("路径越界: %s", relPath)
+	}
+	return fullPath, nil
+}
+
+func safeClaudePath(relPath string) (string, error) {
+	return safeJoin(config.ClaudeDir(), relPath)
+}
+
+func validateSnapshotID(id string) error {
+	if id == "" || strings.ContainsRune(id, 0) || strings.Contains(id, "..") || strings.ContainsAny(id, `/\\`) {
+		return fmt.Errorf("无效快照 ID: %s", id)
+	}
+	return nil
+}
+
+func remoteHeadETagForUpdate(client *webdav.Client, localHead string) (string, string, error) {
+	if localHead != "" {
+		if err := validateSnapshotID(localHead); err != nil {
+			return "", "", err
+		}
+	}
+	data, etag, err := client.GET("HEAD")
+	if err == webdav.ErrNotFound {
+		if localHead != "" {
+			return "", "", fmt.Errorf("远程 HEAD 不存在，请先拉取或重新初始化")
+		}
+		return "", "", nil
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("读取远程 HEAD 失败: %w", err)
+	}
+	remoteHead := strings.TrimSpace(string(data))
+	if remoteHead != localHead {
+		return remoteHead, etag, fmt.Errorf("远程已更新，请先拉取并解决冲突")
+	}
+	if remoteHead != "" && etag == "" {
+		return remoteHead, "", fmt.Errorf("远程服务未返回 HEAD ETag，无法安全更新")
+	}
+	return remoteHead, etag, nil
 }
 
 // loadLocalSnap 加载本地 HEAD 指向的快照（先本地缓存，再远程）
 func (a *App) loadLocalSnap(client *webdav.Client, key []byte) (*snapshot.Snapshot, error) {
 	head, err := os.ReadFile(config.CCBoxDir() + "/HEAD")
-	if err != nil || string(head) == "" {
+	if err != nil {
 		return nil, nil
+	}
+	headID := strings.TrimSpace(string(head))
+	if headID == "" {
+		return nil, nil
+	}
+	if err := validateSnapshotID(headID); err != nil {
+		return nil, err
 	}
 
 	// 先尝试本地缓存
 	snapDir := config.CCBoxDir() + "/snapshots/"
-	data, err := os.ReadFile(snapDir + string(head) + ".json")
+	data, err := os.ReadFile(snapDir + headID + ".json")
 	if err == nil {
 		return snapshot.Deserialize(data)
 	}
 
 	// 从远程下载
-	snapPath := "snapshots/" + string(head) + ".json.enc"
+	snapPath := "snapshots/" + headID + ".json.enc"
 	encrypted, _, err := client.GET(snapPath)
 	if err != nil {
 		return nil, err
@@ -134,12 +216,22 @@ func (a *App) loadRemoteSnap(client *webdav.Client, key []byte) (*snapshot.Snaps
 	if head == "" {
 		return nil, nil
 	}
+	if err := validateSnapshotID(head); err != nil {
+		return nil, err
+	}
 
 	// 先尝试本地缓存
 	snapDir := config.CCBoxDir() + "/snapshots/"
 	local, err := os.ReadFile(snapDir + head + ".json")
 	if err == nil {
-		return snapshot.Deserialize(local)
+		snap, err := snapshot.Deserialize(local)
+		if err != nil {
+			return nil, err
+		}
+		if snap.ID != head {
+			return nil, fmt.Errorf("本地缓存快照 ID 与远程 HEAD 不一致")
+		}
+		return snap, nil
 	}
 
 	snapPath := "snapshots/" + head + ".json.enc"
@@ -151,7 +243,14 @@ func (a *App) loadRemoteSnap(client *webdav.Client, key []byte) (*snapshot.Snaps
 	if err != nil {
 		return nil, err
 	}
-	return snapshot.Deserialize(decrypted)
+	snap, err := snapshot.Deserialize(decrypted)
+	if err != nil {
+		return nil, err
+	}
+	if snap.ID != head {
+		return nil, fmt.Errorf("远程快照 ID 与 HEAD 不一致")
+	}
+	return snap, nil
 }
 
 // GetFileTree 返回配置文件树及同步状态
@@ -260,7 +359,7 @@ func computeFileStatus(path string, current map[string]snapshot.FileEntry, local
 	if remoteSnap != nil && localSnap != nil {
 		localHead, _ := os.ReadFile(config.CCBoxDir() + "/HEAD")
 
-		if string(localHead) != remoteHeadStr {
+		if strings.TrimSpace(string(localHead)) != remoteHeadStr {
 			if remoteEntry, exists := remoteSnap.Files[path]; exists {
 				if localSnap != nil {
 					if localEntry, ok := localSnap.Files[path]; ok {
@@ -282,22 +381,23 @@ func computeFileStatus(path string, current map[string]snapshot.FileEntry, local
 // listConflicts 列出冲突目录中的文件
 func listConflicts() map[string]bool {
 	result := make(map[string]bool)
-	dir := config.CCBoxDir() + "/conflicts"
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return result
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
+	dir := filepath.Join(config.CCBoxDir(), "conflicts")
+	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info == nil || info.IsDir() {
+			return nil
 		}
-		name := entry.Name()
-		base := strings.TrimSuffix(name, ".local")
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		base := strings.TrimSuffix(rel, ".local")
 		base = strings.TrimSuffix(base, ".remote")
-		if base != name {
+		if base != rel {
 			result[base] = true
 		}
-	}
+		return nil
+	})
 	return result
 }
 
@@ -385,7 +485,10 @@ func (a *App) GetFileContent(relPath string) (*FileDetail, error) {
 		return nil, err
 	}
 
-	fullPath := filepath.Join(config.ClaudeDir(), relPath)
+	fullPath, err := safeClaudePath(relPath)
+	if err != nil {
+		return nil, err
+	}
 	info, err := os.Stat(fullPath)
 	if err != nil {
 		return nil, fmt.Errorf("文件不存在: %s", relPath)
@@ -431,7 +534,10 @@ func (a *App) GetFileDiff(relPath string) (*DiffResult, error) {
 	result := &DiffResult{Path: relPath}
 
 	// 读取本地文件
-	fullPath := filepath.Join(config.ClaudeDir(), relPath)
+	fullPath, err := safeClaudePath(relPath)
+	if err != nil {
+		return nil, err
+	}
 	localData, err := os.ReadFile(fullPath)
 	if err != nil {
 		// 本地文件不存在，可能已删除
@@ -478,9 +584,10 @@ func (a *App) GetFileDiff(relPath string) (*DiffResult, error) {
 
 // GetConflictDetail 返回冲突文件的三方信息
 func (a *App) GetConflictDetail(relPath string) (*ConflictDetail, error) {
-	dir := config.CCBoxDir() + "/conflicts"
-	localFile := dir + "/" + relPath + ".local"
-	remoteFile := dir + "/" + relPath + ".remote"
+	localFile, remoteFile, metaFile, err := conflictFilePaths(relPath)
+	if err != nil {
+		return nil, err
+	}
 
 	localData, err := os.ReadFile(localFile)
 	if err != nil {
@@ -491,48 +598,79 @@ func (a *App) GetConflictDetail(relPath string) (*ConflictDetail, error) {
 		return nil, fmt.Errorf("远程冲突版本不存在")
 	}
 
+	meta := conflictMetadata{LocalExists: true, RemoteExists: true}
+	if metaData, err := os.ReadFile(metaFile); err == nil {
+		_ = json.Unmarshal(metaData, &meta)
+	}
+
 	return &ConflictDetail{
-		Path:   relPath,
-		Local:  string(localData),
-		Remote: string(remoteData),
+		Path:           relPath,
+		Local:          string(localData),
+		Remote:         string(remoteData),
+		LocalModified:  formatConflictTime(meta.LocalModified),
+		RemoteModified: formatConflictTime(meta.RemoteModified),
+		Recommended:    meta.Recommended,
+		LocalExists:    meta.LocalExists,
+		RemoteExists:   meta.RemoteExists,
 	}, nil
 }
 
 // ResolveConflict 解决冲突
 func (a *App) ResolveConflict(relPath, choice string) error {
-	dir := config.CCBoxDir() + "/conflicts"
-	localFile := dir + "/" + relPath + ".local"
-	remoteFile := dir + "/" + relPath + ".remote"
+	localFile, remoteFile, metaFile, err := conflictFilePaths(relPath)
+	if err != nil {
+		return err
+	}
+	meta := conflictMetadata{LocalExists: true, RemoteExists: true}
+	if metaData, err := os.ReadFile(metaFile); err == nil {
+		_ = json.Unmarshal(metaData, &meta)
+	}
 
 	var data []byte
+	shouldWrite := true
 	switch choice {
 	case "local":
+		if !meta.LocalExists {
+			shouldWrite = false
+			break
+		}
 		d, err := os.ReadFile(localFile)
 		if err != nil {
 			return err
 		}
 		data = d
 	case "remote":
+		if !meta.RemoteExists {
+			shouldWrite = false
+			break
+		}
 		d, err := os.ReadFile(remoteFile)
 		if err != nil {
 			return err
 		}
 		data = d
 	case "merged":
-		// 合并结果需要前端提供，暂时跳过
 		return fmt.Errorf("合并模式暂未实现")
 	default:
 		return fmt.Errorf("无效选择: %s", choice)
 	}
 
-	targetPath := filepath.Join(config.ClaudeDir(), filepath.FromSlash(relPath))
-	os.MkdirAll(filepath.Dir(targetPath), 0755)
-	if err := os.WriteFile(targetPath, data, 0600); err != nil {
-		return fmt.Errorf("写入失败: %w", err)
+	targetPath, err := safeClaudePath(relPath)
+	if err != nil {
+		return err
+	}
+	if shouldWrite {
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+			return fmt.Errorf("创建目录失败: %w", err)
+		}
+		if err := os.WriteFile(targetPath, data, 0600); err != nil {
+			return fmt.Errorf("写入失败: %w", err)
+		}
+	} else if err := os.Remove(targetPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("删除失败: %w", err)
 	}
 
-	os.Remove(localFile)
-	os.Remove(remoteFile)
+	removeConflictFiles(relPath)
 	return nil
 }
 
@@ -544,7 +682,11 @@ func (a *App) ExcludeFile(relPath string) error {
 	}
 
 	pattern := relPath
-	info, err := os.Stat(filepath.Join(config.ClaudeDir(), relPath))
+	fullPath, pathErr := safeClaudePath(relPath)
+	if pathErr != nil {
+		return pathErr
+	}
+	info, err := os.Stat(fullPath)
 	if err == nil && info.IsDir() {
 		pattern = relPath + "/"
 	}
@@ -582,8 +724,9 @@ func (a *App) doBulkPush(ctx context.Context, opID int64, cfg *config.Config, cl
 	}
 
 	localHead, _ := os.ReadFile(config.CCBoxDir() + "/HEAD")
+	localHeadStr := strings.TrimSpace(string(localHead))
 	var localSnap *snapshot.Snapshot
-	if string(localHead) != "" {
+	if localHeadStr != "" {
 		localSnap, _ = a.loadLocalSnap(client, key)
 	}
 
@@ -605,6 +748,11 @@ func (a *App) doBulkPush(ctx context.Context, opID int64, cfg *config.Config, cl
 		return nil
 	}
 
+	_, headETag, err := remoteHeadETagForUpdate(client, localHeadStr)
+	if err != nil {
+		return err
+	}
+
 	total := int64(len(changes))
 	store := object.NewStore(client, key, config.CCBoxDir()+"/cache/objects")
 
@@ -619,106 +767,331 @@ func (a *App) doBulkPush(ctx context.Context, opID int64, cfg *config.Config, cl
 			continue
 		}
 
-		fullPath := filepath.Join(config.ClaudeDir(), filepath.FromSlash(c.Path))
-		data, err := os.ReadFile(fullPath)
+		fullPath, err := safeClaudePath(c.Path)
 		if err != nil {
-			continue
+			return err
+		}
+		data, err := readObjectData(fullPath)
+		if err != nil {
+			return fmt.Errorf("读取文件 %s 失败: %w", c.Path, err)
 		}
 
-		if _, err := store.Upload(data); err != nil {
-			continue
+		if hash, err := store.Upload(data); err != nil {
+			return fmt.Errorf("上传文件 %s 失败: %w", c.Path, err)
+		} else if hash != c.NewHash {
+			return fmt.Errorf("文件 %s hash 不一致", c.Path)
 		}
 		a.emitProgress(opID, "bulk-push", int64(i+1), total, int(i+1), int(total), fmt.Sprintf("推送 %s", c.Path))
 	}
 
-	newSnap := snapshot.CreateSnapshot(string(localHead), cfg.Device.ID, "gui push", scanResult.Files)
+	newSnap := snapshot.CreateSnapshot(localHeadStr, cfg.Device.ID, "gui push", scanResult.Files)
 	newSnap.Binary = currentBins
 	snapData, _ := newSnap.Serialize()
 	encrypted, err := encryptRemoteData(snapData, key)
 	if err != nil {
 		return fmt.Errorf("encrypt snap: %w", err)
 	}
-	client.EnsureDir("snapshots/")
+	if err := client.EnsureDir("snapshots/"); err != nil {
+		return fmt.Errorf("create snapshots dir: %w", err)
+	}
 	if _, err := client.PUT("snapshots/"+newSnap.ID+".json.enc", encrypted, ""); err != nil {
 		return fmt.Errorf("upload snap: %w", err)
 	}
-	for attempt := 0; attempt < cfg.Sync.MergeRetryMax; attempt++ {
-		_, etag, err := client.GET("HEAD")
-		if err != nil && err != webdav.ErrNotFound {
-			return fmt.Errorf("read HEAD: %w", err)
-		}
-		res, err := client.CompareAndSwapHEAD("HEAD", newSnap.ID, etag)
-		if err != nil {
-			return fmt.Errorf("cas HEAD: %w", err)
-		}
-		if res.Success {
-			break
-		}
-		time.Sleep(time.Duration(attempt+1) * time.Second)
-		if attempt == cfg.Sync.MergeRetryMax-1 {
-			return fmt.Errorf("conflict, pull first")
-		}
+	res, err := client.CompareAndSwapHEAD("HEAD", newSnap.ID, headETag)
+	if err != nil {
+		return fmt.Errorf("cas HEAD: %w", err)
 	}
-	os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(newSnap.ID), 0600)
-	os.WriteFile(config.CCBoxDir()+"/snapshots/"+newSnap.ID+".json", snapData, 0600)
+	if !res.Success {
+		return fmt.Errorf("远程 HEAD 已变化，请先拉取")
+	}
+	if err := os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(newSnap.ID), 0600); err != nil {
+		return fmt.Errorf("更新本地 HEAD 失败: %w", err)
+	}
+	if err := os.WriteFile(config.CCBoxDir()+"/snapshots/"+newSnap.ID+".json", snapData, 0600); err != nil {
+		return fmt.Errorf("缓存快照失败: %w", err)
+	}
 	return nil
 }
 
 func (a *App) doBulkPull(ctx context.Context, opID int64, cfg *config.Config, client *webdav.Client, key []byte) error {
-	remoteSnap, err := a.loadRemoteSnap(client, key)
+	remoteHeadData, _, err := client.GET("HEAD")
+	if err != nil {
+		return fmt.Errorf("读取远程 HEAD 失败: %w", err)
+	}
+	remoteHead := strings.TrimSpace(string(remoteHeadData))
+	if remoteHead == "" {
+		return fmt.Errorf("远程没有数据")
+	}
+	if err := validateSnapshotID(remoteHead); err != nil {
+		return err
+	}
+	remoteSnap, err := a.loadSnapByID(client, key, remoteHead)
 	if err != nil {
 		return fmt.Errorf("加载远程快照失败: %w", err)
 	}
-	if remoteSnap == nil {
-		return fmt.Errorf("远程没有数据")
-	}
 
-	// 只下载有差异的文件
+	result, err := a.applyRemoteSnapshot(ctx, opID, "bulk-pull", cfg, client, key, remoteHead, remoteSnap)
+	if err != nil {
+		return err
+	}
+	if result.Conflicts > 0 {
+		UpdateTrayState(TrayConflict)
+		return fmt.Errorf("发现 %d 个冲突，请在文件页选择以本地或远程为准", result.Conflicts)
+	}
+	if result.Applied == 0 {
+		a.emitProgress(opID, "bulk-pull", 1, 1, 1, 1, "已是最新")
+		return nil
+	}
+	return nil
+}
+
+type pullMergeResult struct {
+	Applied   int
+	Conflicts int
+	Total     int
+}
+
+func (a *App) applyRemoteSnapshot(ctx context.Context, opID int64, operation string, cfg *config.Config, client *webdav.Client, key []byte, remoteHead string, remoteSnap *snapshot.Snapshot) (*pullMergeResult, error) {
 	scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
 	scanResult, err := scanner.Scan()
 	if err != nil {
-		return fmt.Errorf("scan failed: %w", err)
+		return nil, fmt.Errorf("扫描失败: %w", err)
 	}
-	var toDownload []string
-	for path, remoteEntry := range remoteSnap.Files {
-		localEntry, exists := scanResult.Files[path]
-		if !exists || localEntry.Hash != remoteEntry.Hash {
-			toDownload = append(toDownload, path)
+
+	localHead, _ := os.ReadFile(config.CCBoxDir() + "/HEAD")
+	localHeadStr := strings.TrimSpace(string(localHead))
+	var baseSnap *snapshot.Snapshot
+	if localHeadStr != "" {
+		baseSnap, _ = a.loadSnapByID(client, key, localHeadStr)
+	}
+
+	paths := mergePathSet(baseSnap, scanResult.Files, remoteSnap)
+	result := &pullMergeResult{Total: len(paths)}
+	if len(paths) == 0 {
+		if err := cachePulledSnapshot(remoteHead, remoteSnap); err != nil {
+			return nil, err
 		}
+		if err := os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(remoteHead), 0600); err != nil {
+			return nil, err
+		}
+		return result, nil
 	}
-	if len(toDownload) == 0 {
-		os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(remoteSnap.ID), 0600)
-		a.emitProgress(opID, "bulk-pull", 1, 1, 1, 1, "already up to date")
-		return nil
-	}
+
 	store := object.NewStore(client, key, config.CCBoxDir()+"/cache/objects")
-	total := int64(len(toDownload))
-	for i, path := range toDownload {
+	for i, path := range paths {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil, ctx.Err()
 		default:
 		}
-		remoteEntry, ok := remoteSnap.Files[path]
-		if !ok {
+
+		baseEntry, baseExists := fileEntryFromSnapshot(baseSnap, path)
+		localEntry, localExists := scanResult.Files[path]
+		remoteEntry, remoteExists := remoteSnap.Files[path]
+		localChanged := !sameFileState(baseExists, baseEntry, localExists, localEntry)
+		remoteChanged := !sameFileState(baseExists, baseEntry, remoteExists, remoteEntry)
+
+		if !localChanged && !remoteChanged {
 			continue
 		}
-		data, err := store.Download(remoteEntry.Hash)
-		if err != nil {
+		if sameFileState(localExists, localEntry, remoteExists, remoteEntry) {
 			continue
 		}
-		fullPath := filepath.Join(config.ClaudeDir(), filepath.FromSlash(path))
-		os.MkdirAll(filepath.Dir(fullPath), 0755)
-		os.WriteFile(fullPath, data, 0600)
-		a.emitProgress(opID, "bulk-pull", int64(i+1), total, int(i+1), int(total), fmt.Sprintf("pull %s", path))
+		if localChanged && remoteChanged {
+			if err := a.savePullConflict(path, localExists, localEntry, remoteExists, remoteEntry, store); err != nil {
+				return nil, err
+			}
+			result.Conflicts++
+			a.emitProgress(opID, operation, int64(i+1), int64(len(paths)), int(i+1), len(paths), fmt.Sprintf("冲突 %s", path))
+			continue
+		}
+		if remoteChanged {
+			if err := applyRemoteFile(path, remoteExists, remoteEntry, store); err != nil {
+				return nil, err
+			}
+			result.Applied++
+			a.emitProgress(opID, operation, int64(i+1), int64(len(paths)), int(i+1), len(paths), fmt.Sprintf("拉取 %s", path))
+		}
 	}
 
-	// 更新本地 HEAD
-	os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(remoteSnap.ID), 0600)
-	snapData, _ := remoteSnap.Serialize()
-	os.WriteFile(config.CCBoxDir()+"/snapshots/"+remoteSnap.ID+".json", snapData, 0600)
+	if err := cachePulledSnapshot(remoteHead, remoteSnap); err != nil {
+		return nil, err
+	}
+	if result.Conflicts == 0 {
+		if err := os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(remoteHead), 0600); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
 
+func mergePathSet(baseSnap *snapshot.Snapshot, current map[string]snapshot.FileEntry, remoteSnap *snapshot.Snapshot) []string {
+	seen := make(map[string]bool)
+	for path := range current {
+		seen[path] = true
+	}
+	if baseSnap != nil {
+		for path := range baseSnap.Files {
+			seen[path] = true
+		}
+	}
+	if remoteSnap != nil {
+		for path := range remoteSnap.Files {
+			seen[path] = true
+		}
+	}
+	paths := make([]string, 0, len(seen))
+	for path := range seen {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+func fileEntryFromSnapshot(snap *snapshot.Snapshot, path string) (snapshot.FileEntry, bool) {
+	if snap == nil {
+		return snapshot.FileEntry{}, false
+	}
+	entry, ok := snap.Files[path]
+	return entry, ok
+}
+
+func sameFileState(aExists bool, a snapshot.FileEntry, bExists bool, b snapshot.FileEntry) bool {
+	if aExists != bExists {
+		return false
+	}
+	if !aExists {
+		return true
+	}
+	return a.Hash == b.Hash
+}
+
+func applyRemoteFile(path string, remoteExists bool, remoteEntry snapshot.FileEntry, store *object.Store) error {
+	fullPath, err := safeClaudePath(path)
+	if err != nil {
+		return err
+	}
+	if !remoteExists {
+		if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("删除本地文件 %s 失败: %w", path, err)
+		}
+		return nil
+	}
+	data, err := store.Download(remoteEntry.Hash)
+	if err != nil {
+		return fmt.Errorf("下载文件 %s 失败: %w", path, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+		return fmt.Errorf("创建目录失败: %w", err)
+	}
+	if err := os.WriteFile(fullPath, data, 0600); err != nil {
+		return fmt.Errorf("写入文件 %s 失败: %w", path, err)
+	}
 	return nil
+}
+
+func (a *App) savePullConflict(path string, localExists bool, localEntry snapshot.FileEntry, remoteExists bool, remoteEntry snapshot.FileEntry, store *object.Store) error {
+	var localData []byte
+	if localExists {
+		fullPath, err := safeClaudePath(path)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(fullPath)
+		if err != nil {
+			return fmt.Errorf("读取本地冲突文件 %s 失败: %w", path, err)
+		}
+		localData = data
+	}
+	var remoteData []byte
+	if remoteExists {
+		data, err := store.Download(remoteEntry.Hash)
+		if err != nil {
+			return fmt.Errorf("下载远程冲突文件 %s 失败: %w", path, err)
+		}
+		remoteData = data
+	}
+	meta := conflictMetadata{
+		LocalModified:  localEntry.Modified,
+		RemoteModified: remoteEntry.Modified,
+		Recommended:    recommendedConflictChoice(localExists, localEntry.Modified, remoteExists, remoteEntry.Modified),
+		LocalExists:    localExists,
+		RemoteExists:   remoteExists,
+	}
+	return saveConflictFiles(path, localData, remoteData, meta)
+}
+
+func recommendedConflictChoice(localExists bool, localModified time.Time, remoteExists bool, remoteModified time.Time) string {
+	if localExists != remoteExists {
+		return ""
+	}
+	if !localExists {
+		return ""
+	}
+	if localModified.After(remoteModified) {
+		return "local"
+	}
+	if remoteModified.After(localModified) {
+		return "remote"
+	}
+	return ""
+}
+
+func saveConflictFiles(relPath string, localData, remoteData []byte, meta conflictMetadata) error {
+	localFile, remoteFile, metaFile, err := conflictFilePaths(relPath)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(localFile), 0700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(localFile, localData, 0600); err != nil {
+		return err
+	}
+	if err := os.WriteFile(remoteFile, remoteData, 0600); err != nil {
+		return err
+	}
+	metaData, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(metaFile, metaData, 0600)
+}
+
+func conflictFilePaths(relPath string) (string, string, string, error) {
+	base, err := safeJoin(filepath.Join(config.CCBoxDir(), "conflicts"), relPath)
+	if err != nil {
+		return "", "", "", err
+	}
+	return base + ".local", base + ".remote", base + ".meta", nil
+}
+
+func removeConflictFiles(relPath string) {
+	localFile, remoteFile, metaFile, err := conflictFilePaths(relPath)
+	if err != nil {
+		return
+	}
+	os.Remove(localFile)
+	os.Remove(remoteFile)
+	os.Remove(metaFile)
+}
+
+func formatConflictTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Local().Format("2006-01-02 15:04")
+}
+
+func cachePulledSnapshot(remoteHead string, remoteSnap *snapshot.Snapshot) error {
+	if err := validateSnapshotID(remoteHead); err != nil {
+		return err
+	}
+	snapData, err := remoteSnap.Serialize()
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(config.CCBoxDir()+"/snapshots/"+remoteHead+".json", snapData, 0600)
 }
 
 // isTextFile 判断是否为文本文件
@@ -829,13 +1202,18 @@ func findNextMatch(old, new_ []string, oStart, nStart int) (int, int) {
 
 // SaveMergedConflict 保存合并后的冲突解决结果
 func (a *App) SaveMergedConflict(relPath, content string) error {
-	dir := config.CCBoxDir() + "/conflicts"
-	os.Remove(dir + "/" + relPath + ".local")
-	os.Remove(dir + "/" + relPath + ".remote")
-
-	targetPath := filepath.Join(config.ClaudeDir(), filepath.FromSlash(relPath))
-	os.MkdirAll(filepath.Dir(targetPath), 0755)
-	return os.WriteFile(targetPath, []byte(content), 0600)
+	targetPath, err := safeClaudePath(relPath)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+		return fmt.Errorf("创建目录失败: %w", err)
+	}
+	if err := os.WriteFile(targetPath, []byte(content), 0600); err != nil {
+		return err
+	}
+	removeConflictFiles(relPath)
+	return nil
 }
 
 // 导出 JSON 给前端使用（辅助）

@@ -11,14 +11,15 @@ import (
 
 // HashPrefix 返回哈希值的前 2 字符作为目录前缀
 func HashPrefix(hash string) string {
-	if len(hash) < 2 {
+	digest, err := ParseHash(hash)
+	if err != nil || len(digest) < 2 {
 		return "00"
 	}
-	return hash[:2]
+	return digest[:2]
 }
 
 // ObjectPath 返回 object 在 WebDAV 上的路径
-// 格式: objects/ab/c1234def....enc
+// 格式: objects/ab/sha256:c1234def....enc
 func ObjectPath(hash string) string {
 	prefix := HashPrefix(hash)
 	return path.Join("objects", prefix, hash+".enc")

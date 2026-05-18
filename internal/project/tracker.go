@@ -24,14 +24,19 @@ type Project struct {
 
 // OrphanProject 未匹配的远程项目
 type OrphanProject struct {
-	RemoteURL  string    `json:"remote_url"`
-	RemoteName string    `json:"remote_name"`
-	Discovered string    `json:"discovered"` // 发现时间
+	RemoteURL  string `json:"remote_url"`
+	RemoteName string `json:"remote_name"`
+	Discovered string `json:"discovered"` // 发现时间
 }
 
 // OrphanIndex orphan 项目索引
 type OrphanIndex struct {
 	Orphans []OrphanProject `json:"orphans"`
+}
+
+// TrackedIndex 用户手动添加的项目索引
+type TrackedIndex struct {
+	Projects []Project `json:"projects"`
 }
 
 // EncodeRemote 将 remote URL 编码为安全的路径名
@@ -94,6 +99,26 @@ func DiscoverProjects() ([]Project, error) {
 		})
 	}
 
+	tracked, err := LoadTrackedIndex()
+	if err == nil {
+		seen := make(map[string]bool)
+		for _, p := range projects {
+			seen[p.LocalPath] = true
+			seen[p.RemoteURL] = true
+		}
+		for _, p := range tracked.Projects {
+			if p.LocalPath == "" || seen[p.LocalPath] || seen[p.RemoteURL] {
+				continue
+			}
+			if _, err := os.Stat(filepath.Join(p.LocalPath, ".claude.json")); err != nil {
+				continue
+			}
+			projects = append(projects, p)
+			seen[p.LocalPath] = true
+			seen[p.RemoteURL] = true
+		}
+	}
+
 	return projects, nil
 }
 
@@ -142,7 +167,8 @@ func GetGitRemote(dir string) (url string, name string) {
 
 // decodeProjectDir 将 ~/.claude/projects/ 下的目录名还原为实际路径
 // 目录名格式: -Users-a-Desktop-myproject → /Users/a/Desktop/myproject (macOS)
-//             -C-Users-a-Desktop-myproject → C:\Users\a\Desktop\myproject (Windows)
+//
+//	-C-Users-a-Desktop-myproject → C:\Users\a\Desktop\myproject (Windows)
 func decodeProjectDir(dirName string) string {
 	parts := strings.Split(dirName, "-")
 
@@ -191,6 +217,63 @@ func SaveClaudeJSON(projectPath string, content map[string]interface{}) error {
 	return os.WriteFile(filepath.Join(projectPath, ".claude.json"), data, 0600)
 }
 
+func trackedIndexPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".cc-box", "tracked_projects.json")
+}
+
+func LoadTrackedIndex() (*TrackedIndex, error) {
+	data, err := os.ReadFile(trackedIndexPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &TrackedIndex{}, nil
+		}
+		return nil, err
+	}
+	var idx TrackedIndex
+	if err := json.Unmarshal(data, &idx); err != nil {
+		return nil, err
+	}
+	return &idx, nil
+}
+
+func SaveTrackedIndex(idx *TrackedIndex) error {
+	path := trackedIndexPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(idx, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0600)
+}
+
+func AddTrackedProject(dir string) error {
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(filepath.Join(absDir, ".claude.json")); err != nil {
+		return fmt.Errorf("该目录下没有 .claude.json 文件")
+	}
+	remoteURL, remoteName := GetGitRemote(absDir)
+	if remoteURL == "" {
+		remoteURL = "local:" + EncodeRemote(absDir)
+	}
+	idx, err := LoadTrackedIndex()
+	if err != nil {
+		return err
+	}
+	for _, p := range idx.Projects {
+		if p.LocalPath == absDir || p.RemoteURL == remoteURL {
+			return nil
+		}
+	}
+	idx.Projects = append(idx.Projects, Project{RemoteURL: remoteURL, LocalPath: absDir, RemoteName: remoteName})
+	return SaveTrackedIndex(idx)
+}
+
 // LoadOrphanIndex 加载 orphan 索引
 func LoadOrphanIndex() (*OrphanIndex, error) {
 	home, _ := os.UserHomeDir()
@@ -215,6 +298,9 @@ func LoadOrphanIndex() (*OrphanIndex, error) {
 func SaveOrphanIndex(idx *OrphanIndex) error {
 	home, _ := os.UserHomeDir()
 	path := filepath.Join(home, ".cc-box", "orphan_projects.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
 
 	data, err := json.MarshalIndent(idx, "", "  ")
 	if err != nil {

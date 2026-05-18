@@ -14,6 +14,7 @@ import (
 	"github.com/user/cc-box/internal/crypto"
 	"github.com/user/cc-box/internal/object"
 	"github.com/user/cc-box/internal/snapshot"
+	"github.com/user/cc-box/internal/webdav"
 )
 
 var backupCmd = &cobra.Command{
@@ -45,6 +46,7 @@ func init() {
 	rootCmd.AddCommand(restoreCmd)
 	rootCmd.AddCommand(verifyCmd)
 	rootCmd.AddCommand(gcCmd)
+	verifyCmd.Flags().Bool("deep", false, "验证远程快照链和 objects 完整性")
 }
 
 func runBackup(cmd *cobra.Command, args []string) error {
@@ -246,7 +248,8 @@ func restoreFromSnapshot(snapID string) error {
 }
 
 func runVerify(cmd *cobra.Command, args []string) error {
-	cfg, client, _, err := loadClientAndKey()
+	deep, _ := cmd.Flags().GetBool("deep")
+	cfg, client, key, err := loadClientAndKey()
 	if err != nil {
 		return err
 	}
@@ -298,7 +301,57 @@ func runVerify(cmd *cobra.Command, args []string) error {
 		fmt.Println("  ✓ salt")
 	}
 
+	if deep {
+		if err := runDeepVerify(client, key); err != nil {
+			return err
+		}
+	}
+
 	_ = cfg
+	return nil
+}
+
+func runDeepVerify(client *webdav.Client, key []byte) error {
+	fmt.Println()
+	fmt.Println("=== 深度验证 ===")
+
+	headData, _, err := client.GET("HEAD")
+	if err != nil {
+		return fmt.Errorf("读取远程 HEAD 失败: %w", err)
+	}
+	snapID := strings.TrimSpace(string(headData))
+	if snapID == "" {
+		return fmt.Errorf("远程 HEAD 为空")
+	}
+
+	store := object.NewStore(client, key, "")
+	seenSnapshots := make(map[string]bool)
+	checkedObjects := make(map[string]bool)
+	for snapID != "" {
+		if seenSnapshots[snapID] {
+			return fmt.Errorf("快照链存在循环: %s", snapID)
+		}
+		seenSnapshots[snapID] = true
+		snap, err := loadRemoteSnapshot(client, key, snapID)
+		if err != nil {
+			return fmt.Errorf("加载快照 %s 失败: %w", snapID, err)
+		}
+		for path, entry := range snap.Files {
+			if _, err := safeClaudePath(path); err != nil {
+				return fmt.Errorf("快照 %s 包含不安全路径 %s: %w", snapID, path, err)
+			}
+			if checkedObjects[entry.Hash] {
+				continue
+			}
+			if _, err := store.Download(entry.Hash); err != nil {
+				return fmt.Errorf("验证 object %s 失败: %w", entry.Hash, err)
+			}
+			checkedObjects[entry.Hash] = true
+		}
+		snapID = snap.Parent
+	}
+
+	fmt.Printf("  ✓ 快照链 %d 个，objects %d 个\n", len(seenSnapshots), len(checkedObjects))
 	return nil
 }
 
@@ -316,13 +369,12 @@ func runGC(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("读取远程 HEAD 失败: %w", err)
 	}
 
-	snapID := string(headData)
+	snapID := strings.TrimSpace(string(headData))
 	snapCount := 0
 	for snapID != "" && snapCount < 50 {
 		snap, err := loadRemoteSnapshot(client, key, snapID)
 		if err != nil {
-			fmt.Printf("  跳过快照 %s: %v\n", snapID, err)
-			break
+			return fmt.Errorf("加载快照 %s 失败，中止 GC: %w", snapID, err)
 		}
 		for _, entry := range snap.Files {
 			reachableObjects[entry.Hash] = true
@@ -364,8 +416,7 @@ func runGC(cmd *cobra.Command, args []string) error {
 				continue
 			}
 			encFileName := extractName(f.Path)
-			fileName := strings.TrimSuffix(encFileName, ".enc")
-			hash := dirName + fileName
+			hash := strings.TrimSuffix(encFileName, ".enc")
 
 			if !reachableObjects[hash] {
 				orphanObjects = append(orphanObjects, "objects/"+dirName+"/"+encFileName)

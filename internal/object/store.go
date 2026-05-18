@@ -59,7 +59,7 @@ func (s *Store) Upload(data []byte) (string, error) {
 	}
 
 	// 检查远程是否已存在
-	if exists, _ := s.client.Exists(objPath); exists {
+	if exists, _ := s.Exists(hash); exists {
 		if s.knownHashes != nil {
 			s.knownHashes[hash] = true
 		}
@@ -99,19 +99,31 @@ func (s *Store) Download(hash string) ([]byte, error) {
 	if s.cache != "" {
 		cached := s.cachePath(hash)
 		if data, err := os.ReadFile(cached); err == nil {
-			if !s.encrypt {
-				return data, nil
+			decrypted := data
+			if s.encrypt {
+				decrypted, err = crypto.Decrypt(data, s.key)
+				if err != nil {
+					decrypted = nil
+				}
 			}
-			decrypted, err := crypto.Decrypt(data, s.key)
-			if err == nil {
+			if decrypted != nil && ValidateHash(decrypted, hash) {
 				return decrypted, nil
 			}
 			// 缓存损坏，继续从远程下载
 		}
 	}
 
-	objPath := ObjectPath(hash)
-	encrypted, _, err := s.client.GET(objPath)
+	var encrypted []byte
+	var err error
+	for _, candidate := range objectPaths(hash) {
+		encrypted, _, err = s.client.GET(candidate)
+		if err == nil {
+			break
+		}
+		if err != webdav.ErrNotFound {
+			return nil, fmt.Errorf("下载 object 失败: %w", err)
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("下载 object 失败: %w", err)
 	}
@@ -123,6 +135,9 @@ func (s *Store) Download(hash string) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("解密失败: %w", err)
 		}
+	}
+	if !ValidateHash(decrypted, hash) {
+		return nil, fmt.Errorf("object hash 校验失败: %s", hash)
 	}
 
 	// 写入缓存
@@ -142,12 +157,29 @@ func (s *Store) Key() []byte {
 
 // Exists 检查 object 是否存在
 func (s *Store) Exists(hash string) (bool, error) {
-	objPath := ObjectPath(hash)
-	return s.client.Exists(objPath)
+	for _, objPath := range objectPaths(hash) {
+		exists, err := s.client.Exists(objPath)
+		if err != nil {
+			return false, err
+		}
+		if exists {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // cachePath 返回本地缓存路径
 func (s *Store) cachePath(hash string) string {
 	prefix := HashPrefix(hash)
 	return filepath.Join(s.cache, prefix, hash+".enc")
+}
+
+func objectPaths(hash string) []string {
+	primary := ObjectPath(hash)
+	legacy := filepath.ToSlash(filepath.Join("objects", "sh", hash+".enc"))
+	if legacy == primary {
+		return []string{primary}
+	}
+	return []string{primary, legacy}
 }

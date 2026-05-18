@@ -39,17 +39,20 @@ func TestValidateHash(t *testing.T) {
 func TestObjectPath(t *testing.T) {
 	hash := "sha256:abcdef1234567890"
 	path := ObjectPath(hash)
-	if path != "objects/sh/sha256:abcdef1234567890.enc" {
+	if path != "objects/ab/sha256:abcdef1234567890.enc" {
 		t.Errorf("ObjectPath() = %s, unexpected", path)
 	}
 }
 
 func TestHashPrefix(t *testing.T) {
-	if HashPrefix("abcdef") != "ab" {
-		t.Error("HashPrefix should return first 2 chars")
+	if HashPrefix("sha256:abcdef") != "ab" {
+		t.Error("HashPrefix should return first 2 digest chars")
 	}
-	if HashPrefix("a") != "00" {
-		t.Error("HashPrefix should return 00 for short input")
+	if HashPrefix("abcdef") != "00" {
+		t.Error("HashPrefix should reject hashes without sha256 prefix")
+	}
+	if HashPrefix("sha256:a") != "00" {
+		t.Error("HashPrefix should return 00 for short digest")
 	}
 }
 

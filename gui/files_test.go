@@ -266,6 +266,54 @@ func TestFileNodeJSON(t *testing.T) {
 	}
 }
 
+func TestRecommendedConflictChoice(t *testing.T) {
+	localTime := time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)
+	remoteTime := localTime.Add(time.Hour)
+	if got := recommendedConflictChoice(true, localTime, true, remoteTime); got != "remote" {
+		t.Fatalf("expected remote newer, got %s", got)
+	}
+	if got := recommendedConflictChoice(true, remoteTime, true, localTime); got != "local" {
+		t.Fatalf("expected local newer, got %s", got)
+	}
+	if got := recommendedConflictChoice(false, time.Time{}, true, remoteTime); got != "" {
+		t.Fatalf("expected no recommendation for delete-vs-edit, got %s", got)
+	}
+}
+
+func TestConflictFilesIncludeFreshnessMetadata(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
+
+	localTime := time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)
+	remoteTime := localTime.Add(time.Hour)
+	meta := conflictMetadata{
+		LocalModified:  localTime,
+		RemoteModified: remoteTime,
+		Recommended:    "remote",
+		LocalExists:    true,
+		RemoteExists:   true,
+	}
+	if err := saveConflictFiles("nested/settings.json", []byte("local"), []byte("remote"), meta); err != nil {
+		t.Fatalf("save conflict: %v", err)
+	}
+
+	conflicts := listConflicts()
+	if !conflicts["nested/settings.json"] {
+		t.Fatalf("expected nested conflict to be listed: %#v", conflicts)
+	}
+	detail, err := (&App{}).GetConflictDetail("nested/settings.json")
+	if err != nil {
+		t.Fatalf("get conflict detail: %v", err)
+	}
+	if detail.Recommended != "remote" || !detail.LocalExists || !detail.RemoteExists {
+		t.Fatalf("unexpected detail metadata: %+v", detail)
+	}
+	if detail.LocalModified != localTime.Local().Format("2006-01-02 15:04") {
+		t.Fatalf("unexpected local time: %s", detail.LocalModified)
+	}
+}
+
 func TestDiffResultJSON(t *testing.T) {
 	dr := &DiffResult{
 		Path:   "settings.json",
@@ -274,7 +322,7 @@ func TestDiffResultJSON(t *testing.T) {
 			{
 				OldStart: 1, OldCount: 2,
 				NewStart: 1, NewCount: 2,
-				Lines:    []string{"-old line", "+new line"},
+				Lines: []string{"-old line", "+new line"},
 			},
 		},
 	}

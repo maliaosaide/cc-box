@@ -45,13 +45,18 @@ func Upload(client *webdav.Client, key []byte, name string, data []byte, version
 		return err
 	}
 
+	uploadedBy := ""
+	if appCfg, err := config.Load(); err == nil {
+		uploadedBy = appCfg.Device.ID
+	}
+
 	// 更新索引
 	info.Versions[version] = Version{
 		Hash:       manifest.Hash,
 		Size:       int64(len(data)),
 		Refs:       0,
 		Uploaded:   now(),
-		UploadedBy: "",
+		UploadedBy: uploadedBy,
 		Encrypted:  cfg.Encrypt,
 		Chunked:    shouldChunk,
 	}

@@ -316,33 +316,17 @@ func runBinaryPrune(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// 删除分块文件和更新索引
 	cleaned := 0
 	for _, t := range targets {
-		// 删除分块目录
-		if t.hash != "" {
-			partsDir := "binaries/parts/" + t.hash + "/"
-			client.DELETE(partsDir)
-		}
-
-	// 删除完整文件（尝试两种扩展名）
-		for _, ext := range []string{".enc", ".bin"} {
-			wholePath := fmt.Sprintf("binaries/%s/%s-%s%s", t.platform, t.name, t.version, ext)
-			client.DELETE(wholePath)
-		}
-
-		// 从索引中移除
-		info := idx.GetBinaryInfo(t.platform, t.name)
-		if info != nil {
-			delete(info.Versions, t.version)
+		if err := binary.DeleteRemoteVersion(client, nil, t.name, t.version, t.platform); err != nil {
+			fmt.Printf("  删除失败 %s/%s %s: %v\n", t.platform, t.name, t.version, err)
+			continue
 		}
 
 		fmt.Printf("  ✓ %s/%s %s\n", t.platform, t.name, t.version)
 		cleaned++
 	}
 
-	// 保存更新后的索引
-	binary.SaveIndex(client, idx)
 	fmt.Printf("\n已清理 %d 个版本\n", cleaned)
 	return nil
 }

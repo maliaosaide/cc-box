@@ -22,8 +22,8 @@ type FileInfo struct {
 
 // multistatus WebDAV 207 响应根节点
 type multistatus struct {
-	XMLName   xml.Name        `xml:"multistatus"`
-	Responses []davResponse   `xml:"response"`
+	XMLName   xml.Name      `xml:"multistatus"`
+	Responses []davResponse `xml:"response"`
 }
 
 type davResponse struct {
@@ -32,17 +32,17 @@ type davResponse struct {
 }
 
 type davPropStat struct {
-	Prop  davProp `xml:"prop"`
-	Status string `xml:"status"`
+	Prop   davProp `xml:"prop"`
+	Status string  `xml:"status"`
 }
 
 type davProp struct {
-	ETag           string          `xml:"getetag"`
-	ContentLength  int64           `xml:"getcontentlength"`
-	LastModified   string          `xml:"getlastmodified"`
-	ResourceType   davResourceType `xml:"resourcetype"`
+	ETag          string          `xml:"getetag"`
+	ContentLength int64           `xml:"getcontentlength"`
+	LastModified  string          `xml:"getlastmodified"`
+	ResourceType  davResourceType `xml:"resourcetype"`
 }
 
 type davResourceType struct {
-	Collection string `xml:"collection"`
+	Collection *struct{} `xml:"collection"`
 }

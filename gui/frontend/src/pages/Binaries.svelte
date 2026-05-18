@@ -3,7 +3,6 @@
   import { EventsOn } from '../../wailsjs/runtime/runtime.js'
   import { GetBinaryPage, SwitchBinaryVersion, UploadBinaryVersion, UploadCurrentBinary, GetBinaryStorage, DeleteLocalVersion, DeleteCloudBinaryVersion } from '../../wailsjs/go/main/App.js'
 
-  export let syncState = 'idle'
   let activeTab = 'claude'
   let binData = null
   let storage = null

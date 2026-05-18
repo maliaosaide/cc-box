@@ -2,7 +2,6 @@
   import { onMount } from 'svelte'
   import { GetConfig, SetConfigField, TestConnection, SetWebDAVPassword, AddExcludePattern, RemoveExcludePattern, GetEncryptionStatus, VerifyEncryptionKey, ChangeEncryptionPassword } from '../../wailsjs/go/main/App.js'
 
-  export let syncState = 'idle'
   let activeTab = 'connection'
 
   const tabs = [
@@ -112,8 +111,8 @@
   }
 
   async function toggleEncryption() {
-    encryptionEnabled = !encryptionEnabled
-    await saveField('encryption', 'enabled', String(encryptionEnabled))
+    error = '加密和明文同步互斥，初始化后不能直接切换；如需切换，请新建同步组或执行完整迁移。'
+    encryptionEnabled = cfg.encryption.enabled
   }
 
   async function toggleBinaryEncrypt() {
@@ -242,29 +241,29 @@
     {#if activeTab === 'connection'}
       <div class="card animate-fade-in">
         <div class="form-group">
-          <label class="label">WebDAV 服务地址</label>
+          <label class="label" for="webdav-url">WebDAV 服务地址</label>
           <div class="input-row">
-            <input class="input" type="text" bind:value={webdavUrl} placeholder="https://your-server/dav/" />
+            <input id="webdav-url" class="input" type="text" bind:value={webdavUrl} placeholder="https://your-server/dav/" />
             <button class="btn-sm" on:click={saveWebdavUrl}>保存</button>
           </div>
         </div>
         <div class="form-group">
-          <label class="label">用户名</label>
+          <label class="label" for="webdav-user">用户名</label>
           <div class="input-row">
-            <input class="input" type="text" bind:value={webdavUser} placeholder="用户名" />
+            <input id="webdav-user" class="input" type="text" bind:value={webdavUser} placeholder="用户名" />
             <button class="btn-sm" on:click={saveWebdavUser}>保存</button>
           </div>
         </div>
         <div class="form-group">
-          <label class="label">密码</label>
+          <label class="label" for="webdav-password">密码</label>
           <div class="input-row">
-            <input class="input" type="password" bind:value={webdavPassNew} placeholder={cfg.webdav.hasPassword ? '••••••••（已保存）' : '输入密码'} />
+            <input id="webdav-password" class="input" type="password" bind:value={webdavPassNew} placeholder={cfg.webdav.hasPassword ? '••••••••（已保存）' : '输入密码'} />
             <button class="btn-sm" on:click={savePassword}>保存</button>
           </div>
         </div>
         <div class="form-group">
-          <label class="label">根路径</label>
-          <input class="input" value={cfg.webdav.root} disabled />
+          <label class="label" for="webdav-root">根路径</label>
+          <input id="webdav-root" class="input" value={cfg.webdav.root} disabled />
         </div>
         <div class="form-actions">
           {#if testResult}
@@ -285,7 +284,7 @@
         <div class="toggle-row">
           <div class="toggle-info">
             <span class="info-label">加密同步</span>
-            <span class="info-desc">使用 AES-256-GCM 加密云端数据</span>
+            <span class="info-desc">使用 AES-256-GCM 加密云端数据；初始化后不能与明文模式混用</span>
           </div>
           <button class="toggle-btn" class:on={encryptionEnabled} on:click={toggleEncryption}>
             <span class="toggle-knob"></span>
@@ -333,16 +332,16 @@
             <span class="section-label">修改密码</span>
           </div>
           <div class="form-group">
-            <label class="label">当前密码</label>
-            <input class="input" type="password" bind:value={oldEncPass} placeholder="输入当前加密密码" />
+            <label class="label" for="old-encryption-password">当前密码</label>
+            <input id="old-encryption-password" class="input" type="password" bind:value={oldEncPass} placeholder="输入当前加密密码" />
           </div>
           <div class="form-group">
-            <label class="label">新密码</label>
-            <input class="input" type="password" bind:value={newEncPass} placeholder="至少 6 个字符" />
+            <label class="label" for="new-encryption-password">新密码</label>
+            <input id="new-encryption-password" class="input" type="password" bind:value={newEncPass} placeholder="至少 6 个字符" />
           </div>
           <div class="form-group">
-            <label class="label">确认新密码</label>
-            <input class="input" type="password" bind:value={confirmEncPass} placeholder="再次输入新密码" />
+            <label class="label" for="confirm-encryption-password">确认新密码</label>
+            <input id="confirm-encryption-password" class="input" type="password" bind:value={confirmEncPass} placeholder="再次输入新密码" />
           </div>
           <div class="form-actions">
             <button class="btn-primary" disabled={changePassLoading} on:click={changePassword}>
@@ -378,24 +377,24 @@
           </button>
         </div>
         <div class="form-group">
-          <label class="label">分块模式</label>
-          <select class="input select-input" bind:value={chunkMode} on:change={saveChunkMode}>
+          <label class="label" for="chunk-mode">分块模式</label>
+          <select id="chunk-mode" class="input select-input" bind:value={chunkMode} on:change={saveChunkMode}>
             <option value="auto">自动</option>
             <option value="always">始终分块</option>
             <option value="never">不分块</option>
           </select>
         </div>
         <div class="form-group">
-          <label class="label">分块大小 (MB)</label>
+          <label class="label" for="chunk-size-mb">分块大小 (MB)</label>
           <div class="input-row">
-            <input class="input" type="number" bind:value={chunkSizeMB} min="1" max="100" />
+            <input id="chunk-size-mb" class="input" type="number" bind:value={chunkSizeMB} min="1" max="100" />
             <button class="btn-sm" on:click={saveChunkSize}>保存</button>
           </div>
         </div>
         <div class="form-group">
-          <label class="label">分块阈值 (MB)</label>
+          <label class="label" for="chunk-threshold-mb">分块阈值 (MB)</label>
           <div class="input-row">
-            <input class="input" type="number" bind:value={chunkThresholdMB} min="1" max="500" />
+            <input id="chunk-threshold-mb" class="input" type="number" bind:value={chunkThresholdMB} min="1" max="500" />
             <button class="btn-sm" on:click={saveChunkThreshold}>保存</button>
           </div>
           <div class="hint">超过此大小的文件在自动模式下将分块上传</div>
@@ -407,15 +406,15 @@
     {#if activeTab === 'sync'}
       <div class="card animate-fade-in">
         <div class="form-group">
-          <label class="label">快照保留数</label>
+          <label class="label" for="snapshot-limit">快照保留数</label>
           <div class="input-row">
-            <input class="input" type="number" bind:value={snapshotLimit} min="5" max="200" />
+            <input id="snapshot-limit" class="input" type="number" bind:value={snapshotLimit} min="5" max="200" />
             <button class="btn-sm" on:click={saveSnapshotLimit}>保存</button>
           </div>
         </div>
         <div class="form-group">
-          <label class="label">冲突策略</label>
-          <select class="input select-input" bind:value={conflictStrategy} on:change={saveConflictStrategy}>
+          <label class="label" for="conflict-strategy">冲突策略</label>
+          <select id="conflict-strategy" class="input select-input" bind:value={conflictStrategy} on:change={saveConflictStrategy}>
             <option value="ask">询问</option>
             <option value="local">保留本地</option>
             <option value="remote">采用远程</option>
@@ -423,15 +422,15 @@
           </select>
         </div>
         <div class="form-group">
-          <label class="label">合并重试次数</label>
+          <label class="label" for="merge-retry-max">合并重试次数</label>
           <div class="input-row">
-            <input class="input" type="number" bind:value={mergeRetryMax} min="1" max="10" />
+            <input id="merge-retry-max" class="input" type="number" bind:value={mergeRetryMax} min="1" max="10" />
             <button class="btn-sm" on:click={saveMergeRetry}>保存</button>
           </div>
         </div>
         <div class="form-group">
-          <label class="label">自动同步间隔</label>
-          <select class="input select-input" bind:value={autoSyncInterval} on:change={saveAutoSyncInterval}>
+          <label class="label" for="auto-sync-interval">自动同步间隔</label>
+          <select id="auto-sync-interval" class="input select-input" bind:value={autoSyncInterval} on:change={saveAutoSyncInterval}>
             <option value="">关闭</option>
             <option value="5m">每 5 分钟</option>
             <option value="15m">每 15 分钟</option>
@@ -447,25 +446,25 @@
     {#if activeTab === 'paths'}
       <div class="card animate-fade-in">
         <div class="form-group">
-          <label class="label">Claude 配置目录</label>
+          <label class="label" for="claude-dir">Claude 配置目录</label>
           <div class="input-row">
-            <input class="input font-mono" type="text" bind:value={claudeDirRaw} placeholder="留空使用默认 ~/.claude/" />
+            <input id="claude-dir" class="input font-mono" type="text" bind:value={claudeDirRaw} placeholder="留空使用默认 ~/.claude/" />
             <button class="btn-sm" on:click={saveClaudeDir}>保存</button>
           </div>
           <div class="hint">当前解析路径: {cfg.claudeDir}</div>
         </div>
         <div class="form-group">
-          <label class="label">Claude 二进制目录</label>
+          <label class="label" for="binary-dir">Claude 二进制目录</label>
           <div class="input-row">
-            <input class="input font-mono" type="text" bind:value={binDirRaw} placeholder="留空使用默认 ~/.local/bin/" />
+            <input id="binary-dir" class="input font-mono" type="text" bind:value={binDirRaw} placeholder="留空使用默认 ~/.local/bin/" />
             <button class="btn-sm" on:click={saveBinDir}>保存</button>
           </div>
           <div class="hint">当前解析路径: {cfg.binDir}</div>
         </div>
         <div class="form-group">
-          <label class="label">Claude 版本目录</label>
+          <label class="label" for="versions-dir">Claude 版本目录</label>
           <div class="input-row">
-            <input class="input font-mono" type="text" bind:value={versionsDirRaw} placeholder="留空使用默认 ~/.local/share/claude/versions/" />
+            <input id="versions-dir" class="input font-mono" type="text" bind:value={versionsDirRaw} placeholder="留空使用默认 ~/.local/share/claude/versions/" />
             <button class="btn-sm" on:click={saveVersionsDir}>保存</button>
           </div>
           <div class="hint">当前解析路径: {cfg.versionsDir}</div>
@@ -576,7 +575,6 @@
   }
   .toggle-row:last-of-type { border-bottom: none; }
   .toggle-info { display: flex; flex-direction: column; gap: 2px; }
-  .toggle-desc { font-size: 11px; color: rgb(var(--text-muted)); opacity: 0.6; }
 
   .toggle-btn {
     width: 36px; height: 20px; border-radius: 10px;
