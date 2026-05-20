@@ -47,7 +47,8 @@ type DeviceConfig struct {
 }
 
 type ClaudeConfig struct {
-	Path string `mapstructure:"path"`
+	Path     string `mapstructure:"path"`
+	JSONPath string `mapstructure:"json_path"`
 }
 
 type BinaryConfig struct {
@@ -58,6 +59,7 @@ type BinaryConfig struct {
 	AutoUpload       bool   `mapstructure:"auto_upload"`
 	BinDir           string `mapstructure:"bin_dir"`
 	VersionsDir      string `mapstructure:"versions_dir"`
+	ClaudePath       string `mapstructure:"claude_path"`
 }
 
 type ExcludeConfig struct {
@@ -88,7 +90,7 @@ var DefaultExcludePatterns = []string{
 func DefaultConfig() *Config {
 	return &Config{
 		WebDAV: WebDAVConfig{
-			Root: "/cc-box/",
+			Root: "cc-box",
 		},
 		Encryption: EncryptionConfig{
 			Enabled: true,
@@ -140,14 +142,34 @@ func CCBoxDir() string {
 	return filepath.Join(home, ".cc-box")
 }
 
-// ClaudeDir 返回 ~/.claude/ 路径
+// DefaultClaudeDir 返回当前系统用户的默认 Claude 配置目录
+func DefaultClaudeDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude")
+}
+
+// ClaudeDir 返回 Claude 配置目录路径
 func ClaudeDir() string {
 	v := loadViper()
 	if custom := v.GetString("claude.path"); custom != "" {
 		return expandHome(custom)
 	}
+	return DefaultClaudeDir()
+}
+
+// DefaultClaudeJSONPath 返回当前系统用户的默认 Claude JSON 配置文件路径
+func DefaultClaudeJSONPath() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".claude")
+	return filepath.Join(home, ".claude.json")
+}
+
+// ClaudeJSONPath 返回 Claude JSON 配置文件路径
+func ClaudeJSONPath() string {
+	v := loadViper()
+	if custom := v.GetString("claude.json_path"); custom != "" {
+		return expandHome(custom)
+	}
+	return DefaultClaudeJSONPath()
 }
 
 // LocalBinDir 返回二进制目录路径
@@ -177,9 +199,27 @@ func VersionsDir() string {
 	return filepath.Join(home, ".local", "share", "claude", "versions")
 }
 
-func WebDAVBaseURL(url, root string) string {
-	base := strings.TrimRight(url, "/")
+func NormalizeWebDAVRoot(root string) string {
+	root = strings.TrimSpace(strings.ReplaceAll(root, "\\", "/"))
 	root = strings.Trim(root, "/")
+	if root == "" {
+		return ""
+	}
+
+	parts := strings.Split(root, "/")
+	normalized := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			normalized = append(normalized, part)
+		}
+	}
+	return strings.Join(normalized, "/")
+}
+
+func WebDAVBaseURL(url, root string) string {
+	base := strings.TrimRight(strings.TrimSpace(url), "/")
+	root = NormalizeWebDAVRoot(root)
 	if root != "" {
 		base += "/" + root
 	}
@@ -239,6 +279,7 @@ func Load() (*Config, error) {
 	if err := v.Unmarshal(cfg); err != nil {
 		return nil, fmt.Errorf("解析配置失败: %w", err)
 	}
+	cfg.WebDAV.Root = NormalizeWebDAVRoot(cfg.WebDAV.Root)
 	if cfg.Binary.BinDir == "" {
 		cfg.Binary.BinDir = v.GetString("binary.bindir")
 	}
@@ -259,6 +300,7 @@ func Save(cfg *Config) error {
 	v.SetConfigName("config")
 	v.SetConfigType("toml")
 	v.AddConfigPath(dir)
+	cfg.WebDAV.Root = NormalizeWebDAVRoot(cfg.WebDAV.Root)
 
 	v.Set("webdav", map[string]interface{}{
 		"url":      cfg.WebDAV.URL,
@@ -279,7 +321,8 @@ func Save(cfg *Config) error {
 		"name": cfg.Device.Name,
 	})
 	v.Set("claude", map[string]interface{}{
-		"path": cfg.Claude.Path,
+		"path":      cfg.Claude.Path,
+		"json_path": cfg.Claude.JSONPath,
 	})
 	v.Set("binary", map[string]interface{}{
 		"encrypt":            cfg.Binary.Encrypt,
@@ -289,6 +332,7 @@ func Save(cfg *Config) error {
 		"auto_upload":        cfg.Binary.AutoUpload,
 		"bin_dir":            cfg.Binary.BinDir,
 		"versions_dir":       cfg.Binary.VersionsDir,
+		"claude_path":        cfg.Binary.ClaudePath,
 	})
 	v.Set("exclude", map[string]interface{}{
 		"patterns": cfg.Exclude.Patterns,

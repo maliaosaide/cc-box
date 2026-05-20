@@ -10,6 +10,10 @@ export function AddProjectPath(arg1) {
   return window['go']['main']['App']['AddProjectPath'](arg1);
 }
 
+export function BrowseFile(arg1) {
+  return window['go']['main']['App']['BrowseFile'](arg1);
+}
+
 export function BrowseFolder(arg1) {
   return window['go']['main']['App']['BrowseFolder'](arg1);
 }
@@ -56,6 +60,10 @@ export function GetBinaryPage() {
 
 export function GetBinaryStorage() {
   return window['go']['main']['App']['GetBinaryStorage']();
+}
+
+export function GetClaudeBinaryResolution() {
+  return window['go']['main']['App']['GetClaudeBinaryResolution']();
 }
 
 export function GetConfig() {
@@ -122,6 +130,14 @@ export function OpenInExplorer(arg1) {
   return window['go']['main']['App']['OpenInExplorer'](arg1);
 }
 
+export function PreviewEncryptionPassword(arg1) {
+  return window['go']['main']['App']['PreviewEncryptionPassword'](arg1);
+}
+
+export function PreviewSetupEncryptionPassword(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['PreviewSetupEncryptionPassword'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function QuickPull() {
   return window['go']['main']['App']['QuickPull']();
 }
@@ -134,8 +150,16 @@ export function QuickSync() {
   return window['go']['main']['App']['QuickSync']();
 }
 
+export function RedetectClaudeBinary() {
+  return window['go']['main']['App']['RedetectClaudeBinary']();
+}
+
 export function RemoveExcludePattern(arg1) {
   return window['go']['main']['App']['RemoveExcludePattern'](arg1);
+}
+
+export function RepairRemoteFromLocal() {
+  return window['go']['main']['App']['RepairRemoteFromLocal']();
 }
 
 export function ResolveConflict(arg1, arg2) {
@@ -144,6 +168,10 @@ export function ResolveConflict(arg1, arg2) {
 
 export function RevertToSnapshot(arg1) {
   return window['go']['main']['App']['RevertToSnapshot'](arg1);
+}
+
+export function SaveEncryptionPassword(arg1) {
+  return window['go']['main']['App']['SaveEncryptionPassword'](arg1);
 }
 
 export function SaveMergedConflict(arg1, arg2) {

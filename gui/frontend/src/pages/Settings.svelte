@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import { GetConfig, SetConfigField, TestConnection, SetWebDAVPassword, AddExcludePattern, RemoveExcludePattern, GetEncryptionStatus, VerifyEncryptionKey, ChangeEncryptionPassword } from '../../wailsjs/go/main/App.js'
+  import { GetConfig, SetConfigField, TestConnection, SetWebDAVPassword, AddExcludePattern, RemoveExcludePattern, GetEncryptionStatus, VerifyEncryptionKey, ChangeEncryptionPassword, PreviewEncryptionPassword, SaveEncryptionPassword } from '../../wailsjs/go/main/App.js'
 
   let activeTab = 'connection'
 
@@ -24,6 +24,7 @@
   // 可编辑字段
   let webdavUrl = ''
   let webdavUser = ''
+  let webdavRoot = ''
   let webdavPassNew = ''
   let deviceName = ''
   let encryptionEnabled = false
@@ -36,15 +37,25 @@
   let conflictStrategy = 'ask'
   let mergeRetryMax = 3
   let autoSyncInterval = ''
-  let claudeDirRaw = ''
-  let binDirRaw = ''
-  let versionsDirRaw = ''
+  let pathInputs = {
+    claudeDir: '',
+    claudeBinary: '',
+    claudeJSON: '',
+  }
   let newPattern = ''
   let excludeList = []
   let encStatus = null
   let verifyResult = null
   let verifyLoading = false
+  let inputEncPass = ''
+  let inputEncPreview = null
+  let inputEncPreviewLoading = false
+  let inputEncPreviewTimer = null
+  let saveEncPassLoading = false
   let oldEncPass = ''
+  let oldEncPreview = null
+  let oldEncPreviewLoading = false
+  let oldEncPreviewTimer = null
   let newEncPass = ''
   let confirmEncPass = ''
   let changePassLoading = false
@@ -62,6 +73,7 @@
       if (cfg) {
         webdavUrl = cfg.webdav.url || ''
         webdavUser = cfg.webdav.username || ''
+        webdavRoot = cfg.webdav.root || ''
         deviceName = cfg.device.name || ''
         encryptionEnabled = cfg.encryption.enabled
         binaryEncrypt = cfg.binary.encrypt
@@ -73,9 +85,11 @@
         conflictStrategy = cfg.sync.conflictStrategy || 'ask'
         mergeRetryMax = cfg.sync.mergeRetryMax || 3
         autoSyncInterval = cfg.sync.autoSyncInterval || ''
-        claudeDirRaw = cfg.claudeDirRaw || ''
-        binDirRaw = cfg.binDirRaw || ''
-        versionsDirRaw = cfg.versionsDirRaw || ''
+        pathInputs = {
+          claudeDir: cfg.claudeDirRaw || '',
+          claudeBinary: cfg.claudeBinaryPathRaw || '',
+          claudeJSON: cfg.claudeJSONPathRaw || '',
+        }
         excludeList = [...(cfg.exclude || [])]
       }
       try { encStatus = await GetEncryptionStatus() } catch (e) { }
@@ -85,17 +99,33 @@
     loading = false
   }
 
+  $: webdavPathDirty = cfg && (webdavUrl.trim() !== (cfg.webdav.url || '') || normalizeWebDAVRoot(webdavRoot) !== (cfg.webdav.root || ''))
+
+  function normalizeWebDAVRoot(root) {
+    return String(root || '')
+      .trim()
+      .replace(/\\/g, '/')
+      .replace(/^\/+|\/+$/g, '')
+      .split('/')
+      .map(part => part.trim())
+      .filter(Boolean)
+      .join('/')
+  }
+
   async function saveField(section, key, value) {
     try {
       await SetConfigField(section, key, value)
       showSaved()
+      return true
     } catch (e) {
       error = e.message || String(e)
+      return false
     }
   }
 
-  async function saveWebdavUrl() { await saveField('webdav', 'url', webdavUrl) }
+  async function saveWebdavUrl() { if (await saveField('webdav', 'url', webdavUrl)) await loadConfig() }
   async function saveWebdavUser() { await saveField('webdav', 'username', webdavUser) }
+  async function saveWebdavRoot() { if (await saveField('webdav', 'root', webdavRoot)) await loadConfig() }
   async function saveDeviceName() { await saveField('device', 'name', deviceName) }
 
   async function savePassword() {
@@ -132,9 +162,55 @@
   async function saveConflictStrategy() { await saveField('sync', 'conflict_strategy', conflictStrategy) }
   async function saveMergeRetry() { await saveField('sync', 'merge_retry_max', String(mergeRetryMax)) }
   async function saveAutoSyncInterval() { await saveField('sync', 'auto_sync_interval', autoSyncInterval) }
-  async function saveClaudeDir() { await saveField('claude', 'path', claudeDirRaw) }
-  async function saveBinDir() { await saveField('binary', 'bin_dir', binDirRaw) }
-  async function saveVersionsDir() { await saveField('binary', 'versions_dir', versionsDirRaw) }
+
+  function setPathInput(key, value) {
+    pathInputs = { ...pathInputs, [key]: value }
+  }
+
+  function pathFields() {
+    if (!cfg) return []
+    return [
+      {
+        id: 'claude-dir',
+        label: 'Claude 配置目录',
+        inputKey: 'claudeDir',
+        section: 'claude',
+        key: 'path',
+        placeholderLabel: '默认路径',
+        placeholderPath: cfg.claudeDirDefault || cfg.claudeDir,
+      },
+      {
+        id: 'claude-binary-path',
+        label: 'Claude 二进制文件',
+        inputKey: 'claudeBinary',
+        section: 'binary',
+        key: 'claude_path',
+        placeholderLabel: cfg.claudeBinaryValid ? '自动检测' : '默认路径',
+        placeholderPath: cfg.claudeBinaryPlaceholderPath || cfg.claudeBinaryManagedPath || cfg.claudeBinaryPath,
+      },
+      {
+        id: 'claude-json-path',
+        label: 'Claude JSON 配置文件（.claude.json）',
+        inputKey: 'claudeJSON',
+        section: 'claude',
+        key: 'json_path',
+        placeholderLabel: '默认路径',
+        placeholderPath: cfg.claudeJSONPathDefault || cfg.claudeJSONPath,
+      },
+    ]
+  }
+
+  function pathPlaceholder(field) {
+    return field.placeholderPath ? `${field.placeholderLabel}：${field.placeholderPath}` : '留空使用自动检测'
+  }
+
+  async function savePathField(field) {
+    const input = document.getElementById(field.id)
+    const value = (input?.value ?? pathInputs[field.inputKey] ?? '').trim()
+    setPathInput(field.inputKey, value)
+    await saveField(field.section, field.key, value)
+    await loadConfig()
+  }
 
   async function addPattern() {
     const p = newPattern.trim()
@@ -162,24 +238,80 @@
   async function verifyKey() {
     verifyLoading = true; verifyResult = null
     try {
-      const ok = await VerifyEncryptionKey()
-      verifyResult = ok ? 'success' : 'fail'
+      verifyResult = await VerifyEncryptionKey()
     } catch (e) {
-      verifyResult = 'error: ' + (e.message || String(e))
+      verifyResult = { status: 'error', message: e.message || String(e) }
     }
     verifyLoading = false
   }
 
+  function scheduleInputEncPreview() {
+    clearTimeout(inputEncPreviewTimer)
+    if (!inputEncPass) {
+      inputEncPreview = null
+      inputEncPreviewLoading = false
+      return
+    }
+    inputEncPreviewLoading = true
+    inputEncPreviewTimer = setTimeout(previewInputEncPass, 600)
+  }
+
+  async function previewInputEncPass() {
+    try {
+      inputEncPreview = await PreviewEncryptionPassword(inputEncPass)
+    } catch (e) {
+      inputEncPreview = { status: 'error', message: e.message || String(e) }
+    }
+    inputEncPreviewLoading = false
+  }
+
+  function scheduleOldEncPreview() {
+    clearTimeout(oldEncPreviewTimer)
+    if (!oldEncPass) {
+      oldEncPreview = null
+      oldEncPreviewLoading = false
+      return
+    }
+    oldEncPreviewLoading = true
+    oldEncPreviewTimer = setTimeout(previewOldEncPass, 600)
+  }
+
+  async function previewOldEncPass() {
+    try {
+      oldEncPreview = await PreviewEncryptionPassword(oldEncPass)
+    } catch (e) {
+      oldEncPreview = { status: 'error', message: e.message || String(e) }
+    }
+    oldEncPreviewLoading = false
+  }
+
+  async function saveEncryptionPassword() {
+    if (!inputEncPass) { error = '请输入加密密码'; return }
+    saveEncPassLoading = true; error = ''
+    try {
+      await SaveEncryptionPassword(inputEncPass)
+      saved = '加密密码已保存'
+      inputEncPass = ''; inputEncPreview = null
+      encStatus = await GetEncryptionStatus()
+      verifyResult = await VerifyEncryptionKey()
+      setTimeout(() => saved = '', 2000)
+    } catch (e) {
+      error = e.message || String(e)
+    }
+    saveEncPassLoading = false
+  }
+
   async function changePassword() {
-    if (!oldEncPass || !newEncPass || !confirmEncPass) { error = '请填写所有密码字段'; return }
-    if (newEncPass !== confirmEncPass) { error = '新密码两次输入不一致'; return }
-    if (newEncPass.length < 6) { error = '新密码至少 6 个字符'; return }
+    if (!oldEncPass || !newEncPass || !confirmEncPass) { error = '请填写所有加密密码字段'; return }
+    if (newEncPass !== confirmEncPass) { error = '新加密密码两次输入不一致'; return }
+    if (newEncPass.length < 6) { error = '新加密密码至少 6 个字符'; return }
     changePassLoading = true; error = ''
     try {
       await ChangeEncryptionPassword(oldEncPass, newEncPass)
-      saved = '密码已修改'
-      oldEncPass = ''; newEncPass = ''; confirmEncPass = ''
+      saved = '加密密码已修改'
+      oldEncPass = ''; oldEncPreview = null; newEncPass = ''; confirmEncPass = ''
       encStatus = await GetEncryptionStatus()
+      verifyResult = await VerifyEncryptionKey()
       setTimeout(() => saved = '', 2000)
     } catch (e) {
       error = e.message || String(e)
@@ -262,8 +394,29 @@
           </div>
         </div>
         <div class="form-group">
-          <label class="label" for="webdav-root">根路径</label>
-          <input id="webdav-root" class="input" value={cfg.webdav.root} disabled />
+          <label class="label" for="webdav-root">自定义 WebDAV 存储目录</label>
+          <div class="input-row">
+            <input id="webdav-root" class="input" type="text" bind:value={webdavRoot} placeholder="例如 cc-box，可留空" />
+            <button class="btn-sm" on:click={saveWebdavRoot}>保存</button>
+          </div>
+          <div class="hint">可填写 cc-box、/cc-box/；留空时直接使用 WebDAV 服务地址当前目录。</div>
+          {#if webdavPathDirty}
+            <div class="hint warn">当前 WebDAV 地址或存储目录有未保存修改，保存后下方路径会更新。</div>
+          {/if}
+          {#if cfg.webdav.baseUrl}
+            <div class="path-lines">
+              <div class="path-line">
+                <span>当前生效路径</span>
+                <code>{cfg.webdav.baseUrl}</code>
+              </div>
+              <div class="path-line check">
+                <span>HEAD 检查路径</span>
+                <code>{cfg.webdav.headUrl}</code>
+              </div>
+            </div>
+          {:else}
+            <div class="hint">保存 WebDAV 服务地址后会显示最终路径。</div>
+          {/if}
         </div>
         <div class="form-actions">
           {#if testResult}
@@ -281,75 +434,117 @@
     <!-- 加密 -->
     {#if activeTab === 'encryption'}
       <div class="card animate-fade-in">
-        <div class="toggle-row">
-          <div class="toggle-info">
-            <span class="info-label">加密同步</span>
-            <span class="info-desc">使用 AES-256-GCM 加密云端数据；初始化后不能与明文模式混用</span>
-          </div>
-          <button class="toggle-btn" class:on={encryptionEnabled} on:click={toggleEncryption}>
-            <span class="toggle-knob"></span>
-          </button>
+        <div class="section-label-row">
+          <span class="section-label">加密状态</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">加密同步</span>
+          <span class="status-pill" class:on={encryptionEnabled}>{encryptionEnabled ? '已启用' : '未启用'}</span>
         </div>
         <div class="info-row">
           <span class="info-label">加密算法</span>
           <span class="info-value font-mono">AES-256-GCM</span>
         </div>
         <div class="info-row">
-          <span class="info-label">密钥派生</span>
+          <span class="info-label">密码派生</span>
           <span class="info-value font-mono">Argon2id</span>
-        </div>
-      </div>
-
-      <div class="card animate-fade-in">
-        <div class="section-label-row">
-          <span class="section-label">密钥管理</span>
         </div>
         {#if encStatus && encStatus.hasKey}
           <div class="info-row">
-            <span class="info-label">密钥指纹</span>
+            <span class="info-label">当前指纹</span>
             <span class="fingerprint font-mono">{encStatus.fingerprint}</span>
           </div>
+          <div class="hint">指纹用于识别本机当前加密状态，不是密码。</div>
           <div class="form-actions">
-            {#if verifyResult === 'success'}
-              <span class="test-result ok">密钥有效，可以解密远程数据</span>
-            {:else if verifyResult === 'fail'}
-              <span class="test-result err">密钥无法解密远程数据</span>
-            {:else if verifyResult && verifyResult.startsWith('error')}
-              <span class="test-result err">{verifyResult}</span>
+            {#if verifyResult?.status === 'success'}
+              <span class="test-result ok">{verifyResult.message}</span>
+            {:else if verifyResult?.status === 'mismatch'}
+              <span class="test-result err">{verifyResult.message}</span>
+            {:else if verifyResult?.status === 'unverified'}
+              <span class="test-result warn">{verifyResult.message}</span>
+            {:else if verifyResult?.status === 'error'}
+              <span class="test-result err">{verifyResult.message}</span>
             {/if}
             <button class="btn-sm" disabled={verifyLoading} on:click={verifyKey}>
-              {verifyLoading ? '验证中...' : '验证密钥'}
+              {verifyLoading ? '验证中...' : '验证加密密码'}
             </button>
           </div>
         {:else}
-          <div class="empty-compact">未检测到本地密钥</div>
+          <div class="empty-compact">未检测到本机加密密码</div>
         {/if}
       </div>
 
       {#if encStatus && encStatus.hasKey}
         <div class="card animate-fade-in">
           <div class="section-label-row">
-            <span class="section-label">修改密码</span>
+            <span class="section-label">重新输入加密密码</span>
+          </div>
+          <div class="hint">当其他设备修改过加密密码后，在这里输入新的加密密码。</div>
+          <div class="form-group">
+            <label class="label" for="input-encryption-password">加密密码</label>
+            <input id="input-encryption-password" class="input" type="password" bind:value={inputEncPass} placeholder="输入加密密码" on:input={scheduleInputEncPreview} />
+            {#if inputEncPreviewLoading}
+              <div class="fingerprint-preview pending">正在计算输入密码对应指纹...</div>
+            {:else if inputEncPreview?.fingerprint}
+              <div class="fingerprint-preview" class:ok={inputEncPreview.status === 'success'} class:err={inputEncPreview.status === 'mismatch' || inputEncPreview.status === 'error'}>
+                <span>输入密码对应指纹</span>
+                <code>{inputEncPreview.fingerprint}</code>
+                {#if inputEncPreview.matchesCurrent}
+                  <em>与当前指纹一致</em>
+                {:else}
+                  <em>{inputEncPreview.message}</em>
+                {/if}
+              </div>
+            {:else if inputEncPreview?.message}
+              <div class="fingerprint-preview err">{inputEncPreview.message}</div>
+            {/if}
+          </div>
+          <div class="form-actions">
+            <button class="btn-primary" disabled={saveEncPassLoading || !inputEncPass} on:click={saveEncryptionPassword}>
+              {saveEncPassLoading ? '保存中...' : '保存加密密码'}
+            </button>
+          </div>
+        </div>
+
+        <div class="card animate-fade-in">
+          <div class="section-label-row">
+            <span class="section-label">修改加密密码</span>
           </div>
           <div class="form-group">
-            <label class="label" for="old-encryption-password">当前密码</label>
-            <input id="old-encryption-password" class="input" type="password" bind:value={oldEncPass} placeholder="输入当前加密密码" />
+            <label class="label" for="old-encryption-password">当前加密密码</label>
+            <input id="old-encryption-password" class="input" type="password" bind:value={oldEncPass} placeholder="输入当前加密密码" on:input={scheduleOldEncPreview} />
+            {#if oldEncPreviewLoading}
+              <div class="fingerprint-preview pending">正在计算当前加密密码对应指纹...</div>
+            {:else if oldEncPreview?.fingerprint}
+              <div class="fingerprint-preview" class:ok={oldEncPreview.status === 'success'} class:err={oldEncPreview.status === 'mismatch' || oldEncPreview.status === 'error'}>
+                <span>当前加密密码对应指纹</span>
+                <code>{oldEncPreview.fingerprint}</code>
+                {#if oldEncPreview.matchesCurrent}
+                  <em>与当前指纹一致</em>
+                {:else}
+                  <em>{oldEncPreview.message}</em>
+                {/if}
+              </div>
+            {:else if oldEncPreview?.message}
+              <div class="fingerprint-preview err">{oldEncPreview.message}</div>
+            {/if}
           </div>
           <div class="form-group">
-            <label class="label" for="new-encryption-password">新密码</label>
+            <label class="label" for="new-encryption-password">新加密密码</label>
             <input id="new-encryption-password" class="input" type="password" bind:value={newEncPass} placeholder="至少 6 个字符" />
+            <div class="hint">新加密密码会生成新的指纹，修改成功后会刷新当前指纹。</div>
           </div>
           <div class="form-group">
-            <label class="label" for="confirm-encryption-password">确认新密码</label>
-            <input id="confirm-encryption-password" class="input" type="password" bind:value={confirmEncPass} placeholder="再次输入新密码" />
+            <label class="label" for="confirm-encryption-password">确认新加密密码</label>
+            <input id="confirm-encryption-password" class="input" type="password" bind:value={confirmEncPass} placeholder="再次输入新加密密码" />
           </div>
           <div class="form-actions">
             <button class="btn-primary" disabled={changePassLoading} on:click={changePassword}>
-              {changePassLoading ? '修改中...' : '修改密码'}
+              {changePassLoading ? '修改中...' : '修改加密密码'}
             </button>
           </div>
           <div class="warn-box">
-            修改密码将重新加密所有远程数据，其他设备需重新输入新密码。
+            修改加密密码将重新加密所有远程数据，其他设备需重新输入新的加密密码。
           </div>
         </div>
       {/if}
@@ -437,7 +632,7 @@
             <option value="30m">每 30 分钟</option>
             <option value="60m">每 60 分钟</option>
           </select>
-          <div class="hint">监听 ~/.claude/ 变更并自动同步到云端</div>
+          <div class="hint">监听 {cfg.claudeDir} 变更并自动同步到云端</div>
         </div>
       </div>
     {/if}
@@ -445,30 +640,28 @@
     <!-- 路径 -->
     {#if activeTab === 'paths'}
       <div class="card animate-fade-in">
-        <div class="form-group">
-          <label class="label" for="claude-dir">Claude 配置目录</label>
-          <div class="input-row">
-            <input id="claude-dir" class="input font-mono" type="text" bind:value={claudeDirRaw} placeholder="留空使用默认 ~/.claude/" />
-            <button class="btn-sm" on:click={saveClaudeDir}>保存</button>
+        {#each pathFields() as field}
+          <div class="form-group">
+            <label class="label" for={field.id}>{field.label}</label>
+            <div class="input-row">
+              <input
+                id={field.id}
+                class="input font-mono"
+                type="text"
+                value={pathInputs[field.inputKey]}
+                placeholder={pathPlaceholder(field)}
+                on:input={(e) => setPathInput(field.inputKey, e.currentTarget.value)}
+              />
+              <button class="btn-sm" on:click={() => savePathField(field)}>保存</button>
+            </div>
+            {#if field.inputKey === 'claudeBinary' && cfg.claudeBinaryShim}
+              <div class="hint text-state-err">检测到脚本 shim，仅显示版本，不支持作为可上传二进制。</div>
+            {/if}
+            {#if field.inputKey === 'claudeBinary' && cfg.claudeBinaryError}
+              <div class="hint text-state-err">{cfg.claudeBinaryError}</div>
+            {/if}
           </div>
-          <div class="hint">当前解析路径: {cfg.claudeDir}</div>
-        </div>
-        <div class="form-group">
-          <label class="label" for="binary-dir">Claude 二进制目录</label>
-          <div class="input-row">
-            <input id="binary-dir" class="input font-mono" type="text" bind:value={binDirRaw} placeholder="留空使用默认 ~/.local/bin/" />
-            <button class="btn-sm" on:click={saveBinDir}>保存</button>
-          </div>
-          <div class="hint">当前解析路径: {cfg.binDir}</div>
-        </div>
-        <div class="form-group">
-          <label class="label" for="versions-dir">Claude 版本目录</label>
-          <div class="input-row">
-            <input id="versions-dir" class="input font-mono" type="text" bind:value={versionsDirRaw} placeholder="留空使用默认 ~/.local/share/claude/versions/" />
-            <button class="btn-sm" on:click={saveVersionsDir}>保存</button>
-          </div>
-          <div class="hint">当前解析路径: {cfg.versionsDir}</div>
-        </div>
+        {/each}
       </div>
     {/if}
 
@@ -553,10 +746,19 @@
   .form-group:last-child { margin-bottom: 0; }
   .label { display: block; font-size: 12px; color: rgb(var(--text-secondary)); margin-bottom: 6px; }
   .hint { font-size: 11px; color: rgb(var(--text-muted)); opacity: 0.6; margin-top: 4px; }
+  .hint.warn { color: rgb(var(--state-warn)); opacity: 0.9; }
+
+  .path-lines { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
+  .path-line { display: flex; align-items: flex-start; gap: 8px; font-size: 11px; }
+  .path-line span { flex: 0 0 76px; color: rgb(var(--text-muted)); opacity: 0.75; }
+  .path-line code {
+    color: rgb(var(--text-secondary)); font-family: 'DM Mono', monospace;
+    word-break: break-all;
+  }
+  .path-line.check code { color: rgb(var(--accent)); }
 
   .input-row { display: flex; gap: 8px; align-items: center; }
   .input-row .input { flex: 1; }
-
   .select-input { appearance: none; padding-right: 28px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237a7880' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 8px center; }
 
   .form-actions {
@@ -567,6 +769,7 @@
 
   .test-result { font-size: 11px; font-family: 'DM Mono', monospace; }
   .test-result.ok { color: rgb(var(--state-ok)); }
+  .test-result.warn { color: rgb(var(--state-warn)); }
   .test-result.err { color: rgb(var(--state-err)); }
 
   .toggle-row {
@@ -597,10 +800,27 @@
   .info-row:last-child { border-bottom: none; }
   .info-label { font-size: 12px; color: rgb(var(--text-secondary)); }
   .info-value { font-size: 12px; color: rgb(var(--text-primary)); }
+  .status-pill {
+    font-size: 11px; font-family: 'DM Mono', monospace;
+    color: rgb(var(--text-muted));
+  }
+  .status-pill.on { color: rgb(var(--state-ok)); }
   .fingerprint {
     font-size: 14px; font-weight: 600; letter-spacing: 0.1em;
     color: rgb(var(--accent));
   }
+  .fingerprint-preview {
+    margin-top: 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    font-size: 11px; color: rgb(var(--text-muted));
+  }
+  .fingerprint-preview code {
+    font-family: 'DM Mono', monospace; letter-spacing: 0.08em;
+    color: rgb(var(--text-secondary));
+  }
+  .fingerprint-preview em { width: 100%; font-style: normal; opacity: 0.75; }
+  .fingerprint-preview.ok code { color: rgb(var(--state-ok)); }
+  .fingerprint-preview.err { color: rgb(var(--state-err)); }
+  .fingerprint-preview.pending { opacity: 0.75; }
 
   .warn-box {
     margin-top: 12px; padding: 10px 14px; border-radius: 6px;

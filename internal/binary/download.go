@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/user/cc-box/internal/config"
 	"github.com/user/cc-box/internal/crypto"
@@ -50,12 +51,90 @@ func Download(client *webdav.Client, key []byte, name string, version string, ta
 		return fmt.Errorf("二进制 hash 校验失败: %s", v.Hash)
 	}
 
-	os.MkdirAll(filepath.Dir(targetPath), 0755)
-	if err := os.WriteFile(targetPath, data, 0755); err != nil {
+	if err := WriteFileAtomic(targetPath, data, 0755); err != nil {
 		return fmt.Errorf("写入文件失败: %w", err)
 	}
 
 	return nil
+}
+
+func WriteFileAtomic(targetPath string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(targetPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(targetPath)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	cleanupTemp := true
+	defer func() {
+		if cleanupTemp {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Rename(tmpPath, targetPath); err != nil {
+			return err
+		}
+		cleanupTemp = false
+		return nil
+	}
+	return replaceFileWindows(tmpPath, targetPath, &cleanupTemp)
+}
+
+func replaceFileWindows(tmpPath, targetPath string, cleanupTemp *bool) error {
+	backupPath := targetPath + ".old"
+	for i := 0; ; i++ {
+		candidate := fmt.Sprintf("%s.%d", backupPath, i)
+		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+			backupPath = candidate
+			break
+		}
+	}
+	hadTarget := false
+	if _, err := os.Stat(targetPath); err == nil {
+		hadTarget = true
+		if err := os.Rename(targetPath, backupPath); err != nil {
+			return err
+		}
+	}
+	if err := os.Rename(tmpPath, targetPath); err != nil {
+		if hadTarget {
+			_ = os.Rename(backupPath, targetPath)
+		}
+		return err
+	}
+	*cleanupTemp = false
+	if hadTarget {
+		_ = os.Remove(backupPath)
+	}
+	return nil
+}
+
+func BackupFileIfMissing(srcPath, backupPath string) error {
+	if _, err := os.Stat(backupPath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	data, err := os.ReadFile(srcPath)
+	if err != nil {
+		return err
+	}
+	return WriteFileAtomic(backupPath, data, 0755)
 }
 
 func downloadChunked(client *webdav.Client, key []byte, hash string, totalSize int64, encrypted bool, progress DownloadProgress) ([]byte, error) {

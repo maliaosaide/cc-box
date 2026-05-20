@@ -1,28 +1,31 @@
 <script>
   import { createEventDispatcher, onMount } from 'svelte'
   import {
-    GetAppInfo, TestWebDAVConnection, InitNewDevice, InitJoinExisting
+    GetAppInfo, TestWebDAVConnection, InitNewDevice, InitJoinExisting, PreviewSetupEncryptionPassword
   } from '../../wailsjs/go/main/App.js'
 
   const dispatch = createEventDispatcher()
 
   let step = 0
   let mode = ''
-  let webdav = { url: '', username: '', password: '', root: '/cc-box/' }
+  let webdav = { url: '', username: '', password: '', root: 'cc-box' }
   let preset = ''
   let testing = false
   let testResult = null
   let deviceName = ''
   let password = ''
   let confirmPassword = ''
+  let passwordPreview = null
+  let passwordPreviewLoading = false
+  let passwordPreviewTimer = null
   let submitting = false
   let errorMsg = ''
 
   const presets = {
-    jianguoyun: { label: '坚果云', url: 'https://dav.jianguoyun.com/dav/', root: '/cc-box/' },
-    nextcloud: { label: 'NextCloud', url: '', root: '/cc-box/' },
-    synology: { label: 'Synology', url: '', root: '/cc-box/' },
-    alist: { label: 'Alist', url: '', root: '/dav/cc-box/' },
+    jianguoyun: { label: '坚果云', url: 'https://dav.jianguoyun.com/dav/', root: 'cc-box' },
+    nextcloud: { label: 'NextCloud', url: '', root: 'cc-box' },
+    synology: { label: 'Synology', url: '', root: 'cc-box' },
+    alist: { label: 'Alist', url: '', root: 'dav/cc-box' },
   }
 
   onMount(async () => {
@@ -32,7 +35,7 @@
     } catch (e) { /* ignore */ }
   })
 
-  function selectMode(m) { mode = m; step = 1; errorMsg = '' }
+  function selectMode(m) { mode = m; step = 1; errorMsg = ''; passwordPreview = null }
 
   function applyPreset(key) {
     preset = key
@@ -51,11 +54,31 @@
     testing = false
   }
 
-  function goNext() { step = mode === 'new' ? 2 : 3; errorMsg = '' }
+  function goNext() { step = mode === 'new' ? 2 : 3; errorMsg = ''; passwordPreview = null }
+
+  function schedulePasswordPreview() {
+    clearTimeout(passwordPreviewTimer)
+    if (mode !== 'join' || !password) {
+      passwordPreview = null
+      passwordPreviewLoading = false
+      return
+    }
+    passwordPreviewLoading = true
+    passwordPreviewTimer = setTimeout(previewPassword, 600)
+  }
+
+  async function previewPassword() {
+    try {
+      passwordPreview = await PreviewSetupEncryptionPassword(webdav.url, webdav.username, webdav.password, webdav.root, password)
+    } catch (e) {
+      passwordPreview = { status: 'error', message: e.message || String(e) }
+    }
+    passwordPreviewLoading = false
+  }
 
   async function submit() {
-    if (!password) { errorMsg = '请输入密码'; return }
-    if (mode === 'new' && password !== confirmPassword) { errorMsg = '两次密码不一致'; return }
+    if (!password) { errorMsg = '请输入加密密码'; return }
+    if (mode === 'new' && password !== confirmPassword) { errorMsg = '两次加密密码不一致'; return }
     submitting = true; errorMsg = ''
     try {
       if (mode === 'new') {
@@ -107,7 +130,7 @@
             </div>
             <div class="text-left">
               <div class="text-txt-primary font-medium text-sm">加入已有同步组</div>
-              <div class="text-txt-muted text-xs mt-0.5">从其他设备恢复，需要输入已有密码</div>
+              <div class="text-txt-muted text-xs mt-0.5">从其他设备恢复，需要输入已有加密密码</div>
             </div>
           </button>
         </div>
@@ -151,13 +174,13 @@
                    bind:value={webdav.username} />
           </div>
           <div>
-            <label class="label" for="pass">密码</label>
+            <label class="label" for="pass">WebDAV 密码</label>
             <input id="pass" class="input" type="password" placeholder="应用密码"
                    bind:value={webdav.password} />
           </div>
           <div>
-            <label class="label" for="root">根路径</label>
-            <input id="root" class="input" type="text" placeholder="/cc-box/"
+            <label class="label" for="root">自定义 WebDAV 存储目录</label>
+            <input id="root" class="input" type="text" placeholder="例如 cc-box，可留空"
                    bind:value={webdav.root} />
           </div>
 
@@ -201,27 +224,41 @@
         </button>
 
         <h2 class="section-title mb-1">
-          {step === 2 ? '设置加密密码' : '输入已有密码'}
+          {step === 2 ? '设置加密密码' : '输入已有加密密码'}
         </h2>
         <p class="text-txt-muted text-sm mb-8">
           {step === 2
-            ? '密码将用于端到端加密，所有设备需使用相同密码。'
-            : '密码将用于解密云端已有数据。'}
+            ? '加密密码将用于端到端加密，所有设备需使用相同加密密码。'
+            : '加密密码将用于解密云端已有数据。'}
         </p>
 
         <div class="space-y-5">
           <div>
-            <label class="label" for="password">密码</label>
+            <label class="label" for="password">加密密码</label>
             <input id="password" class="input" type="password"
-                   placeholder={step === 2 ? '设置密码' : '输入已有密码'}
-                   bind:value={password} />
+                   placeholder={step === 2 ? '设置加密密码' : '输入已有加密密码'}
+                   bind:value={password}
+                   on:input={schedulePasswordPreview} />
+            {#if step === 2}
+              <div class="hint">创建同步组后会生成当前加密指纹，可在设置页查看。</div>
+            {:else if passwordPreviewLoading}
+              <div class="fingerprint-preview pending">正在计算输入密码对应指纹...</div>
+            {:else if passwordPreview?.fingerprint}
+              <div class="fingerprint-preview" class:ok={passwordPreview.status === 'success'} class:err={passwordPreview.status === 'mismatch' || passwordPreview.status === 'error'}>
+                <span>输入密码对应指纹</span>
+                <code>{passwordPreview.fingerprint}</code>
+                <em>{passwordPreview.message}</em>
+              </div>
+            {:else if passwordPreview?.message}
+              <div class="fingerprint-preview err">{passwordPreview.message}</div>
+            {/if}
           </div>
 
           {#if step === 2}
             <div>
-              <label class="label" for="confirm">确认密码</label>
+              <label class="label" for="confirm">确认加密密码</label>
               <input id="confirm" class="input" type="password"
-                     placeholder="再次输入密码"
+                     placeholder="再次输入加密密码"
                      bind:value={confirmPassword} />
             </div>
           {/if}
@@ -240,7 +277,7 @@
               <svg class="w-4 h-4 flex-shrink-0 mt-0.5" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 14a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm1-5.5h-2V7h2v3.5z"/>
               </svg>
-              <span>验证通过后将自动拉取最新配置</span>
+              <span>加密密码验证通过后将自动拉取最新配置</span>
             </div>
           {/if}
 
@@ -374,6 +411,17 @@
   }
   .test-ok { background: rgba(107,144,128,0.08); color: rgb(var(--state-ok)); }
   .test-err { background: rgba(184,92,92,0.08); color: rgb(var(--state-err)); }
+
+  .hint { margin-top: 6px; font-size: 12px; color: rgb(var(--text-muted)); opacity: 0.7; }
+  .fingerprint-preview {
+    margin-top: 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    font-size: 12px; color: rgb(var(--text-muted));
+  }
+  .fingerprint-preview code { font-family: 'DM Mono', monospace; color: rgb(var(--text-secondary)); }
+  .fingerprint-preview em { width: 100%; font-style: normal; font-size: 11px; opacity: 0.75; }
+  .fingerprint-preview.ok code { color: rgb(var(--state-ok)); }
+  .fingerprint-preview.err { color: rgb(var(--state-err)); }
+  .fingerprint-preview.pending { opacity: 0.75; }
 
   .error-msg {
     font-family: 'DM Mono', monospace;

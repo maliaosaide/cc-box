@@ -6,6 +6,8 @@ export function AddExcludePattern(arg1:string):Promise<void>;
 
 export function AddProjectPath(arg1:string):Promise<void>;
 
+export function BrowseFile(arg1:string):Promise<string>;
+
 export function BrowseFolder(arg1:string):Promise<string>;
 
 export function BulkSync(arg1:string):Promise<number>;
@@ -29,6 +31,8 @@ export function GetAppInfo():Promise<Record<string, any>>;
 export function GetBinaryPage():Promise<main.BinaryPageData>;
 
 export function GetBinaryStorage():Promise<main.BinaryStorageInfo>;
+
+export function GetClaudeBinaryResolution():Promise<main.ClaudeBinaryResolution>;
 
 export function GetConfig():Promise<main.ConfigView>;
 
@@ -62,17 +66,27 @@ export function IsInitialized():Promise<boolean>;
 
 export function OpenInExplorer(arg1:string):Promise<void>;
 
+export function PreviewEncryptionPassword(arg1:string):Promise<main.EncryptionPasswordPreview>;
+
+export function PreviewSetupEncryptionPassword(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<main.EncryptionPasswordPreview>;
+
 export function QuickPull():Promise<number>;
 
 export function QuickPush():Promise<number>;
 
 export function QuickSync():Promise<number>;
 
+export function RedetectClaudeBinary():Promise<main.ClaudeBinaryResolution>;
+
 export function RemoveExcludePattern(arg1:string):Promise<void>;
+
+export function RepairRemoteFromLocal():Promise<number>;
 
 export function ResolveConflict(arg1:string,arg2:string):Promise<void>;
 
 export function RevertToSnapshot(arg1:string):Promise<void>;
+
+export function SaveEncryptionPassword(arg1:string):Promise<void>;
 
 export function SaveMergedConflict(arg1:string,arg2:string):Promise<void>;
 
@@ -92,4 +106,4 @@ export function UploadBinaryVersion(arg1:string):Promise<number>;
 
 export function UploadCurrentBinary():Promise<number>;
 
-export function VerifyEncryptionKey():Promise<boolean>;
+export function VerifyEncryptionKey():Promise<main.EncryptionVerifyResult>;

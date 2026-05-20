@@ -243,6 +243,7 @@ func (a *App) GetConfig() (*ConfigView, error) {
 	// 读取原始配置中的路径字段（用于编辑回显）
 	v := config.LoadRaw()
 	claudePath := v.GetString("claude.path")
+	claudeJSONPath := v.GetString("claude.json_path")
 	binDir := v.GetString("binary.bin_dir")
 	if binDir == "" {
 		binDir = v.GetString("binary.bindir")
@@ -251,12 +252,22 @@ func (a *App) GetConfig() (*ConfigView, error) {
 	if verDir == "" {
 		verDir = v.GetString("binary.versionsdir")
 	}
+	claudeBinaryPath := v.GetString("binary.claude_path")
+	resolution := binary.ResolveClaudeBinary()
+	webdavBaseURL := ""
+	webdavHeadURL := ""
+	if strings.TrimSpace(cfg.WebDAV.URL) != "" {
+		webdavBaseURL = config.ConfiguredWebDAVURL(cfg)
+		webdavHeadURL = webdavBaseURL + "HEAD"
+	}
 
 	return &ConfigView{
 		WebDAV: WebDAVView{
 			URL:         cfg.WebDAV.URL,
 			Username:    cfg.WebDAV.Username,
 			Root:        cfg.WebDAV.Root,
+			BaseURL:     webdavBaseURL,
+			HeadURL:     webdavHeadURL,
 			HasPassword: hasPassword,
 		},
 		Device: DeviceView{
@@ -279,13 +290,27 @@ func (a *App) GetConfig() (*ConfigView, error) {
 			MergeRetryMax:    cfg.Sync.MergeRetryMax,
 			AutoSyncInterval: cfg.Sync.AutoSyncInterval,
 		},
-		Exclude:        cfg.Exclude.Patterns,
-		ClaudeDir:      config.ClaudeDir(),
-		ClaudeDirRaw:   claudePath,
-		BinDir:         config.LocalBinDir(),
-		BinDirRaw:      binDir,
-		VersionsDir:    config.VersionsDir(),
-		VersionsDirRaw: verDir,
+		Exclude:                     cfg.Exclude.Patterns,
+		ClaudeDir:                   config.ClaudeDir(),
+		ClaudeDirRaw:                claudePath,
+		ClaudeDirDefault:            config.DefaultClaudeDir(),
+		ClaudeJSONPath:              config.ClaudeJSONPath(),
+		ClaudeJSONPathRaw:           claudeJSONPath,
+		ClaudeJSONPathDefault:       config.DefaultClaudeJSONPath(),
+		BinDir:                      config.LocalBinDir(),
+		BinDirRaw:                   binDir,
+		VersionsDir:                 config.VersionsDir(),
+		VersionsDirRaw:              verDir,
+		ClaudeBinaryPath:            resolution.CurrentPath,
+		ClaudeBinaryPathRaw:         claudeBinaryPath,
+		ClaudeBinaryManagedPath:     resolution.ManagedPath,
+		ClaudeBinaryPlaceholderPath: claudeBinaryPlaceholderPath(resolution),
+		ClaudeBinarySource:          resolution.Source,
+		ClaudeBinaryVersion:         resolution.Version,
+		ClaudeBinaryValid:           resolution.Valid,
+		ClaudeBinaryReadOnly:        resolution.ReadOnly,
+		ClaudeBinaryShim:            resolution.IsShim,
+		ClaudeBinaryError:           resolution.Error,
 	}, nil
 }
 
@@ -295,16 +320,17 @@ func (a *App) SetConfigField(section, key, value string) error {
 	if err != nil {
 		return err
 	}
+	clearClaudeCache := false
 
 	switch section {
 	case "webdav":
 		switch key {
 		case "url":
-			cfg.WebDAV.URL = value
+			cfg.WebDAV.URL = strings.TrimSpace(value)
 		case "username":
 			cfg.WebDAV.Username = value
 		case "root":
-			cfg.WebDAV.Root = value
+			cfg.WebDAV.Root = config.NormalizeWebDAVRoot(value)
 		}
 	case "device":
 		if key == "name" {
@@ -318,8 +344,11 @@ func (a *App) SetConfigField(section, key, value string) error {
 			}
 		}
 	case "claude":
-		if key == "path" {
+		switch key {
+		case "path":
 			cfg.Claude.Path = value
+		case "json_path":
+			cfg.Claude.JSONPath = value
 		}
 	case "binary":
 		switch key {
@@ -339,8 +368,12 @@ func (a *App) SetConfigField(section, key, value string) error {
 			cfg.Binary.AutoUpload = value == "true"
 		case "bin_dir":
 			cfg.Binary.BinDir = value
+			clearClaudeCache = true
 		case "versions_dir":
 			cfg.Binary.VersionsDir = value
+		case "claude_path":
+			cfg.Binary.ClaudePath = value
+			clearClaudeCache = true
 		}
 	case "sync":
 		switch key {
@@ -359,12 +392,48 @@ func (a *App) SetConfigField(section, key, value string) error {
 		}
 	}
 
-	return config.Save(cfg)
+	if err := config.Save(cfg); err != nil {
+		return err
+	}
+	if clearClaudeCache {
+		_ = binary.ClearClaudeResolutionCache()
+	}
+	return nil
 }
 
 // SetWebDAVPassword 保存 WebDAV 密码到密钥环
 func (a *App) SetWebDAVPassword(password string) error {
 	return config.SaveWebDAVPassword(password)
+}
+
+// GetClaudeBinaryResolution 返回当前 Claude 二进制解析结果
+func (a *App) GetClaudeBinaryResolution() *ClaudeBinaryResolution {
+	return toClaudeBinaryResolution(binary.ResolveClaudeBinary())
+}
+
+// RedetectClaudeBinary 清除缓存并重新检测 Claude 二进制
+func (a *App) RedetectClaudeBinary() *ClaudeBinaryResolution {
+	return toClaudeBinaryResolution(binary.RedetectClaudeBinary())
+}
+
+func toClaudeBinaryResolution(res binary.ClaudeResolution) *ClaudeBinaryResolution {
+	return &ClaudeBinaryResolution{
+		CurrentPath: res.CurrentPath,
+		ManagedPath: res.ManagedPath,
+		Source:      res.Source,
+		Version:     res.Version,
+		Valid:       res.Valid,
+		ReadOnly:    res.ReadOnly,
+		IsShim:      res.IsShim,
+		Error:       res.Error,
+	}
+}
+
+func claudeBinaryPlaceholderPath(res binary.ClaudeResolution) string {
+	if res.CurrentPath != "" {
+		return res.CurrentPath
+	}
+	return res.ManagedPath
 }
 
 // AddExcludePattern 添加排除规则
@@ -520,24 +589,51 @@ type ProjectListResult struct {
 
 // ConfigView 配置视图
 type ConfigView struct {
-	WebDAV         WebDAVView     `json:"webdav"`
-	Device         DeviceView     `json:"device"`
-	Encryption     EncryptionView `json:"encryption"`
-	Binary         BinaryView     `json:"binary"`
-	Sync           SyncView       `json:"sync"`
-	Exclude        []string       `json:"exclude"`
-	ClaudeDir      string         `json:"claudeDir"`
-	ClaudeDirRaw   string         `json:"claudeDirRaw"`
-	BinDir         string         `json:"binDir"`
-	BinDirRaw      string         `json:"binDirRaw"`
-	VersionsDir    string         `json:"versionsDir"`
-	VersionsDirRaw string         `json:"versionsDirRaw"`
+	WebDAV                      WebDAVView     `json:"webdav"`
+	Device                      DeviceView     `json:"device"`
+	Encryption                  EncryptionView `json:"encryption"`
+	Binary                      BinaryView     `json:"binary"`
+	Sync                        SyncView       `json:"sync"`
+	Exclude                     []string       `json:"exclude"`
+	ClaudeDir                   string         `json:"claudeDir"`
+	ClaudeDirRaw                string         `json:"claudeDirRaw"`
+	ClaudeDirDefault            string         `json:"claudeDirDefault"`
+	ClaudeJSONPath              string         `json:"claudeJSONPath"`
+	ClaudeJSONPathRaw           string         `json:"claudeJSONPathRaw"`
+	ClaudeJSONPathDefault       string         `json:"claudeJSONPathDefault"`
+	BinDir                      string         `json:"binDir"`
+	BinDirRaw                   string         `json:"binDirRaw"`
+	VersionsDir                 string         `json:"versionsDir"`
+	VersionsDirRaw              string         `json:"versionsDirRaw"`
+	ClaudeBinaryPath            string         `json:"claudeBinaryPath"`
+	ClaudeBinaryPathRaw         string         `json:"claudeBinaryPathRaw"`
+	ClaudeBinaryManagedPath     string         `json:"claudeBinaryManagedPath"`
+	ClaudeBinaryPlaceholderPath string         `json:"claudeBinaryPlaceholderPath"`
+	ClaudeBinarySource          string         `json:"claudeBinarySource"`
+	ClaudeBinaryVersion         string         `json:"claudeBinaryVersion"`
+	ClaudeBinaryValid           bool           `json:"claudeBinaryValid"`
+	ClaudeBinaryReadOnly        bool           `json:"claudeBinaryReadOnly"`
+	ClaudeBinaryShim            bool           `json:"claudeBinaryShim"`
+	ClaudeBinaryError           string         `json:"claudeBinaryError"`
+}
+
+type ClaudeBinaryResolution struct {
+	CurrentPath string `json:"currentPath"`
+	ManagedPath string `json:"managedPath"`
+	Source      string `json:"source"`
+	Version     string `json:"version"`
+	Valid       bool   `json:"valid"`
+	ReadOnly    bool   `json:"readOnly"`
+	IsShim      bool   `json:"isShim"`
+	Error       string `json:"error,omitempty"`
 }
 
 type WebDAVView struct {
 	URL         string `json:"url"`
 	Username    string `json:"username"`
 	Root        string `json:"root"`
+	BaseURL     string `json:"baseUrl"`
+	HeadURL     string `json:"headUrl"`
 	HasPassword bool   `json:"hasPassword"`
 }
 
@@ -608,38 +704,42 @@ type BinaryPageData struct {
 	LocalVersions  []BinaryVersionInfo `json:"localVersions"`
 	Platform       string              `json:"platform"`
 	BinaryPath     string              `json:"binaryPath"`
+	ManagedPath    string              `json:"managedPath"`
+	BinarySource   string              `json:"binarySource"`
+	BinaryReadOnly bool                `json:"binaryReadOnly"`
+	BinaryShim     bool                `json:"binaryShim"`
+	BinaryError    string              `json:"binaryError"`
 	VersionsDir    string              `json:"versionsDir"`
 	LocalExists    bool                `json:"localExists"`
 }
 
 // GetBinaryPage 返回二进制管理页面数据
 func (a *App) GetBinaryPage() (*BinaryPageData, error) {
-	_, client, _, err := a.loadClients()
-	if err != nil {
-		return nil, err
-	}
-
 	platform := config.Platform()
-	binPath := binary.GetBinaryPath("claude")
 	verDir := config.VersionsDir()
+	resolution := binary.ResolveClaudeBinary()
 
 	data := &BinaryPageData{
-		Platform:    platform,
-		BinaryPath:  binPath,
-		VersionsDir: verDir,
+		Platform:       platform,
+		BinaryPath:     resolution.CurrentPath,
+		ManagedPath:    resolution.ManagedPath,
+		BinarySource:   resolution.Source,
+		BinaryReadOnly: resolution.ReadOnly,
+		BinaryShim:     resolution.IsShim,
+		BinaryError:    resolution.Error,
+		VersionsDir:    verDir,
+		LocalExists:    resolution.Valid,
+		CurrentVersion: resolution.Version,
 	}
 
-	// 检查主二进制文件
-	if info, statErr := os.Stat(binPath); statErr == nil {
-		data.LocalExists = true
-		data.CurrentVersion = detectBinVersion(binPath)
-		_ = info
-	}
-
-	// 扫描本地版本目录
 	data.LocalVersions = scanLocalVersions(verDir, data.CurrentVersion)
+	data.AllVersions = mergeBinaryVersions(data.LocalVersions, nil, data.CurrentVersion)
 
-	// 从 WebDAV 加载索引
+	_, client, _, err := a.loadClients()
+	if err != nil {
+		return data, nil
+	}
+
 	idx, err := binary.LoadIndex(client)
 	if err != nil {
 		return data, nil
@@ -650,12 +750,8 @@ func (a *App) GetBinaryPage() (*BinaryPageData, error) {
 		return data, nil
 	}
 
-	if data.CurrentVersion == "" {
-		data.CurrentVersion = binInfo.Current
-	}
-
 	for ver, v := range binInfo.Versions {
-		isCurrent := (ver == binInfo.Current)
+		isCurrent := data.LocalExists && ver == data.CurrentVersion
 		data.Versions = append(data.Versions, BinaryVersionInfo{
 			Version:    ver,
 			Size:       v.Size,
@@ -667,7 +763,6 @@ func (a *App) GetBinaryPage() (*BinaryPageData, error) {
 		})
 	}
 
-	// 合并本地+云端为统一列表
 	data.AllVersions = mergeBinaryVersions(data.LocalVersions, data.Versions, data.CurrentVersion)
 
 	return data, nil
@@ -741,18 +836,11 @@ func (a *App) SwitchBinaryVersion(version string, source string) error {
 	binPath := binary.GetBinaryPath("claude")
 	verDir := config.VersionsDir()
 
-	// 备份当前版本到 versions 目录（仅移走，不删除）
-	os.MkdirAll(verDir, 0755)
 	currentVer := detectBinVersion(binPath)
-	var backupPath string
 	if currentVer != "" {
-		backupPath = filepath.Join(verDir, currentVer)
-		if _, err := os.Stat(backupPath); os.IsNotExist(err) {
-			os.Rename(binPath, backupPath)
-		} else {
-			// 已有同名备份，直接移除当前（备份已在）
-			os.Remove(binPath)
-			backupPath = ""
+		backupPath := filepath.Join(verDir, currentVer)
+		if err := binary.BackupFileIfMissing(binPath, backupPath); err != nil {
+			return fmt.Errorf("备份当前版本失败: %w", err)
 		}
 	}
 
@@ -762,7 +850,7 @@ func (a *App) SwitchBinaryVersion(version string, source string) error {
 		srcData, err := os.ReadFile(srcPath)
 		if err != nil {
 			switchErr = fmt.Errorf("读取本地版本 %s 失败: %w", version, err)
-		} else if err := os.WriteFile(binPath, srcData, 0755); err != nil {
+		} else if err := binary.WriteFileAtomic(binPath, srcData, 0755); err != nil {
 			switchErr = fmt.Errorf("写入失败: %w", err)
 		}
 	} else {
@@ -777,14 +865,24 @@ func (a *App) SwitchBinaryVersion(version string, source string) error {
 		}
 	}
 
-	// 切换失败时回滚
-	if switchErr != nil && backupPath != "" {
-		os.Rename(backupPath, binPath)
-	}
 	if switchErr != nil {
 		return switchErr
 	}
 
+	if source == "remote" {
+		_, client, _, err := a.loadClients()
+		if err == nil {
+			idx, err := binary.LoadIndex(client)
+			if err == nil {
+				if info := idx.GetBinaryInfo(config.Platform(), "claude"); info != nil {
+					info.Current = version
+					_ = binary.SaveIndex(client, idx)
+				}
+			}
+		}
+	}
+
+	_ = binary.ClearClaudeResolutionCache()
 	return nil
 }
 
@@ -817,13 +915,19 @@ func (a *App) UploadCurrentBinary() int64 {
 			return err
 		}
 
-		binPath := binary.GetBinaryPath("claude")
-		data, err := os.ReadFile(binPath)
+		resolution := binary.ResolveClaudeBinary()
+		if !resolution.Valid {
+			return fmt.Errorf("%s", resolution.Error)
+		}
+		if resolution.IsShim {
+			return fmt.Errorf("当前 Claude 路径是脚本 shim，不支持上传；请手动选择真实二进制或使用受管目录")
+		}
+		data, err := os.ReadFile(resolution.CurrentPath)
 		if err != nil {
 			return fmt.Errorf("读取当前二进制失败: %w", err)
 		}
 
-		version := detectBinVersion(binPath)
+		version := resolution.Version
 		if version == "" {
 			return fmt.Errorf("无法识别当前 Claude 版本")
 		}
@@ -1100,8 +1204,11 @@ func (a *App) revertBinary(name, targetVer string, client *webdav.Client, key []
 	verDir := config.VersionsDir()
 	localPath := filepath.Join(verDir, targetVer)
 	if data, err := os.ReadFile(localPath); err == nil {
-		if err := os.WriteFile(binPath, data, 0755); err != nil {
+		if err := binary.WriteFileAtomic(binPath, data, 0755); err != nil {
 			return fmt.Errorf("恢复 %s %s 失败: %w", name, targetVer, err)
+		}
+		if name == "claude" {
+			_ = binary.ClearClaudeResolutionCache()
 		}
 		return nil
 	}
@@ -1109,6 +1216,9 @@ func (a *App) revertBinary(name, targetVer string, client *webdav.Client, key []
 	// 再尝试从云端下载
 	if err := binary.Download(client, key, name, targetVer, binPath, nil); err != nil {
 		return fmt.Errorf("下载 %s %s 失败: %w", name, targetVer, err)
+	}
+	if name == "claude" {
+		_ = binary.ClearClaudeResolutionCache()
 	}
 	return nil
 }
@@ -1125,6 +1235,18 @@ type EncryptionStatus struct {
 	Enabled     bool   `json:"enabled"`
 	Fingerprint string `json:"fingerprint"`
 	HasKey      bool   `json:"hasKey"`
+}
+
+type EncryptionVerifyResult struct {
+	Status  string `json:"status"`
+	Message string `json:"message"`
+}
+
+type EncryptionPasswordPreview struct {
+	Status         string `json:"status"`
+	Message        string `json:"message"`
+	Fingerprint    string `json:"fingerprint"`
+	MatchesCurrent bool   `json:"matchesCurrent"`
 }
 
 // GetEncryptionStatus 返回加密状态和密钥指纹
@@ -1146,32 +1268,123 @@ func (a *App) GetEncryptionStatus() (*EncryptionStatus, error) {
 	return status, nil
 }
 
-// VerifyEncryptionKey 验证本地密钥能否解密远程数据
-func (a *App) VerifyEncryptionKey() (bool, error) {
+// VerifyEncryptionKey 验证本机加密密码能否解密远程数据
+func (a *App) VerifyEncryptionKey() (*EncryptionVerifyResult, error) {
 	_, client, key, err := a.loadClients()
 	if err != nil {
-		return false, err
+		return nil, err
 	}
+	return verifyRemoteSnapshotWithKey(client, key)
+}
+
+func (a *App) PreviewEncryptionPassword(password string) (*EncryptionPasswordPreview, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	webdavPassword, err := config.LoadWebDAVPassword()
+	if err != nil {
+		return nil, err
+	}
+	client := newConfiguredWebDAVClient(cfg, webdavPassword)
+	preview, _, _, err := buildEncryptionPasswordPreview(client, password)
+	return preview, err
+}
+
+func (a *App) PreviewSetupEncryptionPassword(url, username, password, root, encryptionPassword string) (*EncryptionPasswordPreview, error) {
+	client := webdav.NewClient(buildWebDAVURL(url, root), username, password)
+	preview, _, _, err := buildEncryptionPasswordPreview(client, encryptionPassword)
+	return preview, err
+}
+
+func (a *App) SaveEncryptionPassword(password string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	webdavPassword, err := config.LoadWebDAVPassword()
+	if err != nil {
+		return err
+	}
+	client := newConfiguredWebDAVClient(cfg, webdavPassword)
+	preview, salt, key, err := buildEncryptionPasswordPreview(client, password)
+	if err != nil {
+		return err
+	}
+	if preview.Status != "success" {
+		return fmt.Errorf("%s", preview.Message)
+	}
+	if err := os.WriteFile(filepath.Join(config.CCBoxDir(), "salt.bin"), salt, 0600); err != nil {
+		return fmt.Errorf("保存 salt 失败: %w", err)
+	}
+	if err := crypto.SaveKey(key, config.KeyPath()); err != nil {
+		return fmt.Errorf("保存加密密码失败: %w", err)
+	}
+	return nil
+}
+
+func buildEncryptionPasswordPreview(client *webdav.Client, password string) (*EncryptionPasswordPreview, []byte, []byte, error) {
+	if password == "" {
+		return &EncryptionPasswordPreview{Status: "empty", Message: "请输入加密密码"}, nil, nil, nil
+	}
+
+	remoteSalt, _, err := client.GET("salt.bin")
+	if err == webdav.ErrNotFound {
+		return nil, nil, nil, fmt.Errorf("远程缺少 salt.bin，请检查 WebDAV 根路径")
+	}
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("读取远程 salt 失败: %w", err)
+	}
+
+	key := crypto.DeriveKey(password, remoteSalt)
+	preview := &EncryptionPasswordPreview{Fingerprint: crypto.KeyFingerprint(key)}
+	if currentKey, err := os.ReadFile(config.KeyPath()); err == nil {
+		preview.MatchesCurrent = crypto.ConstantTimeEqual(key, currentKey)
+	}
+
+	verify, err := verifyRemoteSnapshotWithKey(client, key)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	preview.Status = verify.Status
+	preview.Message = verify.Message
+	return preview, remoteSalt, key, nil
+}
+
+func verifyRemoteSnapshotWithKey(client *webdav.Client, key []byte) (*EncryptionVerifyResult, error) {
 	headData, _, err := client.GET("HEAD")
-	if err != nil || string(headData) == "" {
-		return false, fmt.Errorf("无法读取远程 HEAD")
+	if err == webdav.ErrNotFound {
+		return encryptionVerifyUnverified("远程尚未初始化或当前 WebDAV 根路径下没有 HEAD，无法验证加密密码；请先成功同步一次，或检查 WebDAV 根路径。"), nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("读取远程 HEAD 失败: %w", err)
 	}
 	snapID := strings.TrimSpace(string(headData))
+	if snapID == "" {
+		return encryptionVerifyUnverified("远程 HEAD 为空，无法验证加密密码；请先成功同步一次，或检查 WebDAV 根路径。"), nil
+	}
 	if err := validateSnapshotID(snapID); err != nil {
-		return false, err
+		return nil, fmt.Errorf("远程 HEAD 内容无效: %w", err)
 	}
 	encData, _, err := client.GET("snapshots/" + snapID + ".json.enc")
+	if err == webdav.ErrNotFound {
+		return encryptionVerifyUnverified("远程 HEAD 指向的快照不存在，无法验证加密密码；请先同步修复远程数据。"), nil
+	}
 	if err != nil {
-		return false, fmt.Errorf("无法下载远程快照: %w", err)
+		return nil, fmt.Errorf("下载远程快照失败: %w", err)
 	}
 	plainData, err := decryptRemoteData(encData, key)
 	if err != nil {
-		return false, nil
+		return &EncryptionVerifyResult{Status: "mismatch", Message: "输入的加密密码无法解密远程数据"}, nil
 	}
 	if _, err := snapshot.Deserialize(plainData); err != nil {
-		return false, nil
+		return &EncryptionVerifyResult{Status: "mismatch", Message: "解密结果不是有效快照，可能加密密码不匹配或远程快照已损坏"}, nil
 	}
-	return true, nil
+	return &EncryptionVerifyResult{Status: "success", Message: "加密密码有效，可以解密远程数据"}, nil
+}
+
+func encryptionVerifyUnverified(message string) *EncryptionVerifyResult {
+	return &EncryptionVerifyResult{Status: "unverified", Message: message}
 }
 
 // rotateRemoteData 用旧密钥解密远程加密数据并用新密钥重新加密
@@ -1305,7 +1518,7 @@ func (a *App) ChangeEncryptionPassword(oldPassword, newPassword string) error {
 	// 验证旧密码
 	oldKey := crypto.DeriveKey(oldPassword, saltData)
 	if !crypto.ConstantTimeEqual(oldKey, keyData) {
-		return fmt.Errorf("旧密码不正确")
+		return fmt.Errorf("当前加密密码不正确")
 	}
 	// 生成新 salt 和密钥
 	newSalt, err := crypto.GenerateSalt()

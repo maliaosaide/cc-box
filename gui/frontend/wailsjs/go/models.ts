@@ -69,6 +69,11 @@ export namespace main {
 	    localVersions: BinaryVersionInfo[];
 	    platform: string;
 	    binaryPath: string;
+	    managedPath: string;
+	    binarySource: string;
+	    binaryReadOnly: boolean;
+	    binaryShim: boolean;
+	    binaryError: string;
 	    versionsDir: string;
 	    localExists: boolean;
 	
@@ -84,6 +89,11 @@ export namespace main {
 	        this.localVersions = this.convertValues(source["localVersions"], BinaryVersionInfo);
 	        this.platform = source["platform"];
 	        this.binaryPath = source["binaryPath"];
+	        this.managedPath = source["managedPath"];
+	        this.binarySource = source["binarySource"];
+	        this.binaryReadOnly = source["binaryReadOnly"];
+	        this.binaryShim = source["binaryShim"];
+	        this.binaryError = source["binaryError"];
 	        this.versionsDir = source["versionsDir"];
 	        this.localExists = source["localExists"];
 	    }
@@ -161,6 +171,32 @@ export namespace main {
 	        this.time = source["time"];
 	    }
 	}
+	export class ClaudeBinaryResolution {
+	    currentPath: string;
+	    managedPath: string;
+	    source: string;
+	    version: string;
+	    valid: boolean;
+	    readOnly: boolean;
+	    isShim: boolean;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ClaudeBinaryResolution(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.currentPath = source["currentPath"];
+	        this.managedPath = source["managedPath"];
+	        this.source = source["source"];
+	        this.version = source["version"];
+	        this.valid = source["valid"];
+	        this.readOnly = source["readOnly"];
+	        this.isShim = source["isShim"];
+	        this.error = source["error"];
+	    }
+	}
 	export class SyncView {
 	    snapshotLimit: number;
 	    conflictStrategy: string;
@@ -209,6 +245,8 @@ export namespace main {
 	    url: string;
 	    username: string;
 	    root: string;
+	    baseUrl: string;
+	    headUrl: string;
 	    hasPassword: boolean;
 	
 	    static createFrom(source: any = {}) {
@@ -220,6 +258,8 @@ export namespace main {
 	        this.url = source["url"];
 	        this.username = source["username"];
 	        this.root = source["root"];
+	        this.baseUrl = source["baseUrl"];
+	        this.headUrl = source["headUrl"];
 	        this.hasPassword = source["hasPassword"];
 	    }
 	}
@@ -232,10 +272,24 @@ export namespace main {
 	    exclude: string[];
 	    claudeDir: string;
 	    claudeDirRaw: string;
+	    claudeDirDefault: string;
+	    claudeJSONPath: string;
+	    claudeJSONPathRaw: string;
+	    claudeJSONPathDefault: string;
 	    binDir: string;
 	    binDirRaw: string;
 	    versionsDir: string;
 	    versionsDirRaw: string;
+	    claudeBinaryPath: string;
+	    claudeBinaryPathRaw: string;
+	    claudeBinaryManagedPath: string;
+	    claudeBinaryPlaceholderPath: string;
+	    claudeBinarySource: string;
+	    claudeBinaryVersion: string;
+	    claudeBinaryValid: boolean;
+	    claudeBinaryReadOnly: boolean;
+	    claudeBinaryShim: boolean;
+	    claudeBinaryError: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ConfigView(source);
@@ -251,10 +305,24 @@ export namespace main {
 	        this.exclude = source["exclude"];
 	        this.claudeDir = source["claudeDir"];
 	        this.claudeDirRaw = source["claudeDirRaw"];
+	        this.claudeDirDefault = source["claudeDirDefault"];
+	        this.claudeJSONPath = source["claudeJSONPath"];
+	        this.claudeJSONPathRaw = source["claudeJSONPathRaw"];
+	        this.claudeJSONPathDefault = source["claudeJSONPathDefault"];
 	        this.binDir = source["binDir"];
 	        this.binDirRaw = source["binDirRaw"];
 	        this.versionsDir = source["versionsDir"];
 	        this.versionsDirRaw = source["versionsDirRaw"];
+	        this.claudeBinaryPath = source["claudeBinaryPath"];
+	        this.claudeBinaryPathRaw = source["claudeBinaryPathRaw"];
+	        this.claudeBinaryManagedPath = source["claudeBinaryManagedPath"];
+	        this.claudeBinaryPlaceholderPath = source["claudeBinaryPlaceholderPath"];
+	        this.claudeBinarySource = source["claudeBinarySource"];
+	        this.claudeBinaryVersion = source["claudeBinaryVersion"];
+	        this.claudeBinaryValid = source["claudeBinaryValid"];
+	        this.claudeBinaryReadOnly = source["claudeBinaryReadOnly"];
+	        this.claudeBinaryShim = source["claudeBinaryShim"];
+	        this.claudeBinaryError = source["claudeBinaryError"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -351,8 +419,31 @@ export namespace main {
 	        this.isCurrent = source["isCurrent"];
 	    }
 	}
+	export class SyncHealth {
+	    status: string;
+	    code: string;
+	    message: string;
+	    canRepair: boolean;
+	    localHead?: string;
+	    remoteHead?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SyncHealth(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.status = source["status"];
+	        this.code = source["code"];
+	        this.message = source["message"];
+	        this.canRepair = source["canRepair"];
+	        this.localHead = source["localHead"];
+	        this.remoteHead = source["remoteHead"];
+	    }
+	}
 	export class DashboardData {
 	    syncStatus: string;
+	    syncHealth: SyncHealth;
 	    lastSync: string;
 	    claudeVersion: string;
 	    claudeLatest: boolean;
@@ -370,6 +461,7 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.syncStatus = source["syncStatus"];
+	        this.syncHealth = this.convertValues(source["syncHealth"], SyncHealth);
 	        this.lastSync = source["lastSync"];
 	        this.claudeVersion = source["claudeVersion"];
 	        this.claudeLatest = source["claudeLatest"];
@@ -463,6 +555,24 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class EncryptionPasswordPreview {
+	    status: string;
+	    message: string;
+	    fingerprint: string;
+	    matchesCurrent: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new EncryptionPasswordPreview(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.status = source["status"];
+	        this.message = source["message"];
+	        this.fingerprint = source["fingerprint"];
+	        this.matchesCurrent = source["matchesCurrent"];
+	    }
+	}
 	export class EncryptionStatus {
 	    enabled: boolean;
 	    fingerprint: string;
@@ -477,6 +587,20 @@ export namespace main {
 	        this.enabled = source["enabled"];
 	        this.fingerprint = source["fingerprint"];
 	        this.hasKey = source["hasKey"];
+	    }
+	}
+	export class EncryptionVerifyResult {
+	    status: string;
+	    message: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new EncryptionVerifyResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.status = source["status"];
+	        this.message = source["message"];
 	    }
 	}
 	
@@ -738,6 +862,7 @@ export namespace main {
 	        this.fileCount = source["fileCount"];
 	    }
 	}
+	
 	
 
 }

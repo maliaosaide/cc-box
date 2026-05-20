@@ -1,7 +1,7 @@
 <script>
   import { onMount, createEventDispatcher } from 'svelte'
   import { EventsOn } from '../../wailsjs/runtime/runtime.js'
-  import { GetDashboard, QuickPush, QuickPull, QuickSync } from '../../wailsjs/go/main/App.js'
+  import { GetDashboard, QuickPush, QuickPull, QuickSync, RepairRemoteFromLocal } from '../../wailsjs/go/main/App.js'
 
   export let syncState = 'idle'
   export let theme = 'dark'
@@ -10,15 +10,26 @@
   let dashboard = null
   let loading = true
   let actionLoading = ''
+  let actionError = ''
   let progress = null
+  let currentOpId = null
 
   onMount(async () => {
     await refresh()
     EventsOn('op:progress', (e) => {
-      if (e.operation && e.operation.startsWith('quick-')) progress = e
+      if (!e.operation || (!e.operation.startsWith('quick-') && e.operation !== 'repair-remote')) return
+      if (e.opId === currentOpId || (actionLoading === 'sync' && (e.operation === 'quick-pull' || e.operation === 'quick-push'))) progress = e
     })
-    EventsOn('op:complete', () => {
-      actionLoading = ''; progress = null; syncState = 'synced'; refresh()
+    EventsOn('op:complete', async (e) => {
+      if (!e || e.opId !== currentOpId) return
+      actionLoading = ''; progress = null; currentOpId = null
+      if (e.status === 'error') {
+        actionError = e.error || '同步失败'
+        await refresh()
+      } else {
+        actionError = ''
+        await refresh()
+      }
     })
   })
 
@@ -26,29 +37,57 @@
     try {
       dashboard = await GetDashboard()
       if (dashboard && dashboard.conflicts) syncState = 'conflict'
-      else if (dashboard && dashboard.lastSync) syncState = 'synced'
-      else syncState = 'idle'
+      else syncState = dashboard?.syncStatus || 'idle'
     } catch (e) { syncState = 'error' }
     loading = false
   }
 
   async function doAction(action) {
-    actionLoading = action; progress = null; syncState = 'syncing'
+    actionLoading = action; actionError = ''; progress = null; syncState = 'syncing'; currentOpId = null
     try {
-      if (action === 'push') QuickPush()
-      else if (action === 'pull') QuickPull()
-      else QuickSync()
-    } catch (e) { console.error(action, e) }
+      currentOpId = action === 'push' ? await QuickPush() : action === 'pull' ? await QuickPull() : await QuickSync()
+    } catch (e) {
+      actionLoading = ''; syncState = 'error'; actionError = e.message || String(e)
+    }
+  }
+
+  async function repairRemote() {
+    if (!confirm('将使用本机当前配置初始化当前 WebDAV 根路径。请确认根路径正确，且远程没有需要保留的数据。')) return
+    actionLoading = 'repair'; actionError = ''; progress = null; syncState = 'syncing'; currentOpId = null
+    try {
+      currentOpId = await RepairRemoteFromLocal()
+    } catch (e) {
+      actionLoading = ''; syncState = 'error'; actionError = e.message || String(e)
+    }
   }
 
   function navigateTo(page) { dispatch('navigate', { page }) }
 
+  function statusLabel(state) {
+    if (state === 'syncing') return '同步中'
+    if (state === 'conflict') return `${data.conflicts} 个冲突`
+    if (state === 'pending') return '待同步'
+    if (state === 'remote_uninitialized') return '远程未初始化'
+    if (state === 'remote_incomplete') return '远程数据不完整'
+    if (state === 'key_mismatch') return '密钥不匹配'
+    if (state === 'connection_error') return '连接异常'
+    if (state === 'local_error') return '本地配置异常'
+    if (state === 'error') return '连接异常'
+    if (state === 'synced') return '已同步'
+    return '未同步'
+  }
+
   $: data = dashboard || {
-    syncStatus: 'idle', lastSync: null, claudeVersion: '-',
+    syncStatus: 'idle', syncHealth: null, lastSync: null, claudeVersion: '-',
     claudeLatest: true, conflicts: 0, devices: [], recentChanges: [],
     backups: [], binaries: []
   }
+  $: health = data.syncHealth
   $: hasConflicts = data.conflicts !== 0
+  $: displaySyncState = hasConflicts ? 'conflict' : (syncState || data.syncStatus || 'idle')
+  $: isWarnState = displaySyncState === 'pending' || displaySyncState === 'remote_uninitialized' || displaySyncState === 'idle'
+  $: isErrorState = displaySyncState === 'error' || displaySyncState === 'connection_error' || displaySyncState === 'remote_incomplete' || displaySyncState === 'key_mismatch' || displaySyncState === 'local_error'
+  $: showRecovery = health && ['remote_uninitialized', 'remote_incomplete', 'key_mismatch', 'connection_error', 'local_error'].includes(displaySyncState)
   $: hasChanges = data.recentChanges && data.recentChanges.length
   $: hasBackups = data.backups && data.backups.length
   $: hasBinaries = data.binaries && data.binaries.length
@@ -74,26 +113,24 @@
             <span>暗色</span>
           {/if}
         </button>
-        <div class="status-pill" class:conflict={hasConflicts}>
-          <div class="status-dot" class:ok={!hasConflicts} class:err={hasConflicts}></div>
-          <span class="status-text">
-            {!hasConflicts ? '已同步' : `${data.conflicts} 个冲突`}
-          </span>
-          {#if hasConflicts}
+        <div class="status-pill" class:conflict={displaySyncState === 'conflict'} class:warn={isWarnState} class:err={isErrorState} class:syncing={displaySyncState === 'syncing'}>
+          <div class="status-dot" class:ok={displaySyncState === 'synced'} class:warn={isWarnState} class:err={isErrorState || displaySyncState === 'conflict'} class:syncing={displaySyncState === 'syncing'}></div>
+          <span class="status-text">{statusLabel(displaySyncState)}</span>
+          {#if displaySyncState === 'conflict'}
             <button class="status-link" on:click={() => navigateTo('files')}>解决</button>
           {/if}
         </div>
         <div class="toolbar-divider"></div>
         <div class="action-group">
-          <button class="action-btn" disabled={actionLoading === 'push'} on:click={() => doAction('push')}>
+          <button class="action-btn" disabled={!!actionLoading} on:click={() => doAction('push')}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5m-7 7l7-7 7 7"/></svg>
             <span>推送</span>
           </button>
-          <button class="action-btn" disabled={actionLoading === 'pull'} on:click={() => doAction('pull')}>
+          <button class="action-btn" disabled={!!actionLoading} on:click={() => doAction('pull')}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14m-7-7l7 7 7-7"/></svg>
             <span>拉取</span>
           </button>
-          <button class="action-btn" disabled={actionLoading === 'sync'} on:click={() => doAction('sync')}>
+          <button class="action-btn" disabled={!!actionLoading} on:click={() => doAction('sync')}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M1 4v6h6M23 20v-6h-6"/>
               <path d="M20.49 9A9 9 0 005.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 013.51 15"/>
@@ -104,6 +141,10 @@
       </div>
     </div>
 
+    {#if actionError}
+      <div class="error-banner animate-fade-in">{actionError}</div>
+    {/if}
+
     {#if progress}
       <div class="progress-section animate-fade-in">
         <div class="flex justify-between text-xs mb-1">
@@ -112,6 +153,26 @@
         </div>
         <div class="progress-bar">
           <div class="progress-bar-fill" style="width: {progress.percent}%"></div>
+        </div>
+      </div>
+    {/if}
+
+    {#if showRecovery}
+      <div class="recovery-card animate-fade-in">
+        <div class="recovery-main">
+          <span class="section-label">同步诊断</span>
+          <div class="recovery-title">{statusLabel(displaySyncState)}</div>
+          <div class="recovery-message">{health.message}</div>
+          <div class="recovery-meta">
+            {#if health.localHead}<span>本地 HEAD：{health.localHead.slice(0, 12)}</span>{/if}
+            {#if health.remoteHead}<span>远程 HEAD：{health.remoteHead.slice(0, 12)}</span>{/if}
+          </div>
+        </div>
+        <div class="recovery-actions">
+          <button class="action-btn" disabled={!!actionLoading} on:click={() => navigateTo('settings')}>检查 WebDAV 根路径</button>
+          {#if health.canRepair}
+            <button class="action-btn primary" disabled={!!actionLoading} on:click={repairRemote}>以本机为准初始化远程</button>
+          {/if}
         </div>
       </div>
     {/if}
@@ -277,10 +338,14 @@
     border-radius: 8px;
     background: rgb(var(--surface-2));
   }
-  .status-pill.conflict { background: rgba(184,92,92,0.06); }
+  .status-pill.conflict, .status-pill.err { background: rgba(184,92,92,0.06); }
+  .status-pill.warn { background: rgba(196,165,78,0.08); }
+  .status-pill.syncing { background: rgba(91,127,165,0.08); }
   .status-dot { width: 6px; height: 6px; border-radius: 50%; }
   .status-dot.ok { background: rgb(var(--state-ok)); }
+  .status-dot.warn { background: rgb(var(--state-warn)); }
   .status-dot.err { background: rgb(var(--state-err)); }
+  .status-dot.syncing { background: rgb(var(--state-sync)); }
   .status-text { font-size: 12px; font-family: 'DM Mono', monospace; color: rgb(var(--text-secondary)); }
   .status-link {
     font-size: 11px; color: rgb(var(--state-err)); background: none;
@@ -304,6 +369,11 @@
     border-color: rgba(196,112,78,0.4); color: rgb(var(--accent));
     background: rgba(196,112,78,0.05);
   }
+  .action-btn.primary {
+    color: rgb(var(--accent));
+    background: rgba(196,112,78,0.08);
+    border-color: rgba(196,112,78,0.35);
+  }
   .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
   /* 通用 */
@@ -326,7 +396,23 @@
     color: rgb(var(--text-muted)); font-size: 12px; opacity: 0.6;
   }
   .loading-dot { width: 6px; height: 6px; border-radius: 50%; background: rgb(var(--accent)); }
+  .error-banner {
+    padding: 8px 10px; border-radius: 8px;
+    background: rgba(184,92,92,0.08); color: rgb(var(--state-err));
+    font-size: 12px;
+  }
   .progress-section { margin-top: -4px; }
+  .recovery-card {
+    display: flex; justify-content: space-between; gap: 12px;
+    padding: 12px; border-radius: 10px;
+    border: 1px solid rgba(196,165,78,0.25);
+    background: rgba(196,165,78,0.06);
+  }
+  .recovery-main { min-width: 0; flex: 1; }
+  .recovery-title { margin-top: 4px; font-size: 14px; font-weight: 600; color: rgb(var(--text-primary)); }
+  .recovery-message { margin-top: 4px; font-size: 12px; color: rgb(var(--text-secondary)); line-height: 1.5; }
+  .recovery-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; font-size: 11px; color: rgb(var(--text-muted)); font-family: 'DM Mono', monospace; }
+  .recovery-actions { display: flex; align-items: flex-start; gap: 6px; flex-shrink: 0; }
 
   /* 统一列表行 */
   .item-list { display: flex; flex-direction: column; }

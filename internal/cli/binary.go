@@ -5,10 +5,7 @@ package cli
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/user/cc-box/internal/binary"
@@ -109,12 +106,26 @@ func runBinaryPush(cmd *cobra.Command, args []string) error {
 	}
 
 	binPath := binary.GetBinaryPath(name)
+	version := ""
+	if name == "claude" {
+		resolution := binary.ResolveClaudeBinary()
+		if !resolution.Valid {
+			return fmt.Errorf("%s", resolution.Error)
+		}
+		if resolution.IsShim {
+			return fmt.Errorf("当前 Claude 路径是脚本 shim，不支持上传；请手动选择真实二进制或使用受管目录")
+		}
+		binPath = resolution.CurrentPath
+		version = resolution.Version
+	}
 	data, err := os.ReadFile(binPath)
 	if err != nil {
 		return fmt.Errorf("读取 %s 失败: %w", binPath, err)
 	}
 
-	version := detectVersion(binPath)
+	if version == "" {
+		version = detectVersion(binPath)
+	}
 	fmt.Printf("上传 %s (%s, %s)...\n", binPath, version, formatSize(int64(len(data))))
 
 	err = binary.Upload(client, key, name, data, version, func(total, uploaded int64, part, totalParts int) {
@@ -171,6 +182,9 @@ func runBinaryPull(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	if name == "claude" {
+		_ = binary.ClearClaudeResolutionCache()
+	}
 	fmt.Printf("\n已下载 %s %s\n", name, version)
 	return nil
 }
@@ -195,9 +209,13 @@ func runBinarySwitch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("没有可用的 %s 二进制", name)
 	}
 
-	currentVersion := info.Current
-	if targetVersion == currentVersion {
-		return fmt.Errorf("已经是版本 %s", targetVersion)
+	binPath := binary.GetBinaryPath(name)
+	currentVersion := ""
+	if _, err := os.Stat(binPath); err == nil {
+		currentVersion = detectVersion(binPath)
+		if targetVersion == currentVersion {
+			return fmt.Errorf("已经是版本 %s", targetVersion)
+		}
 	}
 
 	// 检查目标版本是否存在
@@ -206,13 +224,13 @@ func runBinarySwitch(cmd *cobra.Command, args []string) error {
 	}
 
 	// 备份当前版本到 versions 目录
-	binPath := binary.GetBinaryPath(name)
-	if currentVersion != "" {
+	if currentVersion != "" && currentVersion != "unknown" {
 		versionsDir := config.VersionsDir()
 		backupPath := filepath.Join(versionsDir, currentVersion)
-		os.MkdirAll(versionsDir, 0755)
 		fmt.Printf("备份当前版本 %s → %s\n", currentVersion, backupPath)
-		os.Rename(binPath, backupPath)
+		if err := binary.BackupFileIfMissing(binPath, backupPath); err != nil {
+			return fmt.Errorf("备份当前版本失败: %w", err)
+		}
 	}
 
 	// 下载目标版本
@@ -228,6 +246,9 @@ func runBinarySwitch(cmd *cobra.Command, args []string) error {
 	// 更新索引
 	info.Current = targetVersion
 	binary.SaveIndex(client, idx)
+	if name == "claude" {
+		_ = binary.ClearClaudeResolutionCache()
+	}
 
 	fmt.Printf("\n已切换到 %s %s\n", name, targetVersion)
 	return nil
@@ -346,18 +367,9 @@ func totalPruneSize(idx *binary.Index, targets []pruneTarget) int64 {
 
 // detectVersion 从二进制路径检测版本
 func detectVersion(binPath string) string {
-	cmd := exec.Command(binPath, "--version")
-	if runtime.GOOS == "windows" {
-		setHideWindow(cmd)
-	}
-	output, err := cmd.Output()
+	version, err := binary.DetectVersion(binPath)
 	if err != nil {
 		return "unknown"
 	}
-	// 输出格式: "2.1.126 (Claude Code)" 或类似
-	fields := strings.Fields(string(output))
-	if len(fields) > 0 {
-		return fields[0]
-	}
-	return "unknown"
+	return version
 }

@@ -3,15 +3,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
-	"os/exec"
-	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/user/cc-box/internal/binary"
@@ -25,6 +24,7 @@ import (
 // DashboardData 概览页数据
 type DashboardData struct {
 	SyncStatus    string        `json:"syncStatus"`
+	SyncHealth    SyncHealth    `json:"syncHealth"`
 	LastSync      string        `json:"lastSync"`
 	ClaudeVersion string        `json:"claudeVersion"`
 	ClaudeLatest  bool          `json:"claudeLatest"`
@@ -35,6 +35,20 @@ type DashboardData struct {
 	Backups       []BackupInfo  `json:"backups"`
 	Binaries      []BinaryInfo  `json:"binaries"`
 }
+
+type SyncHealth struct {
+	Status     string `json:"status"`
+	Code       string `json:"code"`
+	Message    string `json:"message"`
+	CanRepair  bool   `json:"canRepair"`
+	LocalHead  string `json:"localHead,omitempty"`
+	RemoteHead string `json:"remoteHead,omitempty"`
+}
+
+var (
+	errRemoteUninitialized = errors.New("远程尚未初始化")
+	errKeyMismatch         = errors.New("密钥不匹配")
+)
 
 type ConflictRef struct {
 	Path   string `json:"path"`
@@ -81,7 +95,8 @@ func (a *App) GetDashboard() (*DashboardData, error) {
 	}
 
 	data := &DashboardData{
-		SyncStatus:    "synced",
+		SyncStatus:    "idle",
+		SyncHealth:    SyncHealth{Status: "idle", Code: "idle", Message: "尚未同步"},
 		ClaudeVersion: "-",
 		ClaudeLatest:  true,
 		Conflicts:     0,
@@ -102,36 +117,67 @@ func (a *App) GetDashboard() (*DashboardData, error) {
 
 	data.Binaries = collectInstalledBinaries(nil)
 
-	// 尝试加载真实数据
 	client, key, err := a.loadClientKey(cfg)
-	if err == nil {
-		a.fillDashboardFromSnapshots(data, cfg, client, key)
+	if err != nil {
+		data.setSyncHealth("connection_error", "local_credentials_error", err.Error(), false, "", "")
+		return data, nil
 	}
+	a.fillDashboardFromSnapshots(data, cfg, client, key)
 
 	return data, nil
 }
 
 // fillDashboardFromSnapshots 从真实快照数据填充概览
 func (a *App) fillDashboardFromSnapshots(data *DashboardData, cfg *config.Config, client *webdav.Client, key []byte) {
-	// 加载快照列表
+	localHeadStr, localHeadErr := readLocalHeadID()
+	if localHeadErr != nil {
+		localHeadStr = ""
+	}
+	if localHeadStr != "" {
+		if err := validateSnapshotID(localHeadStr); err != nil {
+			data.setSyncHealth("local_error", "local_head_invalid", err.Error(), false, localHeadStr, "")
+			return
+		}
+	}
+
 	headData, _, err := client.GET("HEAD")
-	if err != nil || string(headData) == "" {
+	if err == webdav.ErrNotFound {
+		data.setSyncHealth("remote_uninitialized", "remote_head_missing", "当前 WebDAV 根路径下没有 HEAD。请检查根路径，确认无误后可用本机数据初始化远程。", true, localHeadStr, "")
+		return
+	}
+	if err != nil {
+		data.setSyncHealth("connection_error", "remote_head_read_failed", fmt.Sprintf("读取远程 HEAD 失败: %v", err), false, localHeadStr, "")
 		return
 	}
 	headID := strings.TrimSpace(string(headData))
-
-	// 本地 HEAD
-	localHead, _ := os.ReadFile(config.CCBoxDir() + "/HEAD")
-	localHeadStr := strings.TrimSpace(string(localHead))
-
-	if localHeadStr != headID {
-		data.SyncStatus = "pending"
+	if headID == "" {
+		data.setSyncHealth("remote_incomplete", "remote_head_empty", "远程 HEAD 为空。请检查 WebDAV 根路径或手动修复远程数据。", false, localHeadStr, "")
+		return
+	}
+	if err := validateSnapshotID(headID); err != nil {
+		data.setSyncHealth("remote_incomplete", "remote_head_invalid", err.Error(), false, localHeadStr, headID)
+		return
 	}
 
 	// 加载最新快照获取备份信息和最近变更
-	snap, snapErr := a.loadSnapByID(client, key, headID)
+	snap, snapErr := a.loadRemoteSnapByID(client, key, headID)
 	if snapErr != nil || snap == nil {
+		if errors.Is(snapErr, webdav.ErrNotFound) {
+			data.setSyncHealth("remote_incomplete", "remote_snapshot_missing", "远程 HEAD 指向的快照不存在，请检查 WebDAV 根路径或手动修复远程数据。", false, localHeadStr, headID)
+			return
+		}
+		if errors.Is(snapErr, errKeyMismatch) {
+			data.setSyncHealth("key_mismatch", "key_mismatch", "本机加密密码无法解密远程快照，请确认加密密码或 WebDAV 根路径是否正确。", false, localHeadStr, headID)
+			return
+		}
+		data.setSyncHealth("remote_incomplete", "remote_snapshot_invalid", fmt.Sprintf("远程快照无效: %v", snapErr), false, localHeadStr, headID)
 		return
+	}
+
+	if localHeadStr != headID {
+		data.setSyncHealth("pending", "head_mismatch", "本地与远程 HEAD 不一致，需要同步。", false, localHeadStr, headID)
+	} else {
+		data.setSyncHealth("synced", "synced", "本地与远程一致。", false, localHeadStr, headID)
 	}
 
 	// 上次同步时间
@@ -199,6 +245,41 @@ func (a *App) fillDashboardFromSnapshots(data *DashboardData, cfg *config.Config
 			data.ConflictFiles = append(data.ConflictFiles, ConflictRef{Path: path})
 		}
 	}
+}
+
+func (d *DashboardData) setSyncHealth(status, code, message string, canRepair bool, localHead, remoteHead string) {
+	d.SyncStatus = status
+	d.SyncHealth = SyncHealth{
+		Status:     status,
+		Code:       code,
+		Message:    message,
+		CanRepair:  canRepair,
+		LocalHead:  localHead,
+		RemoteHead: remoteHead,
+	}
+}
+
+func (a *App) loadRemoteSnapByID(client *webdav.Client, key []byte, id string) (*snapshot.Snapshot, error) {
+	id = strings.TrimSpace(id)
+	if err := validateSnapshotID(id); err != nil {
+		return nil, err
+	}
+	encrypted, _, err := client.GET("snapshots/" + id + ".json.enc")
+	if err != nil {
+		return nil, err
+	}
+	decrypted, err := decryptRemoteData(encrypted, key)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", errKeyMismatch, err)
+	}
+	snap, err := snapshot.Deserialize(decrypted)
+	if err != nil {
+		return nil, err
+	}
+	if snap.ID != id {
+		return nil, fmt.Errorf("远程快照 ID 与 HEAD 不一致")
+	}
+	return snap, nil
 }
 
 func (a *App) loadClientKey(cfg *config.Config) (*webdav.Client, []byte, error) {
@@ -335,12 +416,15 @@ func (a *App) QuickPull() int64 {
 		}
 
 		remoteHeadData, _, err := client.GET("HEAD")
+		if err == webdav.ErrNotFound {
+			return fmt.Errorf("远程尚未初始化或当前 WebDAV 根路径下没有 HEAD，请先检查 WebDAV 根路径，或在概览页显式以本机为准初始化远程: %w", errRemoteUninitialized)
+		}
 		if err != nil {
 			return fmt.Errorf("读取远程 HEAD 失败: %w", err)
 		}
 		remoteHead := strings.TrimSpace(string(remoteHeadData))
 		if remoteHead == "" {
-			return fmt.Errorf("远程没有数据")
+			return fmt.Errorf("远程 HEAD 为空，请检查 WebDAV 根路径或手动修复远程数据: %w", errRemoteUninitialized)
 		}
 
 		localHead, _ := os.ReadFile(config.CCBoxDir() + "/HEAD")
@@ -396,10 +480,12 @@ func (a *App) QuickSync() int64 {
 			default:
 			}
 		}
-		if pullErr := opResults[pullID]; pullErr != nil {
+		opCancelMu.Lock()
+		pullErr := opResults[pullID]
+		opCancelMu.Unlock()
+		if pullErr != nil {
 			return fmt.Errorf("拉取失败: %w", pullErr)
 		}
-
 		a.emitProgress(opID, "quick-sync", 1, 2, 1, 2, "正在推送...")
 		pushID := a.QuickPush()
 		for {
@@ -416,13 +502,150 @@ func (a *App) QuickSync() int64 {
 			default:
 			}
 		}
-		if pushErr := opResults[pushID]; pushErr != nil {
+		opCancelMu.Lock()
+		pushErr := opResults[pushID]
+		opCancelMu.Unlock()
+		if pushErr != nil {
 			return fmt.Errorf("推送失败: %w", pushErr)
 		}
 
 		a.emitProgress(opID, "quick-sync", 2, 2, 2, 2, "同步完成")
 		return nil
 	})
+}
+
+func (a *App) RepairRemoteFromLocal() int64 {
+	return a.StartAsync("repair-remote", func(ctx context.Context, opID int64) error {
+		cfg, client, key, err := a.loadClients()
+		if err != nil {
+			return err
+		}
+
+		UpdateTrayState(TraySyncing)
+		a.emitProgress(opID, "repair-remote", 0, 4, 0, 4, "检查远程 HEAD...")
+		if err := ensureRemoteHeadMissing(client); err != nil {
+			return err
+		}
+
+		localHead, err := readLocalHeadID()
+		if err != nil {
+			localHead = ""
+		}
+		if localHead != "" {
+			if err := validateSnapshotID(localHead); err != nil {
+				return err
+			}
+		}
+
+		a.emitProgress(opID, "repair-remote", 1, 4, 1, 4, "检查加密 salt...")
+		if err := ensureRemoteSaltFromLocal(client); err != nil {
+			return err
+		}
+
+		scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
+		scanResult, err := scanner.Scan()
+		if err != nil {
+			return fmt.Errorf("扫描失败: %w", err)
+		}
+
+		store := object.NewStore(client, key, config.CCBoxDir()+"/cache/objects")
+		total := int64(len(scanResult.Files))
+		var uploaded int64
+		for path, entry := range scanResult.Files {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			fullPath, err := safeClaudePath(path)
+			if err != nil {
+				return err
+			}
+			data, err := readObjectData(fullPath)
+			if err != nil {
+				return fmt.Errorf("读取文件 %s 失败: %w", path, err)
+			}
+			hash, err := store.Upload(data)
+			if err != nil {
+				return fmt.Errorf("上传文件 %s 失败: %w", path, err)
+			}
+			if hash != entry.Hash {
+				return fmt.Errorf("文件 %s hash 不一致", path)
+			}
+			uploaded++
+			a.emitProgress(opID, "repair-remote", uploaded, total, 2, 4, fmt.Sprintf("上传 %s", path))
+		}
+
+		snap := snapshot.CreateSnapshot(localHead, cfg.Device.ID, "repair remote from local", scanResult.Files)
+		snap.Binary = currentBinaryVersions()
+		snapData, err := snap.Serialize()
+		if err != nil {
+			return fmt.Errorf("序列化快照失败: %w", err)
+		}
+		encrypted, err := encryptRemoteData(snapData, key)
+		if err != nil {
+			return fmt.Errorf("加密快照失败: %w", err)
+		}
+		if err := client.EnsureDir("snapshots/"); err != nil {
+			return fmt.Errorf("创建快照目录失败: %w", err)
+		}
+		if _, err := client.PUT("snapshots/"+snap.ID+".json.enc", encrypted, ""); err != nil {
+			return fmt.Errorf("上传快照失败: %w", err)
+		}
+
+		a.emitProgress(opID, "repair-remote", 3, 4, 3, 4, "写入远程 HEAD...")
+		if err := ensureRemoteHeadMissing(client); err != nil {
+			return err
+		}
+		if _, err := client.PUT("HEAD", []byte(snap.ID), ""); err != nil {
+			return fmt.Errorf("写入远程 HEAD 失败: %w", err)
+		}
+		if err := os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(snap.ID), 0600); err != nil {
+			return fmt.Errorf("更新本地 HEAD 失败: %w", err)
+		}
+		if err := os.WriteFile(config.CCBoxDir()+"/snapshots/"+snap.ID+".json", snapData, 0600); err != nil {
+			return fmt.Errorf("缓存快照失败: %w", err)
+		}
+		registerDeviceInfo(client, cfg)
+		UpdateTrayState(TraySynced)
+		a.emitProgress(opID, "repair-remote", 4, 4, 4, 4, "远程初始化完成")
+		return nil
+	})
+}
+
+func ensureRemoteHeadMissing(client *webdav.Client) error {
+	headData, _, err := client.GET("HEAD")
+	if err == webdav.ErrNotFound {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("读取远程 HEAD 失败: %w", err)
+	}
+	if strings.TrimSpace(string(headData)) == "" {
+		return fmt.Errorf("远程 HEAD 已存在但为空，已停止修复以避免覆盖可能损坏的远程数据；请先检查 WebDAV 根路径")
+	}
+	return fmt.Errorf("远程 HEAD 已存在，已停止修复以避免覆盖远程数据；请先检查 WebDAV 根路径")
+}
+
+func ensureRemoteSaltFromLocal(client *webdav.Client) error {
+	localSalt, err := os.ReadFile(config.CCBoxDir() + "/salt.bin")
+	if err != nil {
+		return fmt.Errorf("读取本地 salt 失败: %w", err)
+	}
+	remoteSalt, _, err := client.GET("salt.bin")
+	if err == nil {
+		if !bytes.Equal(remoteSalt, localSalt) {
+			return fmt.Errorf("远程 salt 与本地不一致，请检查 WebDAV 根路径")
+		}
+		return nil
+	}
+	if err != webdav.ErrNotFound {
+		return fmt.Errorf("读取远程 salt 失败: %w", err)
+	}
+	if _, err := client.PUT("salt.bin", localSalt, ""); err != nil {
+		return fmt.Errorf("上传 salt 失败: %w", err)
+	}
+	return nil
 }
 
 // fillBinaryVersion 尝试从二进制文件检测版本号
@@ -444,10 +667,20 @@ func collectInstalledBinaries(client *webdav.Client) []BinaryInfo {
 	platform := config.Platform()
 	for _, name := range tools {
 		binPath := binary.GetBinaryPath(name)
-		if _, err := os.Stat(binPath); err != nil {
-			continue
+		version := ""
+		if name == "claude" {
+			resolution := binary.ResolveClaudeBinary()
+			if !resolution.Valid {
+				continue
+			}
+			binPath = resolution.CurrentPath
+			version = resolution.Version
+		} else {
+			if _, err := os.Stat(binPath); err != nil {
+				continue
+			}
+			version = detectBinVersion(binPath)
 		}
-		version := detectBinVersion(binPath)
 		latest := true
 		if idx != nil {
 			if info := idx.GetBinaryInfo(platform, name); info != nil {
@@ -469,11 +702,20 @@ func currentBinaryVersions() map[string]map[string]string {
 	tools := []string{"claude", "uv", "uvx", "codex", "gemini"}
 	versions := make(map[string]string)
 	for _, name := range tools {
-		binPath := binary.GetBinaryPath(name)
-		if _, err := os.Stat(binPath); err != nil {
-			continue
+		version := ""
+		if name == "claude" {
+			resolution := binary.ResolveClaudeBinary()
+			if !resolution.Valid || resolution.IsShim {
+				continue
+			}
+			version = resolution.Version
+		} else {
+			binPath := binary.GetBinaryPath(name)
+			if _, err := os.Stat(binPath); err != nil {
+				continue
+			}
+			version = detectBinVersion(binPath)
 		}
-		version := detectBinVersion(binPath)
 		if version != "" {
 			versions[name] = version
 		}
@@ -574,20 +816,11 @@ func versionParts(version string) ([]int, bool) {
 }
 
 func detectBinVersion(binPath string) string {
-	cmd := exec.Command(binPath, "--version")
-	if runtime.GOOS == "windows" {
-		cmd.SysProcAttr = hideWindowAttr()
-	}
-	output, err := cmd.Output()
+	version, err := binary.DetectVersion(binPath)
 	if err != nil {
 		return ""
 	}
-	for _, field := range strings.Fields(string(output)) {
-		if version := cleanVersionToken(field); version != "" {
-			return version
-		}
-	}
-	return ""
+	return version
 }
 
 func cleanVersionToken(token string) string {
@@ -609,13 +842,6 @@ func leadingDigits(value string) string {
 		}
 	}
 	return value
-}
-
-func hideWindowAttr() *syscall.SysProcAttr {
-	return &syscall.SysProcAttr{
-		HideWindow:    true,
-		CreationFlags: 0x08000000,
-	}
 }
 
 // loadRemoteDevices 从远程 devices/ 目录加载设备列表

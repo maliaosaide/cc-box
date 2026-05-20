@@ -87,6 +87,17 @@ func (a *App) BrowseFolder(title string) (string, error) {
 	return dir, nil
 }
 
+// BrowseFile 打开系统文件选择对话框
+func (a *App) BrowseFile(title string) (string, error) {
+	file, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: title,
+	})
+	if err != nil {
+		return "", fmt.Errorf("选择文件失败: %w", err)
+	}
+	return file, nil
+}
+
 // OpenInExplorer 在系统文件管理器中打开路径
 func (a *App) OpenInExplorer(path string) error {
 	expanded := expandHome(path)

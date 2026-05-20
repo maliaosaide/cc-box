@@ -5,6 +5,8 @@ package binary
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/user/cc-box/internal/config"
@@ -149,11 +151,14 @@ func (idx *Index) EnsureBinaryInfo(platform, name string) *BinaryInfo {
 	return info
 }
 
-// GetBinaryPath 获取二进制文件的本地路径
+// GetBinaryPath 获取二进制文件的受管写入路径
 func GetBinaryPath(name string) string {
+	if name == "claude" {
+		return ResolveClaudeManagedPath()
+	}
 	ext := ""
-	if config.Platform()[:7] == "windows" {
+	if runtime.GOOS == "windows" {
 		ext = ".exe"
 	}
-	return config.LocalBinDir() + "/" + name + ext
+	return filepath.Join(config.LocalBinDir(), name+ext)
 }

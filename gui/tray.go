@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"fyne.io/systray"
 )
@@ -157,10 +158,12 @@ func setAutoStart(enable bool) bool {
 	if err != nil {
 		return false
 	}
-	script := `$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('` + path + `'); $s.TargetPath = '` + exe + `'; $s.Save()`
-	cmd := exec.Command("powershell", "-NoProfile", "-Command", script)
-	if runtime.GOOS == "windows" {
-		cmd.SysProcAttr = hideWindowAttr()
-	}
+	script := `$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('` + powerShellSingleQuote(path) + `'); $s.TargetPath = '` + powerShellSingleQuote(exe) + `'; $s.Save()`
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	hideCommandWindow(cmd)
 	return cmd.Run() == nil
+}
+
+func powerShellSingleQuote(value string) string {
+	return strings.ReplaceAll(value, "'", "''")
 }

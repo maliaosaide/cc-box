@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/user/cc-box/internal/config"
+	"github.com/user/cc-box/internal/crypto"
 )
 
 const virtualWebDAVPassword = "webdav-pass"
@@ -153,15 +154,192 @@ func TestVirtualGUIWorkflowWithBinaryLifecycle(t *testing.T) {
 	if err := deviceA.app.ChangeEncryptionPassword("old-secret", "new-secret"); err != nil {
 		t.Fatalf("ChangeEncryptionPassword: %v", err)
 	}
-	ok, err := deviceA.app.VerifyEncryptionKey()
-	if err != nil || !ok {
-		t.Fatalf("VerifyEncryptionKey after rotation = %v, %v", ok, err)
+	verifyResult, err := deviceA.app.VerifyEncryptionKey()
+	if err != nil || verifyResult.Status != "success" {
+		t.Fatalf("VerifyEncryptionKey after rotation = %+v, %v", verifyResult, err)
 	}
 	if err := deviceA.app.SwitchBinaryVersion("2.0.0-test", "remote"); err != nil {
 		t.Fatalf("SwitchBinaryVersion after key rotation: %v", err)
 	}
 	if got := runFakeClaude(t, filepath.Join(deviceA.binDir, binaryName())); got != "fake-claude-v2" {
 		t.Fatalf("rotated encrypted binary output = %q", got)
+	}
+
+	activateDevice(t, deviceB)
+	oldPreview, err := deviceB.app.PreviewEncryptionPassword("old-secret")
+	if err != nil || oldPreview.Status != "mismatch" {
+		t.Fatalf("PreviewEncryptionPassword old = %+v, %v", oldPreview, err)
+	}
+	newPreview, err := deviceB.app.PreviewEncryptionPassword("new-secret")
+	if err != nil || newPreview.Status != "success" || newPreview.MatchesCurrent {
+		t.Fatalf("PreviewEncryptionPassword new = %+v, %v", newPreview, err)
+	}
+	if err := deviceB.app.SaveEncryptionPassword("new-secret"); err != nil {
+		t.Fatalf("SaveEncryptionPassword: %v", err)
+	}
+	verifyResult, err = deviceB.app.VerifyEncryptionKey()
+	if err != nil || verifyResult.Status != "success" {
+		t.Fatalf("VerifyEncryptionKey after saving password = %+v, %v", verifyResult, err)
+	}
+	if err := deviceB.app.SwitchBinaryVersion("1.0.0-test", "remote"); err != nil {
+		t.Fatalf("SwitchBinaryVersion after saving password: %v", err)
+	}
+	if got := runFakeClaude(t, filepath.Join(deviceB.binDir, binaryName())); got != "fake-claude-v1" {
+		t.Fatalf("remote binary after saving password = %q", got)
+	}
+}
+
+func TestDashboardMarksMissingRemoteHeadUninitialized(t *testing.T) {
+	preserveEnv(t, "HOME", "USERPROFILE", "CC_BOX_WEBDAV_PASSWORD")
+	webdavServer := newVirtualWebDAVServer(t)
+	device := newVirtualDevice(t)
+	activateDevice(t, device)
+	configureVirtualDevice(t, device, webdavServer.server.URL+"/dav", "/cc-box-missing-head/")
+
+	dashboard, err := device.app.GetDashboard()
+	if err != nil {
+		t.Fatalf("GetDashboard: %v", err)
+	}
+	if dashboard.SyncStatus != "remote_uninitialized" {
+		t.Fatalf("SyncStatus = %q, want remote_uninitialized", dashboard.SyncStatus)
+	}
+	if dashboard.SyncHealth.Code != "remote_head_missing" || !dashboard.SyncHealth.CanRepair {
+		t.Fatalf("SyncHealth = %+v, want repairable remote_head_missing", dashboard.SyncHealth)
+	}
+}
+
+func TestQuickSyncDoesNotInitializeEmptyRemote(t *testing.T) {
+	preserveEnv(t, "HOME", "USERPROFILE", "CC_BOX_WEBDAV_PASSWORD")
+	webdavServer := newVirtualWebDAVServer(t)
+	device := newVirtualDevice(t)
+	writeTextFile(t, filepath.Join(device.claudeDir, "settings.json"), `{"theme":"light"}`)
+	activateDevice(t, device)
+	configureVirtualDevice(t, device, webdavServer.server.URL+"/dav", "/cc-box-quick-sync-init/")
+
+	err := waitAsyncError(t, device.app.QuickSync())
+	if err == nil || !strings.Contains(err.Error(), "远程尚未初始化") {
+		t.Fatalf("QuickSync error = %v, want remote uninitialized", err)
+	}
+	client := newConfiguredWebDAVClient(mustLoadConfig(t), virtualWebDAVPassword)
+	exists, err := client.Exists("HEAD")
+	if err != nil {
+		t.Fatalf("check remote HEAD after QuickSync: %v", err)
+	}
+	if exists {
+		t.Fatalf("QuickSync created remote HEAD unexpectedly")
+	}
+	dashboard, err := device.app.GetDashboard()
+	if err != nil {
+		t.Fatalf("GetDashboard after QuickSync: %v", err)
+	}
+	if dashboard.SyncStatus != "remote_uninitialized" {
+		t.Fatalf("SyncStatus after QuickSync = %q, want remote_uninitialized", dashboard.SyncStatus)
+	}
+}
+
+func TestRepairRemoteFromLocalInitializesEmptyRemote(t *testing.T) {
+	preserveEnv(t, "HOME", "USERPROFILE", "CC_BOX_WEBDAV_PASSWORD")
+	webdavServer := newVirtualWebDAVServer(t)
+	device := newVirtualDevice(t)
+	writeTextFile(t, filepath.Join(device.claudeDir, "settings.json"), `{"theme":"light"}`)
+	activateDevice(t, device)
+	configureVirtualDevice(t, device, webdavServer.server.URL+"/dav", "/cc-box-repair/")
+
+	waitAsyncSuccess(t, device.app.RepairRemoteFromLocal())
+	client := newConfiguredWebDAVClient(mustLoadConfig(t), virtualWebDAVPassword)
+	headData, _, err := client.GET("HEAD")
+	if err != nil {
+		t.Fatalf("remote HEAD after RepairRemoteFromLocal: %v", err)
+	}
+	head := strings.TrimSpace(string(headData))
+	if head == "" {
+		t.Fatalf("remote HEAD after RepairRemoteFromLocal is empty")
+	}
+	if _, _, err := client.GET("snapshots/" + head + ".json.enc"); err != nil {
+		t.Fatalf("remote snapshot after RepairRemoteFromLocal: %v", err)
+	}
+	verifyResult, err := device.app.VerifyEncryptionKey()
+	if err != nil || verifyResult.Status != "success" {
+		t.Fatalf("VerifyEncryptionKey after RepairRemoteFromLocal = %+v, %v", verifyResult, err)
+	}
+	dashboard, err := device.app.GetDashboard()
+	if err != nil {
+		t.Fatalf("GetDashboard after RepairRemoteFromLocal: %v", err)
+	}
+	if dashboard.SyncStatus != "synced" {
+		t.Fatalf("SyncStatus after RepairRemoteFromLocal = %q, want synced", dashboard.SyncStatus)
+	}
+}
+
+func TestRepairRemoteFromLocalRejectsExistingHead(t *testing.T) {
+	preserveEnv(t, "HOME", "USERPROFILE", "CC_BOX_WEBDAV_PASSWORD")
+	webdavServer := newVirtualWebDAVServer(t)
+	device := newVirtualDevice(t)
+	activateDevice(t, device)
+	configureVirtualDevice(t, device, webdavServer.server.URL+"/dav", "/cc-box-repair-existing/")
+	client := newConfiguredWebDAVClient(mustLoadConfig(t), virtualWebDAVPassword)
+	if _, err := client.PUT("HEAD", []byte("foreign-head"), ""); err != nil {
+		t.Fatalf("seed remote HEAD: %v", err)
+	}
+
+	err := waitAsyncError(t, device.app.RepairRemoteFromLocal())
+	if err == nil || !strings.Contains(err.Error(), "远程 HEAD 已存在") {
+		t.Fatalf("RepairRemoteFromLocal error = %v, want existing HEAD rejection", err)
+	}
+	headData, _, err := client.GET("HEAD")
+	if err != nil {
+		t.Fatalf("read remote HEAD after rejected repair: %v", err)
+	}
+	if strings.TrimSpace(string(headData)) != "foreign-head" {
+		t.Fatalf("remote HEAD after rejected repair = %q, want foreign-head", strings.TrimSpace(string(headData)))
+	}
+}
+
+func TestDashboardMarksMissingRemoteSnapshotIncomplete(t *testing.T) {
+	preserveEnv(t, "HOME", "USERPROFILE", "CC_BOX_WEBDAV_PASSWORD")
+	webdavServer := newVirtualWebDAVServer(t)
+	device := newVirtualDevice(t)
+	activateDevice(t, device)
+	configureVirtualDevice(t, device, webdavServer.server.URL+"/dav", "/cc-box-missing-snapshot/")
+	client := newConfiguredWebDAVClient(mustLoadConfig(t), virtualWebDAVPassword)
+	if _, err := client.PUT("HEAD", []byte("missing-snapshot"), ""); err != nil {
+		t.Fatalf("seed remote HEAD: %v", err)
+	}
+
+	dashboard, err := device.app.GetDashboard()
+	if err != nil {
+		t.Fatalf("GetDashboard: %v", err)
+	}
+	if dashboard.SyncStatus != "remote_incomplete" || dashboard.SyncHealth.Code != "remote_snapshot_missing" {
+		t.Fatalf("dashboard sync health = %+v, want remote_snapshot_missing", dashboard.SyncHealth)
+	}
+	if dashboard.SyncHealth.CanRepair {
+		t.Fatalf("missing snapshot should not be marked repairable")
+	}
+}
+
+func TestDashboardMarksKeyMismatch(t *testing.T) {
+	preserveEnv(t, "HOME", "USERPROFILE", "CC_BOX_WEBDAV_PASSWORD")
+	webdavServer := newVirtualWebDAVServer(t)
+	baseURL := webdavServer.server.URL + "/dav"
+	root := "/cc-box-key-mismatch/"
+	deviceA := newVirtualDevice(t)
+	deviceB := newVirtualDevice(t)
+	writeTextFile(t, filepath.Join(deviceA.claudeDir, "settings.json"), `{"theme":"light"}`)
+
+	activateDevice(t, deviceA)
+	if err := deviceA.app.InitNewDevice(baseURL, "user", virtualWebDAVPassword, root, "right-secret", "device-a"); err != nil {
+		t.Fatalf("InitNewDevice: %v", err)
+	}
+
+	activateDevice(t, deviceB)
+	configureVirtualDevice(t, deviceB, baseURL, root)
+	dashboard, err := deviceB.app.GetDashboard()
+	if err != nil {
+		t.Fatalf("GetDashboard: %v", err)
+	}
+	if dashboard.SyncStatus != "key_mismatch" {
+		t.Fatalf("SyncStatus = %q, want key_mismatch (health=%+v)", dashboard.SyncStatus, dashboard.SyncHealth)
 	}
 }
 
@@ -193,6 +371,29 @@ func activateDevice(t *testing.T, device *virtualDevice) {
 	}
 	if err := os.Setenv("CC_BOX_WEBDAV_PASSWORD", virtualWebDAVPassword); err != nil {
 		t.Fatalf("set password env: %v", err)
+	}
+}
+
+func configureVirtualDevice(t *testing.T, device *virtualDevice, baseURL, root string) {
+	t.Helper()
+	if err := config.InitCCBoxDir(); err != nil {
+		t.Fatalf("InitCCBoxDir: %v", err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.WebDAV = config.WebDAVConfig{URL: strings.TrimRight(baseURL, "/") + "/", Username: "user", Root: root}
+	cfg.Claude.Path = device.claudeDir
+	cfg.Binary.BinDir = device.binDir
+	cfg.Binary.VersionsDir = device.versionsDir
+	if err := config.Save(cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	salt := []byte("0123456789abcdef")
+	key := crypto.DeriveKey("secret", salt)
+	if err := crypto.SaveKey(key, config.KeyPath()); err != nil {
+		t.Fatalf("save key: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(config.CCBoxDir(), "salt.bin"), salt, 0600); err != nil {
+		t.Fatalf("save salt: %v", err)
 	}
 }
 

@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { EventsOn } from '../../wailsjs/runtime/runtime.js'
-  import { GetBinaryPage, SwitchBinaryVersion, UploadBinaryVersion, UploadCurrentBinary, GetBinaryStorage, DeleteLocalVersion, DeleteCloudBinaryVersion } from '../../wailsjs/go/main/App.js'
+  import { GetBinaryPage, SwitchBinaryVersion, UploadBinaryVersion, UploadCurrentBinary, GetBinaryStorage, DeleteLocalVersion, DeleteCloudBinaryVersion, RedetectClaudeBinary, BrowseFile, SetConfigField } from '../../wailsjs/go/main/App.js'
 
   let activeTab = 'claude'
   let binData = null
@@ -12,6 +12,8 @@
   let switching = ''
   let uploading = ''
   let uploadProgress = null
+  let detecting = false
+  let promptHidden = false
 
   const tabs = [
     { id: 'claude', label: 'Claude', active: true },
@@ -62,6 +64,38 @@
     if (b < 1024) return b + ' B'
     if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB'
     return (b / 1024 / 1024).toFixed(1) + ' MB'
+  }
+
+  function sourceLabel(source) {
+    return ({ configured: '手动配置', environment: '环境变量', cache: '缓存', bin_dir: '二进制目录', path: 'PATH', common: '常见目录', not_found: '未找到' })[source] || source || '-'
+  }
+
+  async function redetect() {
+    detecting = true; msg = ''; error = ''
+    try {
+      await RedetectClaudeBinary()
+      await loadBinary()
+      msg = '已重新检测 Claude 二进制'
+      promptHidden = false
+    } catch (e) {
+      error = e.message || String(e)
+    }
+    detecting = false
+  }
+
+  async function chooseBinary() {
+    msg = ''; error = ''
+    try {
+      const file = await BrowseFile('选择 Claude 可执行文件')
+      if (file) {
+        await SetConfigField('binary', 'claude_path', file)
+        await loadBinary()
+        msg = '已设置 Claude 可执行文件'
+        promptHidden = false
+      }
+    } catch (e) {
+      error = e.message || String(e)
+    }
   }
 
   async function switchTo(version, source) {
@@ -191,7 +225,7 @@
         </span>
         <div class="item-actions">
           <button class="btn-sm btn-upload"
-                  disabled={!binData.localExists || currentUploaded || !!uploadProgress}
+                  disabled={!binData.localExists || binData.binaryShim || currentUploaded || !!uploadProgress}
                   on:click={uploadCurrent}>
             {#if currentUploaded}已上传
             {:else if uploadProgress && uploading === 'current'}上传中...
@@ -201,6 +235,25 @@
       </div>
       {#if binData.binaryPath}
         <div class="path-row font-mono">{binData.binaryPath}</div>
+      {/if}
+      <div class="path-meta">
+        <span>来源: {sourceLabel(binData.binarySource)}</span>
+      </div>
+      {#if binData.binaryShim}
+        <div class="path-warn">检测到脚本 shim，仅用于版本显示，不支持上传为二进制版本。</div>
+      {/if}
+      {#if !binData.localExists && !promptHidden}
+        <div class="detect-panel">
+          <div>
+            <div class="detect-title">未找到 Claude 二进制</div>
+            <div class="detect-msg">{binData.binaryError || '可以重新检测，或手动选择 Claude 可执行文件。'}</div>
+          </div>
+          <div class="detect-actions">
+            <button class="btn-sm" disabled={detecting} on:click={redetect}>{detecting ? '检测中...' : '重新检测'}</button>
+            <button class="btn-sm" on:click={chooseBinary}>手动选择</button>
+            <button class="btn-sm btn-upload" on:click={() => promptHidden = true}>暂不处理</button>
+          </div>
+        </div>
       {/if}
     </div>
 
@@ -434,6 +487,25 @@
     font-size: 11px; color: rgb(var(--text-muted)); opacity: 0.5;
     padding: 4px 0 0 38px;
   }
+  .path-meta {
+    display: flex; flex-wrap: wrap; gap: 10px;
+    padding: 4px 0 0 38px;
+    font-size: 10px; color: rgb(var(--text-muted)); opacity: 0.65;
+  }
+  .path-warn {
+    margin: 8px 0 0 38px; padding: 6px 8px; border-radius: 5px;
+    font-size: 11px;
+    color: rgb(var(--state-err));
+    background: rgba(184,92,92,0.08); border: 1px solid rgba(184,92,92,0.15);
+  }
+  .detect-panel {
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    margin-top: 10px; padding: 10px 12px; border-radius: 7px;
+    background: rgb(var(--surface-1)); border: 1px solid rgb(var(--border));
+  }
+  .detect-title { font-size: 12px; color: rgb(var(--text-primary)); font-weight: 600; }
+  .detect-msg { margin-top: 2px; font-size: 11px; color: rgb(var(--text-muted)); opacity: 0.75; }
+  .detect-actions { display: flex; gap: 6px; flex-shrink: 0; }
 
   .item-list { display: flex; flex-direction: column; }
   .item-row {
