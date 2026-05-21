@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/user/cc-box/gui/internal/binary"
-	"github.com/user/cc-box/gui/internal/crypto"
-	"github.com/user/cc-box/gui/internal/object"
+	"github.com/user/cc-box/core/binary"
+	"github.com/user/cc-box/core/crypto"
+	"github.com/user/cc-box/core/object"
+	"github.com/user/cc-box/core/snapshot"
+	"github.com/user/cc-box/core/webdav"
 	"github.com/user/cc-box/gui/internal/project"
-	"github.com/user/cc-box/gui/internal/snapshot"
-	"github.com/user/cc-box/gui/internal/webdav"
 )
 
 // TestPhase3_DeviceRegistration 测试设备注册与列出

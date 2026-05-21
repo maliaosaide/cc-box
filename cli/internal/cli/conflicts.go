@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/user/cc-box/cli/internal/config"
+	"github.com/user/cc-box/core/config"
 )
 
 var conflictsCmd = &cobra.Command{

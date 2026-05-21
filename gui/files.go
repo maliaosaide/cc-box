@@ -12,12 +12,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/user/cc-box/gui/internal/config"
-	"github.com/user/cc-box/gui/internal/crypto"
-	"github.com/user/cc-box/gui/internal/normalize"
-	"github.com/user/cc-box/gui/internal/object"
-	"github.com/user/cc-box/gui/internal/snapshot"
-	"github.com/user/cc-box/gui/internal/webdav"
+	"github.com/user/cc-box/core/config"
+	"github.com/user/cc-box/core/crypto"
+	"github.com/user/cc-box/core/normalize"
+	"github.com/user/cc-box/core/object"
+	"github.com/user/cc-box/core/snapshot"
+	"github.com/user/cc-box/core/webdav"
 )
 
 // FileNode 文件树节点

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/user/cc-box/cli/internal/config"
+	"github.com/user/cc-box/core/config"
 )
 
 func safeJoin(root, relPath string) (string, error) {

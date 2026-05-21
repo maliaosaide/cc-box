@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/user/cc-box/gui/internal/config"
+	"github.com/user/cc-box/core/config"
 )
 
 const (

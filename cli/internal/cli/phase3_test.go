@@ -28,7 +28,7 @@ func TestSplitLines(t *testing.T) {
 
 func TestFormatTimeAgo(t *testing.T) {
 	tests := []struct {
-		name string
+		name  string
 		input string
 		want  string
 	}{

@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/user/cc-box/gui/internal/config"
+	"github.com/user/cc-box/core/config"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 

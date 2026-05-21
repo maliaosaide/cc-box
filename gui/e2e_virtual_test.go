@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/user/cc-box/gui/internal/config"
-	"github.com/user/cc-box/gui/internal/crypto"
+	"github.com/user/cc-box/core/config"
+	"github.com/user/cc-box/core/crypto"
 )
 
 const virtualWebDAVPassword = "webdav-pass"

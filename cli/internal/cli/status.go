@@ -7,10 +7,10 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/user/cc-box/cli/internal/config"
-	"github.com/user/cc-box/cli/internal/crypto"
-	"github.com/user/cc-box/cli/internal/snapshot"
-	"github.com/user/cc-box/cli/internal/webdav"
+	"github.com/user/cc-box/core/config"
+	"github.com/user/cc-box/core/crypto"
+	"github.com/user/cc-box/core/snapshot"
+	"github.com/user/cc-box/core/webdav"
 )
 
 var statusCmd = &cobra.Command{

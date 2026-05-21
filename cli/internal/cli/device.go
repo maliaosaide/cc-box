@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/user/cc-box/cli/internal/config"
-	"github.com/user/cc-box/cli/internal/webdav"
+	"github.com/user/cc-box/core/config"
+	"github.com/user/cc-box/core/webdav"
 )
 
 var deviceCmd = &cobra.Command{
@@ -47,11 +47,11 @@ func init() {
 
 // DeviceInfo 设备注册信息
 type DeviceInfo struct {
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
-	Platform   string    `json:"platform"`
-	LastSeen   time.Time `json:"last_seen"`
-	HEAD       string    `json:"head"`
+	ID       string    `json:"id"`
+	Name     string    `json:"name"`
+	Platform string    `json:"platform"`
+	LastSeen time.Time `json:"last_seen"`
+	HEAD     string    `json:"head"`
 }
 
 func runDeviceList(cmd *cobra.Command, args []string) error {

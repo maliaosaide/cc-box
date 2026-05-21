@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
-	"github.com/user/cc-box/cli/internal/binary"
-	"github.com/user/cc-box/cli/internal/config"
+	"github.com/user/cc-box/core/binary"
+	"github.com/user/cc-box/core/config"
 )
 
 var binaryCmd = &cobra.Command{

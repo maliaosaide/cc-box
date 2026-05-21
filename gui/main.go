@@ -6,7 +6,7 @@ import (
 	"embed"
 	goruntime "runtime"
 
-	"github.com/user/cc-box/gui/internal/config"
+	"github.com/user/cc-box/core/config"
 	wails "github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/menu"
 	"github.com/wailsapp/wails/v2/pkg/menu/keys"

@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/user/cc-box/gui/internal/binary"
-	"github.com/user/cc-box/gui/internal/crypto"
-	"github.com/user/cc-box/gui/internal/object"
-	"github.com/user/cc-box/gui/internal/snapshot"
-	"github.com/user/cc-box/gui/internal/sync"
+	"github.com/user/cc-box/core/binary"
+	"github.com/user/cc-box/core/crypto"
+	"github.com/user/cc-box/core/object"
+	"github.com/user/cc-box/core/snapshot"
+	"github.com/user/cc-box/core/sync"
 )
 
 // TestPhase2_SnapshotChain 测试快照链（多次 push 产生链式快照）

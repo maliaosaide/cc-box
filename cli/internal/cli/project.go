@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/user/cc-box/cli/internal/crypto"
 	"github.com/user/cc-box/cli/internal/project"
+	"github.com/user/cc-box/core/crypto"
 )
 
 var projectCmd = &cobra.Command{

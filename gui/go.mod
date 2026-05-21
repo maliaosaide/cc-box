@@ -5,9 +5,12 @@ go 1.25.0
 require (
 	fyne.io/systray v1.12.1
 	github.com/fsnotify/fsnotify v1.9.0
-	github.com/spf13/viper v1.21.0
 	github.com/wailsapp/wails/v2 v2.12.0
-	golang.org/x/crypto v0.50.0
+)
+
+require (
+	github.com/spf13/viper v1.21.0 // indirect
+	golang.org/x/crypto v0.50.0 // indirect
 )
 
 require (
@@ -39,6 +42,7 @@ require (
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/tkrajina/go-reflector v0.5.8 // indirect
+	github.com/user/cc-box/core v0.0.0
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect
 	github.com/wailsapp/go-webview2 v1.0.22 // indirect
@@ -48,3 +52,5 @@ require (
 	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
 )
+
+replace github.com/user/cc-box/core => ../core
