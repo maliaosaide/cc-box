@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"runtime"
 	"time"
 
 	"github.com/user/cc-box/core/config"
@@ -156,9 +155,5 @@ func GetBinaryPath(name string) string {
 	if name == "claude" {
 		return ResolveClaudeManagedPath()
 	}
-	ext := ""
-	if runtime.GOOS == "windows" {
-		ext = ".exe"
-	}
-	return filepath.Join(config.LocalBinDir(), name+ext)
+	return filepath.Join(config.LocalBinDir(), executableName(name))
 }

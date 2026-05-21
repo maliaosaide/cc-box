@@ -34,6 +34,8 @@ export function GetBinaryStorage():Promise<main.BinaryStorageInfo>;
 
 export function GetClaudeBinaryResolution():Promise<main.ClaudeBinaryResolution>;
 
+export function GetClaudeDirectories():Promise<Array<main.ClaudeDirectoryInfo>>;
+
 export function GetConfig():Promise<main.ConfigView>;
 
 export function GetConflictDetail(arg1:string):Promise<main.ConflictDetail>;

@@ -25,6 +25,34 @@
 
 因此，修改 `gui/internal/...` 不会自动修复或更新 `cli/internal/...`，反之亦然。
 
+## Claude 执行提示
+
+- 先判断修改属于手写源码、自动生成绑定、构建产物还是第三方依赖；不要把依赖或生成物当作业务代码处理。
+- 默认只搜索必要范围：`core/**/*.go`、`cli/**/*.go`、`gui/*.go`、`gui/internal/**/*.go`、`gui/frontend/src/**` 和明确相关的文档。
+- 不要对整个仓库或整个 `gui/` 做无约束全文搜索；除非用户明确要求，不搜索 `node_modules/`、`dist/`、`build/`。
+- `gui/frontend/wailsjs/` 是 Wails 自动生成绑定；可以检查 diff，但不要当作手写业务源码主动修改。
+- 构建或测试后先区分变更来源，再决定是否保留；不要把依赖目录和构建输出混入代码修改。
+
+## 核心结构速记
+
+- `core/` 是共享核心 module，只放 CLI/GUI 都需要的数据能力；不能依赖 `cli/`、`gui/`、Wails 或前端代码。
+- `cli/` 依赖 `core/`，只放命令行入口、Cobra 命令层和 CLI 专属适配。
+- `gui/` 依赖 `core/`，只放 Wails 桌面应用、前端绑定、托盘、窗口生命周期和 GUI 专属桌面适配。
+- `cli/` 和 `gui/` 不互相依赖；需要共享的能力下沉到 `core/`。
+- GUI 桌面平台差异集中在 `gui/internal/desktop`，例如文件打开、托盘、平台命令窗口隐藏。
+- 平台专属代码优先用 `*_windows.go`、`*_darwin.go`、`*_linux.go`、`*_other.go` 和 build tags 隔离，不要在普通文件里直接引用 Windows-only 字段或桌面 API。
+- Wails 绑定方法定义在 `gui` 主包的 `App` 方法中，前端通过 `gui/frontend/wailsjs/` 调用生成绑定。
+- 当前明确不做开机自启动；不要重新引入 `AutoStartManager`、Startup 快捷方式、注册表 Run key、LaunchAgent 或 XDG autostart。
+
+## 平台验证原则
+
+- 当前在哪个平台运行，就优先验证该平台的真实构建、打包和桌面行为。
+- Windows 环境优先验证 Windows Wails 构建、窗口/托盘、文件管理器打开和同步关键路径。
+- macOS 环境优先验证 macOS Wails 构建、`.app` 启动、Finder reveal、托盘/菜单栏和窗口行为。
+- Linux 环境优先验证 Linux Wails 构建、`xdg-open`/`gio open`、托盘可用性和窗口行为。
+- 从非目标平台做 Linux/macOS/Windows 交叉编译只作为 build tags 和编译边界 smoke test；不能视为对应平台安装包或桌面交互已验证。
+- 正式发布安装包应在目标平台本机或 CI matrix 中分别构建和验证。
+
 ## 总体策略
 
 开发时采用“GUI 优先，但核心能力同步审查”的策略：

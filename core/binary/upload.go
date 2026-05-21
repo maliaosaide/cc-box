@@ -70,9 +70,16 @@ func uploadChunked(client *webdav.Client, key []byte, data []byte, manifest *Man
 	ext := extForEncrypted(encrypt)
 
 	// 上传 manifest
-	manifestData, _ := SerializeManifest(chunkResult.Manifest)
-	client.EnsureDir(basePath + "manifest.json")
-	client.PUT(basePath+"manifest.json", manifestData, "")
+	manifestData, err := SerializeManifest(chunkResult.Manifest)
+	if err != nil {
+		return fmt.Errorf("序列化 manifest 失败: %w", err)
+	}
+	if err := client.EnsureDir(basePath + "manifest.json"); err != nil {
+		return fmt.Errorf("创建 manifest 目录失败: %w", err)
+	}
+	if _, err := client.PUT(basePath+"manifest.json", manifestData, ""); err != nil {
+		return fmt.Errorf("上传 manifest 失败: %w", err)
+	}
 
 	// 逐块上传
 	for i, chunk := range chunkResult.Chunks {
@@ -96,13 +103,19 @@ func uploadChunked(client *webdav.Client, key []byte, data []byte, manifest *Man
 			payload = encrypted
 		}
 
-		client.EnsureDir(partPath)
+		if err := client.EnsureDir(partPath); err != nil {
+			return fmt.Errorf("创建分块 %d 目录失败: %w", i, err)
+		}
 		if _, err := client.PUT(partPath, payload, ""); err != nil {
 			return fmt.Errorf("上传分块 %d 失败: %w", i, err)
 		}
 
 		if progress != nil {
-			progress(int64(len(data)), int64((i+1)*chunkSize), i+1, chunkResult.Manifest.TotalParts)
+			uploaded := int64((i + 1) * chunkSize)
+			if uploaded > int64(len(data)) {
+				uploaded = int64(len(data))
+			}
+			progress(int64(len(data)), uploaded, i+1, chunkResult.Manifest.TotalParts)
 		}
 	}
 
@@ -121,7 +134,9 @@ func uploadWhole(client *webdav.Client, key []byte, name string, version string,
 
 	ext := extForEncrypted(encrypt)
 	path := fmt.Sprintf("binaries/%s/%s-%s%s", platform, name, version, ext)
-	client.EnsureDir(path)
+	if err := client.EnsureDir(path); err != nil {
+		return fmt.Errorf("创建二进制目录失败: %w", err)
+	}
 	_, err := client.PUT(path, payload, "")
 	return err
 }

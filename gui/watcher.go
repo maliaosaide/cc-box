@@ -21,29 +21,34 @@ const (
 // Watcher 文件变更监听器
 type Watcher struct {
 	fsw     *fsnotify.Watcher
+	app     *App
 	dir     string
 	changed bool
 	mu      sync.Mutex
 	cancel  context.CancelFunc
 	syncing bool
+	stopped bool
 
-	// 自动同步
 	interval time.Duration
 	lastSync time.Time
 	timer    *time.Timer
+
+	watchErrors []error
+	updateTray  func(TrayState)
 }
 
 // NewWatcher 创建监听器
-func NewWatcher() (*Watcher, error) {
+func NewWatcher(app *App) (*Watcher, error) {
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
 	}
-	dir := config.ClaudeDir()
 	return &Watcher{
-		fsw:      fsw,
-		dir:      dir,
-		interval: autoSyncInterval(),
+		fsw:        fsw,
+		app:        app,
+		dir:        config.ClaudeDir(),
+		interval:   autoSyncInterval(),
+		updateTray: UpdateTrayState,
 	}, nil
 }
 
@@ -51,13 +56,10 @@ func NewWatcher() (*Watcher, error) {
 func (w *Watcher) Start(ctx context.Context) {
 	ctx, w.cancel = context.WithCancel(ctx)
 
-	// 监听主目录
-	_ = w.fsw.Add(w.dir)
-
-	// 监听子目录
+	w.addWatch(w.dir)
 	filepath.Walk(w.dir, func(path string, info os.FileInfo, err error) error {
 		if err == nil && info.IsDir() {
-			_ = w.fsw.Add(path)
+			w.addWatch(path)
 		}
 		return nil
 	})
@@ -71,13 +73,39 @@ func (w *Watcher) Start(ctx context.Context) {
 
 // Stop 停止监听
 func (w *Watcher) Stop() {
-	if w.cancel != nil {
-		w.cancel()
+	w.mu.Lock()
+	w.stopped = true
+	timer := w.timer
+	cancel := w.cancel
+	w.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
 	}
-	if w.timer != nil {
-		w.timer.Stop()
+	if timer != nil {
+		timer.Stop()
 	}
 	w.fsw.Close()
+}
+
+func (w *Watcher) WatchErrors() []error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]error{}, w.watchErrors...)
+}
+
+func (w *Watcher) addWatch(path string) {
+	if err := w.fsw.Add(path); err != nil {
+		w.mu.Lock()
+		w.watchErrors = append(w.watchErrors, err)
+		w.mu.Unlock()
+	}
+}
+
+func (w *Watcher) setTrayState(state TrayState) {
+	if w.updateTray != nil {
+		w.updateTray(state)
+	}
 }
 
 func (w *Watcher) watchLoop(ctx context.Context) {
@@ -94,10 +122,9 @@ func (w *Watcher) watchLoop(ctx context.Context) {
 			}
 			if event.Has(fsnotify.Create) || event.Has(fsnotify.Write) ||
 				event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename) {
-				// 新建目录时加入监听
 				if event.Has(fsnotify.Create) {
 					if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
-						_ = w.fsw.Add(event.Name)
+						w.addWatch(event.Name)
 					}
 				}
 				w.mu.Lock()
@@ -107,29 +134,36 @@ func (w *Watcher) watchLoop(ctx context.Context) {
 			}
 		case <-debounce.C:
 			w.mu.Lock()
-			if w.changed {
-				w.changed = false
-				UpdateTrayState(TrayPending)
-			}
+			changed := w.changed
+			w.changed = false
 			w.mu.Unlock()
+			if changed {
+				w.setTrayState(TrayPending)
+			}
 		}
 	}
 }
 
 // triggerAutoSync 定时自动同步
 func (w *Watcher) triggerAutoSync(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
 	w.mu.Lock()
-	if w.syncing {
+	if w.stopped || w.syncing || time.Since(w.lastSync) < minAutoSyncGap {
+		shouldReset := !w.stopped
 		w.mu.Unlock()
+		if shouldReset {
+			w.resetTimer()
+		}
 		return
 	}
 	w.syncing = true
 	w.mu.Unlock()
 
-	UpdateTrayState(TraySyncing)
-	opID := appRef.QuickSync()
+	w.setTrayState(TraySyncing)
+	opID := w.app.QuickSync()
 
-	// 等待同步操作完成
 	go func() {
 		for {
 			time.Sleep(300 * time.Millisecond)
@@ -158,19 +192,23 @@ func (w *Watcher) triggerAutoSync(ctx context.Context) {
 		w.mu.Unlock()
 
 		if syncErr != nil {
-			UpdateTrayState(TrayConflict)
+			w.setTrayState(TrayConflict)
+			w.resetTimer()
 			return
 		}
-		UpdateTrayState(TraySynced)
+		w.setTrayState(TraySynced)
+		w.resetTimer()
 	}()
+}
 
-	// 重置定时器
-	if w.interval > 0 {
-		w.mu.Lock()
-		if w.timer != nil {
-			w.timer.Reset(w.interval)
-		}
-		w.mu.Unlock()
+func (w *Watcher) resetTimer() {
+	if w.interval <= 0 {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.stopped && w.timer != nil {
+		w.timer.Reset(w.interval)
 	}
 }
 

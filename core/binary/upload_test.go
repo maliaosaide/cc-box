@@ -5,6 +5,8 @@ package binary
 import (
 	"bytes"
 	"testing"
+
+	"github.com/user/cc-box/core/config"
 )
 
 func TestShouldChunk(t *testing.T) {
@@ -21,6 +23,7 @@ func TestShouldChunk(t *testing.T) {
 		{"always小文件也切块", 100, "always", 50 * 1024 * 1024, true},
 		{"always大文件切块", 100 * 1024 * 1024, "always", 50 * 1024 * 1024, true},
 		{"auto零阈值全部切块", 100, "auto", 0, true},
+		{"never大文件也不切块", 100 * 1024 * 1024, "never", 50 * 1024 * 1024, false},
 	}
 
 	for _, tt := range tests {
@@ -71,6 +74,29 @@ func TestSplitSmallData(t *testing.T) {
 	}
 	if !bytes.Equal(result.Chunks[0], data) {
 		t.Error("single chunk doesn't match data")
+	}
+}
+
+func TestChunkProgressDoesNotExceedTotal(t *testing.T) {
+	configureBinaryTest(t, config.BinaryConfig{
+		Encrypt:          true,
+		ChunkMode:        "always",
+		ChunkSizeMB:      1,
+		ChunkThresholdMB: 1,
+	})
+	client, _ := newBinaryTestDAV(t)
+	key := bytes.Repeat([]byte{0x58}, 32)
+	data := bytes.Repeat([]byte("x"), 1024*1024+1)
+	var lastTotal, lastUploaded int64
+
+	if err := Upload(client, key, "claude", data, "progress-test", func(total, uploaded int64, _, _ int) {
+		lastTotal = total
+		lastUploaded = uploaded
+	}); err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+	if lastTotal != int64(len(data)) || lastUploaded != int64(len(data)) {
+		t.Fatalf("progress total=%d uploaded=%d, want %d", lastTotal, lastUploaded, len(data))
 	}
 }
 

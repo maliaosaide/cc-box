@@ -23,17 +23,19 @@ import (
 
 // DashboardData 概览页数据
 type DashboardData struct {
-	SyncStatus    string        `json:"syncStatus"`
-	SyncHealth    SyncHealth    `json:"syncHealth"`
-	LastSync      string        `json:"lastSync"`
-	ClaudeVersion string        `json:"claudeVersion"`
-	ClaudeLatest  bool          `json:"claudeLatest"`
-	Conflicts     int           `json:"conflicts"`
-	ConflictFiles []ConflictRef `json:"conflictFiles"`
-	Devices       []DeviceInfo  `json:"devices"`
-	RecentChanges []ChangeInfo  `json:"recentChanges"`
-	Backups       []BackupInfo  `json:"backups"`
-	Binaries      []BinaryInfo  `json:"binaries"`
+	SyncStatus    string           `json:"syncStatus"`
+	SyncHealth    SyncHealth       `json:"syncHealth"`
+	LastSync      string           `json:"lastSync"`
+	ClaudeVersion string           `json:"claudeVersion"`
+	ClaudeLatest  bool             `json:"claudeLatest"`
+	ClaudeBinary  ClaudeBinaryInfo `json:"claudeBinary"`
+	ConfigStatus  ConfigStatus     `json:"configStatus"`
+	Conflicts     int              `json:"conflicts"`
+	ConflictFiles []ConflictRef    `json:"conflictFiles"`
+	Devices       []DeviceInfo     `json:"devices"`
+	RecentChanges []ChangeInfo     `json:"recentChanges"`
+	Backups       []BackupInfo     `json:"backups"`
+	Binaries      []BinaryInfo     `json:"binaries"`
 }
 
 type SyncHealth struct {
@@ -83,6 +85,24 @@ type BinaryInfo struct {
 	Installed bool   `json:"installed"`
 }
 
+type ClaudeBinaryInfo struct {
+	Platform      string `json:"platform"`
+	PlatformLabel string `json:"platformLabel"`
+	LocalVersion  string `json:"localVersion"`
+	RemoteVersion string `json:"remoteVersion"`
+	Installed     bool   `json:"installed"`
+	Status        string `json:"status"`
+	StatusLabel   string `json:"statusLabel"`
+}
+
+type ConfigStatus struct {
+	OK                bool   `json:"ok"`
+	WebDAVConfigured  bool   `json:"webdavConfigured"`
+	PasswordAvailable bool   `json:"passwordAvailable"`
+	ClaudeDirExists   bool   `json:"claudeDirExists"`
+	Message           string `json:"message"`
+}
+
 // GetDashboard 返回概览页数据
 func (a *App) GetDashboard() (*DashboardData, error) {
 	if !config.IsInitialized() {
@@ -94,11 +114,14 @@ func (a *App) GetDashboard() (*DashboardData, error) {
 		return nil, err
 	}
 
+	claudeBinary := collectClaudeBinaryInfo(nil)
 	data := &DashboardData{
 		SyncStatus:    "idle",
 		SyncHealth:    SyncHealth{Status: "idle", Code: "idle", Message: "尚未同步"},
-		ClaudeVersion: "-",
-		ClaudeLatest:  true,
+		ClaudeVersion: claudeBinary.LocalVersion,
+		ClaudeLatest:  claudeBinary.Status == "latest",
+		ClaudeBinary:  claudeBinary,
+		ConfigStatus:  buildConfigStatus(cfg),
 		Conflicts:     0,
 		Devices:       []DeviceInfo{},
 		RecentChanges: []ChangeInfo{},
@@ -114,8 +137,6 @@ func (a *App) GetDashboard() (*DashboardData, error) {
 		LastActive: "刚刚",
 		IsCurrent:  true,
 	})
-
-	data.Binaries = collectInstalledBinaries(nil)
 
 	client, key, err := a.loadClientKey(cfg)
 	if err != nil {
@@ -140,7 +161,7 @@ func (a *App) fillDashboardFromSnapshots(data *DashboardData, cfg *config.Config
 		}
 	}
 
-	headData, _, err := client.GET("HEAD")
+	headData, _, err := getDashboardRemoteHead(client)
 	if err == webdav.ErrNotFound {
 		data.setSyncHealth("remote_uninitialized", "remote_head_missing", "当前 WebDAV 根路径下没有 HEAD。请检查根路径，确认无误后可用本机数据初始化远程。", true, localHeadStr, "")
 		return
@@ -159,7 +180,7 @@ func (a *App) fillDashboardFromSnapshots(data *DashboardData, cfg *config.Config
 		return
 	}
 
-	// 加载最新快照获取备份信息和最近变更
+	// 加载最新快照获取备份信息
 	snap, snapErr := a.loadRemoteSnapByID(client, key, headID)
 	if snapErr != nil || snap == nil {
 		if errors.Is(snapErr, webdav.ErrNotFound) {
@@ -202,37 +223,9 @@ func (a *App) fillDashboardFromSnapshots(data *DashboardData, cfg *config.Config
 		})
 	}
 
-	// 最近变更：对比最新快照和本地文件
-	if localHeadStr != "" {
-		localSnap, err := a.loadSnapByID(client, key, localHeadStr)
-		if err == nil && localSnap != nil {
-			scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
-			scanResult, err := scanner.Scan()
-			if err == nil {
-				currentSnap := snapshot.CreateSnapshot("", cfg.Device.ID, "", scanResult.Files)
-				changes := localSnap.Diff(currentSnap)
-				for i, c := range changes {
-					if i >= 5 {
-						break
-					}
-					status := "M"
-					switch c.Type {
-					case snapshot.Added:
-						status = "A"
-					case snapshot.Deleted:
-						status = "D"
-					}
-					data.RecentChanges = append(data.RecentChanges, ChangeInfo{
-						Status: status,
-						Path:   c.Path,
-						Time:   localSnap.Timestamp.Local().Format("15:04"),
-					})
-				}
-			}
-		}
-	}
-
-	data.Binaries = collectInstalledBinaries(client)
+	data.ClaudeBinary = collectClaudeBinaryInfo(client)
+	data.ClaudeVersion = data.ClaudeBinary.LocalVersion
+	data.ClaudeLatest = data.ClaudeBinary.Status == "latest"
 
 	// 冲突
 	// 从远程加载设备列表
@@ -257,6 +250,26 @@ func (d *DashboardData) setSyncHealth(status, code, message string, canRepair bo
 		LocalHead:  localHead,
 		RemoteHead: remoteHead,
 	}
+}
+
+const dashboardRemoteHeadAttempts = 3
+
+var dashboardRemoteHeadRetryDelay = 300 * time.Millisecond
+
+func getDashboardRemoteHead(client *webdav.Client) ([]byte, string, error) {
+	var data []byte
+	var etag string
+	var err error
+	for attempt := 0; attempt < dashboardRemoteHeadAttempts; attempt++ {
+		data, etag, err = client.GET("HEAD")
+		if err == nil || err == webdav.ErrNotFound {
+			return data, etag, err
+		}
+		if attempt+1 < dashboardRemoteHeadAttempts {
+			time.Sleep(dashboardRemoteHeadRetryDelay)
+		}
+	}
+	return data, etag, err
 }
 
 func (a *App) loadRemoteSnapByID(client *webdav.Client, key []byte, id string) (*snapshot.Snapshot, error) {
@@ -657,73 +670,121 @@ func fillBinaryVersion(d *DashboardData, binPath string) (*DashboardData, error)
 	return d, nil
 }
 
-func collectInstalledBinaries(client *webdav.Client) []BinaryInfo {
-	tools := []string{"claude", "uv", "uvx", "codex", "gemini"}
-	versions := make([]BinaryInfo, 0, len(tools))
-	var idx *binary.Index
-	if client != nil {
-		idx, _ = binary.LoadIndex(client)
+func buildConfigStatus(cfg *config.Config) ConfigStatus {
+	status := ConfigStatus{
+		WebDAVConfigured: strings.TrimSpace(cfg.WebDAV.URL) != "" && strings.TrimSpace(cfg.WebDAV.Username) != "",
+		ClaudeDirExists:  dirExists(config.ClaudeDir()),
 	}
+	_, err := config.LoadWebDAVPassword()
+	status.PasswordAvailable = err == nil
+	status.OK = status.WebDAVConfigured && status.PasswordAvailable && status.ClaudeDirExists
+	switch {
+	case status.OK:
+		status.Message = "配置正常"
+	case !status.WebDAVConfigured:
+		status.Message = "WebDAV 未配置"
+	case !status.PasswordAvailable:
+		status.Message = "加密密码不可用"
+	case !status.ClaudeDirExists:
+		status.Message = "Claude 配置目录不存在"
+	}
+	return status
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+func collectClaudeBinaryInfo(client *webdav.Client) ClaudeBinaryInfo {
 	platform := config.Platform()
-	for _, name := range tools {
-		binPath := binary.GetBinaryPath(name)
-		version := ""
-		if name == "claude" {
-			resolution := binary.ResolveClaudeBinary()
-			if !resolution.Valid {
-				continue
-			}
-			binPath = resolution.CurrentPath
-			version = resolution.Version
-		} else {
-			if _, err := os.Stat(binPath); err != nil {
-				continue
-			}
-			version = detectBinVersion(binPath)
-		}
-		latest := true
-		if idx != nil {
-			if info := idx.GetBinaryInfo(platform, name); info != nil {
-				latest = !hasNewerBinaryVersion(version, info.Versions)
-			}
-		}
-		versions = append(versions, BinaryInfo{
-			Name:      name,
-			Version:   version,
-			Latest:    latest,
-			Installed: true,
-		})
+	info := ClaudeBinaryInfo{
+		Platform:      platform,
+		PlatformLabel: platformLabel(platform),
+		Status:        "missing_remote",
+		StatusLabel:   "当前平台暂无云端版本",
 	}
-	return versions
+
+	resolution := binary.ResolveClaudeBinary()
+	if resolution.Valid {
+		info.Installed = true
+		info.LocalVersion = resolution.Version
+	}
+
+	if client != nil {
+		if idx, err := binary.LoadIndex(client); err == nil {
+			info.RemoteVersion = highestRemoteBinaryVersion(idx.GetBinaryInfo(platform, "claude"))
+		}
+	}
+
+	info.Status, info.StatusLabel = claudeBinaryStatus(info.LocalVersion, info.RemoteVersion, info.Installed)
+	return info
+}
+
+func platformLabel(platform string) string {
+	switch platform {
+	case "windows-amd64":
+		return "Windows"
+	case "darwin-arm64":
+		return "Mac M 系列"
+	case "linux-amd64":
+		return "Linux"
+	default:
+		return platform
+	}
+}
+
+func highestRemoteBinaryVersion(info *binary.BinaryInfo) string {
+	if info == nil {
+		return ""
+	}
+	highest := strings.TrimSpace(info.Current)
+	for version := range info.Versions {
+		version = strings.TrimSpace(version)
+		if version == "" {
+			continue
+		}
+		if highest == "" {
+			highest = version
+			continue
+		}
+		if cmp, ok := compareVersion(version, highest); ok && cmp > 0 {
+			highest = version
+		}
+	}
+	return highest
+}
+
+func claudeBinaryStatus(localVersion, remoteVersion string, installed bool) (string, string) {
+	if !installed {
+		return "missing_local", "未检测到本地版本"
+	}
+	if remoteVersion == "" {
+		return "missing_remote", "当前平台暂无云端版本"
+	}
+	cmp, ok := compareVersion(remoteVersion, localVersion)
+	if !ok {
+		if remoteVersion == localVersion {
+			return "latest", "已是最新"
+		}
+		return "unknown", "版本需确认"
+	}
+	if cmp > 0 {
+		return "update_available", "可更新"
+	}
+	if cmp < 0 {
+		return "ahead", "本地版本高于云端"
+	}
+	return "latest", "已是最新"
 }
 
 func currentBinaryVersions() map[string]map[string]string {
-	platform := config.Platform()
-	tools := []string{"claude", "uv", "uvx", "codex", "gemini"}
-	versions := make(map[string]string)
-	for _, name := range tools {
-		version := ""
-		if name == "claude" {
-			resolution := binary.ResolveClaudeBinary()
-			if !resolution.Valid || resolution.IsShim {
-				continue
-			}
-			version = resolution.Version
-		} else {
-			binPath := binary.GetBinaryPath(name)
-			if _, err := os.Stat(binPath); err != nil {
-				continue
-			}
-			version = detectBinVersion(binPath)
-		}
-		if version != "" {
-			versions[name] = version
-		}
-	}
-	if len(versions) == 0 {
+	resolution := binary.ResolveClaudeBinary()
+	version := strings.TrimSpace(resolution.Version)
+	if !resolution.Valid || resolution.IsShim || version == "" {
 		return nil
 	}
-	return map[string]map[string]string{platform: versions}
+	return map[string]map[string]string{config.Platform(): {"claude": version}}
 }
 
 func binaryVersionsEqual(a, b map[string]map[string]string) bool {
@@ -745,25 +806,6 @@ func binaryVersionsEqual(a, b map[string]map[string]string) bool {
 		}
 	}
 	return true
-}
-
-func hasNewerBinaryVersion(current string, versions map[string]binary.Version) bool {
-	if len(versions) == 0 {
-		return false
-	}
-	if current == "" {
-		return true
-	}
-	for remote := range versions {
-		if remote == current {
-			continue
-		}
-		cmp, ok := compareVersion(remote, current)
-		if !ok || cmp > 0 {
-			return true
-		}
-	}
-	return false
 }
 
 func compareVersion(a, b string) (int, bool) {

@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import { GetConfig, SetConfigField, TestConnection, SetWebDAVPassword, AddExcludePattern, RemoveExcludePattern, GetEncryptionStatus, VerifyEncryptionKey, ChangeEncryptionPassword, PreviewEncryptionPassword, SaveEncryptionPassword } from '../../wailsjs/go/main/App.js'
+  import { GetConfig, SetConfigField, TestConnection, SetWebDAVPassword, AddExcludePattern, RemoveExcludePattern, GetClaudeDirectories, GetEncryptionStatus, VerifyEncryptionKey, ChangeEncryptionPassword, PreviewEncryptionPassword, SaveEncryptionPassword } from '../../wailsjs/go/main/App.js'
 
   let activeTab = 'connection'
 
@@ -42,8 +42,8 @@
     claudeBinary: '',
     claudeJSON: '',
   }
-  let newPattern = ''
   let excludeList = []
+  let claudeDirs = []
   let encStatus = null
   let verifyResult = null
   let verifyLoading = false
@@ -61,6 +61,9 @@
   let changePassLoading = false
 
   const defaultPatterns = ['sessions/', 'cache/', 'debug/', 'telemetry/', 'downloads/', 'paste-cache/', 'shell-snapshots/', 'file-history/', 'session-env/', 'ide/', 'backups/', 'plans/', 'tasks/', 'teams/', 'plugins/data/', '*.lock']
+
+  $: availableClaudeDirs = claudeDirs.filter(dir => !dir.excluded)
+  $: excludedDirectoryPatterns = excludeList.filter(isDirectoryPattern)
 
   onMount(async () => {
     await loadConfig()
@@ -91,6 +94,7 @@
           claudeJSON: cfg.claudeJSONPathRaw || '',
         }
         excludeList = [...(cfg.exclude || [])]
+        await loadClaudeDirectories()
       }
       try { encStatus = await GetEncryptionStatus() } catch (e) { }
     } catch (e) {
@@ -212,27 +216,44 @@
     await loadConfig()
   }
 
-  async function addPattern() {
-    const p = newPattern.trim()
-    if (!p) return
+  async function loadClaudeDirectories() {
     try {
-      await AddExcludePattern(p)
-      excludeList = [...excludeList, p]
-      newPattern = ''
+      claudeDirs = await GetClaudeDirectories()
+    } catch (e) {
+      claudeDirs = []
+      error = e.message || String(e)
+    }
+  }
+
+  async function excludeDirectory(dir) {
+    try {
+      await AddExcludePattern(dir.pattern)
+      if (!excludeList.includes(dir.pattern)) excludeList = [...excludeList, dir.pattern]
+      claudeDirs = claudeDirs.map(item => item.pattern === dir.pattern ? { ...item, excluded: true } : item)
       showSaved()
     } catch (e) {
       error = e.message || String(e)
     }
   }
 
-  async function removePattern(p) {
+  async function restoreDirectory(pattern) {
     try {
-      await RemoveExcludePattern(p)
-      excludeList = excludeList.filter(x => x !== p)
+      await RemoveExcludePattern(pattern)
+      excludeList = excludeList.filter(x => x !== pattern)
+      claudeDirs = claudeDirs.map(item => item.pattern === pattern ? { ...item, excluded: false } : item)
       showSaved()
     } catch (e) {
       error = e.message || String(e)
     }
+  }
+
+  function isDirectoryPattern(pattern) {
+    return String(pattern || '').endsWith('/') && !String(pattern || '').includes('*')
+  }
+
+  function directoryLabel(pattern) {
+    const dir = claudeDirs.find(item => item.pattern === pattern)
+    return dir ? `${dir.name}/` : pattern
   }
 
   async function verifyKey() {
@@ -669,29 +690,61 @@
     {#if activeTab === 'exclude'}
       <div class="card animate-fade-in">
         <div class="exclude-header">
-          <span class="info-label">排除的文件/目录</span>
-          <span class="text-xs text-txt-muted">{excludeList.length} 条规则</span>
-        </div>
-        <div class="add-row">
-          <input class="input" type="text" bind:value={newPattern} placeholder="输入规则，如 node_modules/ 或 *.log" on:keydown={(e) => { if (e.key === 'Enter') addPattern() }} />
-          <button class="btn-sm" on:click={addPattern}>添加</button>
+          <div>
+            <span class="info-label">同步目录</span>
+            <div class="hint">只管理 {cfg.claudeDir} 下的一级目录，点击 × 可排除目录。</div>
+          </div>
+          <span class="text-xs text-txt-muted">{availableClaudeDirs.length} 个目录</span>
         </div>
         <div class="exclude-list">
-          {#each excludeList as pattern}
-            <div class="exclude-row">
-              <div class="exclude-left">
-                <span class="exclude-pattern font-mono">{pattern}</span>
-                <span class="exclude-type" class:default={isDefaultPattern(pattern)} class:custom={!isDefaultPattern(pattern)}>
-                  {isDefaultPattern(pattern) ? '默认' : '自定义'}
-                </span>
+          {#if availableClaudeDirs.length === 0}
+            <div class="empty-compact">没有可同步的目录</div>
+          {:else}
+            {#each availableClaudeDirs as dir (dir.pattern)}
+              <div class="exclude-row">
+                <div class="exclude-left">
+                  <span class="exclude-pattern font-mono">{dir.name}/</span>
+                  <span class="exclude-path font-mono">{dir.path}</span>
+                </div>
+                <button class="exclude-action remove" title="排除目录" on:click={() => excludeDirectory(dir)}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14">
+                    <path d="M18 6L6 18M6 6l12 12"/>
+                  </svg>
+                </button>
               </div>
-              <button class="del-btn" on:click={() => removePattern(pattern)}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14">
-                  <path d="M18 6L6 18M6 6l12 12"/>
-                </svg>
-              </button>
-            </div>
-          {/each}
+            {/each}
+          {/if}
+        </div>
+      </div>
+
+      <div class="card animate-fade-in">
+        <div class="exclude-header">
+          <div>
+            <span class="info-label">已排除目录</span>
+            <div class="hint">点击 + 恢复同步；文件级规则暂不在这里管理。</div>
+          </div>
+          <span class="text-xs text-txt-muted">{excludedDirectoryPatterns.length} 条规则</span>
+        </div>
+        <div class="exclude-list">
+          {#if excludedDirectoryPatterns.length === 0}
+            <div class="empty-compact">暂无排除目录</div>
+          {:else}
+            {#each excludedDirectoryPatterns as pattern (pattern)}
+              <div class="exclude-row">
+                <div class="exclude-left">
+                  <span class="exclude-pattern font-mono">{directoryLabel(pattern)}</span>
+                  <span class="exclude-type" class:default={isDefaultPattern(pattern)} class:custom={!isDefaultPattern(pattern)}>
+                    {isDefaultPattern(pattern) ? '默认' : '自定义'}
+                  </span>
+                </div>
+                <button class="exclude-action add" title="恢复同步" on:click={() => restoreDirectory(pattern)}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14">
+                    <path d="M12 5v14M5 12h14"/>
+                  </svg>
+                </button>
+              </div>
+            {/each}
+          {/if}
         </div>
       </div>
     {/if}
@@ -829,35 +882,37 @@
   }
 
   .exclude-header {
-    display: flex; align-items: center; justify-content: space-between;
-    margin-bottom: 10px;
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 12px; margin-bottom: 10px;
   }
-  .add-row {
-    display: flex; gap: 8px; margin-bottom: 12px;
-  }
-  .add-row .input { flex: 1; }
   .exclude-list { display: flex; flex-direction: column; }
   .exclude-row {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 6px 0; border-bottom: 1px solid rgba(46,45,51,0.3);
+    gap: 12px; padding: 7px 0; border-bottom: 1px solid rgba(46,45,51,0.3);
   }
   .exclude-row:last-child { border-bottom: none; }
   .exclude-left { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
-  .exclude-pattern { font-size: 12px; color: rgb(var(--text-primary)); }
+  .exclude-pattern { font-size: 12px; color: rgb(var(--text-primary)); flex-shrink: 0; }
+  .exclude-path {
+    font-size: 10px; color: rgb(var(--text-muted)); opacity: 0.55;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
   .exclude-type {
     font-size: 10px; font-family: 'DM Mono', monospace;
     padding: 2px 6px; border-radius: 3px; flex-shrink: 0;
   }
   .exclude-type.default { color: rgb(var(--text-muted)); background: rgb(var(--surface-2)); }
   .exclude-type.custom { color: rgb(var(--accent)); background: rgba(196,112,78,0.08); }
-  .del-btn {
+  .exclude-action {
     width: 24px; height: 24px; border-radius: 4px;
     display: flex; align-items: center; justify-content: center;
     background: transparent; border: none; cursor: pointer;
-    color: rgb(var(--text-muted)); opacity: 0.4; transition: all 0.2s;
+    color: rgb(var(--text-muted)); opacity: 0.45; transition: all 0.2s;
     flex-shrink: 0;
   }
-  .del-btn:hover { opacity: 1; color: rgb(var(--state-err)); background: rgba(184,92,92,0.08); }
+  .exclude-action:hover { opacity: 1; }
+  .exclude-action.remove:hover { color: rgb(var(--state-err)); background: rgba(184,92,92,0.08); }
+  .exclude-action.add:hover { color: rgb(var(--state-ok)); background: rgba(107,144,128,0.08); }
 
   .device-card { display: flex; flex-direction: column; gap: 12px; }
   .device-main { display: flex; align-items: center; gap: 12px; }

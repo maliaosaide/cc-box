@@ -10,9 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
-	"syscall"
 )
 
 // Project 项目信息
@@ -127,9 +125,7 @@ func DiscoverProjects() ([]Project, error) {
 func GetGitRemote(dir string) (url string, name string) {
 	cmd := exec.Command("git", "remote", "-v")
 	cmd.Dir = dir
-	if runtime.GOOS == "windows" {
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
-	}
+	hideCommandWindow(cmd)
 	output, err := cmd.Output()
 	if err != nil {
 		return "", ""

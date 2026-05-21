@@ -14,40 +14,37 @@ import (
 
 var binaryCmd = &cobra.Command{
 	Use:   "binary",
-	Short: "二进制版本管理",
+	Short: "Claude 二进制版本管理",
 }
 
 var binaryListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "列出所有已备份的二进制版本",
+	Short: "列出已备份的 Claude 二进制版本",
 	RunE:  runBinaryList,
 }
 
 var binaryPushCmd = &cobra.Command{
 	Use:   "push",
-	Short: "上传当前二进制文件到云端",
+	Short: "上传当前 Claude 二进制到云端",
 	RunE:  runBinaryPush,
 }
 
 var binaryPullCmd = &cobra.Command{
 	Use:   "pull [VERSION]",
-	Short: "从云端下载二进制文件",
+	Short: "从云端下载 Claude 二进制",
 	RunE:  runBinaryPull,
 }
 
 var binarySwitchCmd = &cobra.Command{
 	Use:   "switch <VERSION>",
-	Short: "切换到指定二进制版本",
+	Short: "切换到指定 Claude 二进制版本",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runBinarySwitch,
 }
 
-// binaryName 二进制名称，默认 claude
-var binaryName string
-
 var binaryPruneCmd = &cobra.Command{
 	Use:   "prune",
-	Short: "清理不再被引用的版本",
+	Short: "清理不再被引用的 Claude 版本",
 	RunE:  runBinaryPrune,
 }
 
@@ -58,9 +55,6 @@ func init() {
 	binaryCmd.AddCommand(binaryPullCmd)
 	binaryCmd.AddCommand(binarySwitchCmd)
 	binaryCmd.AddCommand(binaryPruneCmd)
-	binaryPushCmd.Flags().StringVar(&binaryName, "name", "claude", "二进制名称 (claude/uv/uvx/uvw)")
-	binaryPullCmd.Flags().StringVar(&binaryName, "name", "claude", "二进制名称 (claude/uv/uvx/uvw)")
-	binarySwitchCmd.Flags().StringVar(&binaryName, "name", "claude", "二进制名称 (claude/uv/uvx/uvw)")
 }
 
 func runBinaryList(cmd *cobra.Command, args []string) error {
@@ -77,47 +71,39 @@ func runBinaryList(cmd *cobra.Command, args []string) error {
 	platform := config.Platform()
 	fmt.Printf("平台: %s\n\n", platform)
 
-	binNames := []string{"claude", "uv", "uvx", "uvw"}
-	for _, name := range binNames {
-		info := idx.GetBinaryInfo(platform, name)
-		if info == nil || len(info.Versions) == 0 {
-			continue
-		}
-
-		fmt.Printf("%s (当前: %s):\n", name, info.Current)
-		for ver, v := range info.Versions {
-			marker := " "
-			if ver == info.Current {
-				marker = "*"
-			}
-			fmt.Printf("  %s %-12s  %s  %s\n", marker, ver, formatSize(v.Size), v.Uploaded.Format("2006-01-02"))
-		}
-		fmt.Println()
+	info := idx.GetBinaryInfo(platform, "claude")
+	if info == nil || len(info.Versions) == 0 {
+		return nil
 	}
+
+	fmt.Printf("claude (当前: %s):\n", info.Current)
+	for ver, v := range info.Versions {
+		marker := " "
+		if ver == info.Current {
+			marker = "*"
+		}
+		fmt.Printf("  %s %-12s  %s  %s\n", marker, ver, formatSize(v.Size), v.Uploaded.Format("2006-01-02"))
+	}
+	fmt.Println()
 
 	return nil
 }
 
 func runBinaryPush(cmd *cobra.Command, args []string) error {
-	name := binaryName
 	cfg, client, key, err := loadClientAndKey()
 	if err != nil {
 		return err
 	}
 
-	binPath := binary.GetBinaryPath(name)
-	version := ""
-	if name == "claude" {
-		resolution := binary.ResolveClaudeBinary()
-		if !resolution.Valid {
-			return fmt.Errorf("%s", resolution.Error)
-		}
-		if resolution.IsShim {
-			return fmt.Errorf("当前 Claude 路径是脚本 shim，不支持上传；请手动选择真实二进制或使用受管目录")
-		}
-		binPath = resolution.CurrentPath
-		version = resolution.Version
+	resolution := binary.ResolveClaudeBinary()
+	if !resolution.Valid {
+		return fmt.Errorf("%s", resolution.Error)
 	}
+	if resolution.IsShim {
+		return fmt.Errorf("当前 Claude 路径是脚本 shim，不支持上传；请手动选择真实二进制或使用受管目录")
+	}
+	binPath := resolution.CurrentPath
+	version := resolution.Version
 	data, err := os.ReadFile(binPath)
 	if err != nil {
 		return fmt.Errorf("读取 %s 失败: %w", binPath, err)
@@ -128,7 +114,7 @@ func runBinaryPush(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("上传 %s (%s, %s)...\n", binPath, version, formatSize(int64(len(data))))
 
-	err = binary.Upload(client, key, name, data, version, func(total, uploaded int64, part, totalParts int) {
+	err = binary.Upload(client, key, "claude", data, version, func(total, uploaded int64, part, totalParts int) {
 		pct := float64(uploaded) / float64(total) * 100
 		fmt.Printf("\r  进度: %.0f%% (%d/%d 分块)", pct, part, totalParts)
 	})
@@ -136,13 +122,12 @@ func runBinaryPush(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fmt.Printf("\n已上传 %s %s\n", name, version)
+	fmt.Printf("\n已上传 claude %s\n", version)
 	_ = cfg
 	return nil
 }
 
 func runBinaryPull(cmd *cobra.Command, args []string) error {
-	name := binaryName
 	_, client, key, err := loadClientAndKey()
 	if err != nil {
 		return err
@@ -159,9 +144,9 @@ func runBinaryPull(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	info := idx.GetBinaryInfo(platform, name)
+	info := idx.GetBinaryInfo(platform, "claude")
 	if info == nil {
-		return fmt.Errorf("没有可用的 %s 二进制", name)
+		return fmt.Errorf("没有可用的 Claude 二进制")
 	}
 
 	if version == "" {
@@ -171,10 +156,10 @@ func runBinaryPull(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("请指定版本号")
 	}
 
-	targetPath := binary.GetBinaryPath(name)
-	fmt.Printf("下载 %s %s → %s ...\n", name, version, targetPath)
+	targetPath := binary.GetBinaryPath("claude")
+	fmt.Printf("下载 claude %s → %s ...\n", version, targetPath)
 
-	err = binary.Download(client, key, name, version, targetPath, func(total, downloaded int64, part, totalParts int) {
+	err = binary.Download(client, key, "claude", version, targetPath, func(total, downloaded int64, part, totalParts int) {
 		pct := float64(downloaded) / float64(total) * 100
 		fmt.Printf("\r  进度: %.0f%% (%d/%d 分块)", pct, part, totalParts)
 	})
@@ -182,16 +167,13 @@ func runBinaryPull(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if name == "claude" {
-		_ = binary.ClearClaudeResolutionCache()
-	}
-	fmt.Printf("\n已下载 %s %s\n", name, version)
+	_ = binary.ClearClaudeResolutionCache()
+	fmt.Printf("\n已下载 claude %s\n", version)
 	return nil
 }
 
 func runBinarySwitch(cmd *cobra.Command, args []string) error {
 	targetVersion := args[0]
-	name := binaryName
 
 	_, client, key, err := loadClientAndKey()
 	if err != nil {
@@ -204,12 +186,12 @@ func runBinarySwitch(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	info := idx.GetBinaryInfo(platform, name)
+	info := idx.GetBinaryInfo(platform, "claude")
 	if info == nil {
-		return fmt.Errorf("没有可用的 %s 二进制", name)
+		return fmt.Errorf("没有可用的 Claude 二进制")
 	}
 
-	binPath := binary.GetBinaryPath(name)
+	binPath := binary.GetBinaryPath("claude")
 	currentVersion := ""
 	if _, err := os.Stat(binPath); err == nil {
 		currentVersion = detectVersion(binPath)
@@ -218,12 +200,10 @@ func runBinarySwitch(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// 检查目标版本是否存在
 	if _, exists := info.Versions[targetVersion]; !exists {
 		return fmt.Errorf("版本 %s 不存在云端", targetVersion)
 	}
 
-	// 备份当前版本到 versions 目录
 	if currentVersion != "" && currentVersion != "unknown" {
 		versionsDir := config.VersionsDir()
 		backupPath := filepath.Join(versionsDir, currentVersion)
@@ -233,9 +213,8 @@ func runBinarySwitch(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// 下载目标版本
-	fmt.Printf("下载 %s %s ...\n", name, targetVersion)
-	err = binary.Download(client, key, name, targetVersion, binPath, func(total, downloaded int64, part, totalParts int) {
+	fmt.Printf("下载 claude %s ...\n", targetVersion)
+	err = binary.Download(client, key, "claude", targetVersion, binPath, func(total, downloaded int64, part, totalParts int) {
 		pct := float64(downloaded) / float64(total) * 100
 		fmt.Printf("\r  进度: %.0f%% (%d/%d 分块)", pct, part, totalParts)
 	})
@@ -243,14 +222,11 @@ func runBinarySwitch(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// 更新索引
 	info.Current = targetVersion
 	binary.SaveIndex(client, idx)
-	if name == "claude" {
-		_ = binary.ClearClaudeResolutionCache()
-	}
+	_ = binary.ClearClaudeResolutionCache()
 
-	fmt.Printf("\n已切换到 %s %s\n", name, targetVersion)
+	fmt.Printf("\n已切换到 claude %s\n", targetVersion)
 	return nil
 }
 
@@ -274,48 +250,21 @@ func runBinaryPrune(cmd *cobra.Command, args []string) error {
 
 	var targets []pruneTarget
 
-	// 遍历所有平台的二进制
 	for platform, pBins := range idx.Platforms {
-		allBins := []*binary.BinaryInfo{
-			pBins.Claude, pBins.UV, pBins.UVX, pBins.UVW,
+		info := pBins.Claude
+		if info == nil {
+			continue
 		}
-		names := []string{"claude", "uv", "uvx", "uvw"}
-		for i, info := range allBins {
-			if info == nil {
+		for ver, v := range info.Versions {
+			if ver == info.Current || v.Refs > 0 {
 				continue
 			}
-			for ver, v := range info.Versions {
-				// 安全规则：不删除 current 版本，不删除 refs > 0 的版本
-				if ver == info.Current {
-					continue
-				}
-				if v.Refs > 0 {
-					continue
-				}
-				targets = append(targets, pruneTarget{
-					platform: platform,
-					name:     names[i],
-					version:  ver,
-					hash:     v.Hash,
-				})
-			}
-		}
-		// 检查 custom 二进制
-		for name, info := range pBins.Custom {
-			if info == nil {
-				continue
-			}
-			for ver, v := range info.Versions {
-				if ver == info.Current || v.Refs > 0 {
-					continue
-				}
-				targets = append(targets, pruneTarget{
-					platform: platform,
-					name:     name,
-					version:  ver,
-					hash:     v.Hash,
-				})
-			}
+			targets = append(targets, pruneTarget{
+				platform: platform,
+				name:     "claude",
+				version:  ver,
+				hash:     v.Hash,
+			})
 		}
 	}
 

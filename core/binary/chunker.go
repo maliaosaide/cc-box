@@ -66,13 +66,16 @@ func Split(data []byte, chunkSize int) *ChunkResult {
 }
 
 // ShouldChunk 判断是否需要分块
-// chunkMode: "always" 始终分块, "auto" 超过阈值时分块
+// chunkMode: "always" 始终分块, "never" 不分块, "auto" 超过阈值时分块
 func ShouldChunk(size int64, chunkMode string, thresholdBytes int64) bool {
-	if chunkMode == "always" {
+	switch chunkMode {
+	case "always":
 		return true
+	case "never":
+		return false
+	default:
+		return size > thresholdBytes
 	}
-	// "auto" 模式
-	return size > thresholdBytes
 }
 
 // SerializeManifest 序列化 manifest

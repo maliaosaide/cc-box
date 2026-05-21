@@ -366,14 +366,12 @@ func IsInitialized() bool {
 	return err == nil
 }
 
-// LoadWebDAVPassword 从密钥环或环境变量读取 WebDAV 密码
+// LoadWebDAVPassword 从环境变量或共享密码存储读取 WebDAV 密码
 func LoadWebDAVPassword() (string, error) {
-	// 优先环境变量
 	if pass := os.Getenv("CC_BOX_WEBDAV_PASSWORD"); pass != "" {
 		return pass, nil
 	}
 
-	// 尝试系统密钥环
 	pass, err := keyringGet("cc-box", "webdav-password")
 	if err == nil {
 		return pass, nil
@@ -382,7 +380,7 @@ func LoadWebDAVPassword() (string, error) {
 	return "", fmt.Errorf("未找到 WebDAV 密码，请设置环境变量 CC_BOX_WEBDAV_PASSWORD 或运行 cc-box config webdav")
 }
 
-// SaveWebDAVPassword 保存密码到密钥环
+// SaveWebDAVPassword 保存 WebDAV 密码到共享密码存储
 func SaveWebDAVPassword(password string) error {
 	return keyringSet("cc-box", "webdav-password", password)
 }

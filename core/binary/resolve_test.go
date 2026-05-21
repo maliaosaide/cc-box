@@ -3,6 +3,7 @@ package binary
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -130,4 +131,35 @@ func TestClearClaudeResolutionCacheIgnoresMissingFile(t *testing.T) {
 	if err := ClearClaudeResolutionCache(); err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
+}
+
+func TestPlatformExecutableAndClaudeCandidates(t *testing.T) {
+	name := executableName("claude")
+	candidates := claudeCandidateNames()
+	if runtime.GOOS == "windows" {
+		if name != "claude.exe" {
+			t.Fatalf("executableName = %q, want claude.exe", name)
+		}
+		for _, want := range []string{"claude.exe", "claude.cmd", "claude.bat", "claude.ps1"} {
+			if !containsString(candidates, want) {
+				t.Fatalf("claudeCandidateNames missing %q in %v", want, candidates)
+			}
+		}
+		return
+	}
+	if name != "claude" {
+		t.Fatalf("executableName = %q, want claude", name)
+	}
+	if len(candidates) != 1 || candidates[0] != "claude" {
+		t.Fatalf("claudeCandidateNames = %v, want [claude]", candidates)
+	}
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }

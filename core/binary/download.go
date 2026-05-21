@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 
 	"github.com/user/cc-box/core/config"
 	"github.com/user/cc-box/core/crypto"
@@ -85,7 +84,7 @@ func WriteFileAtomic(targetPath string, data []byte, perm os.FileMode) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if runtime.GOOS != "windows" {
+	if canReplaceFileByRename() {
 		if err := os.Rename(tmpPath, targetPath); err != nil {
 			return err
 		}

@@ -5,10 +5,9 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/user/cc-box/core/config"
+	"github.com/user/cc-box/gui/internal/desktop"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -31,7 +30,7 @@ func (a *App) startup(ctx context.Context) {
 
 	// 启动文件监听
 	if config.IsInitialized() {
-		if w, err := NewWatcher(); err == nil {
+		if w, err := NewWatcher(a); err == nil {
 			w.Start(ctx)
 			a.watcher = w
 		}
@@ -102,19 +101,5 @@ func (a *App) BrowseFile(title string) (string, error) {
 
 // OpenInExplorer 在系统文件管理器中打开路径
 func (a *App) OpenInExplorer(path string) error {
-	expanded := expandHome(path)
-	_, err := os.Stat(expanded)
-	if err != nil {
-		return fmt.Errorf("路径不存在: %s", path)
-	}
-	runtime.BrowserOpenURL(a.ctx, "file:///"+filepath.ToSlash(expanded))
-	return nil
-}
-
-func expandHome(path string) string {
-	if len(path) > 0 && path[0] == '~' {
-		home, _ := os.UserHomeDir()
-		return filepath.Join(home, path[1:])
-	}
-	return path
+	return desktop.NewFileOpener().Reveal(path)
 }

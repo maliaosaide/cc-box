@@ -1707,7 +1707,6 @@ func (a *App) PullBinaryAsync(version string) {
 |  <-> 同步             |
 |  ------------------- |
 |  打开主窗口           |
-|  开机自启动      [v]  |
 |  ------------------- |
 |  退出                 |
 +----------------------+
@@ -1723,7 +1722,7 @@ func (a *App) PullBinaryAsync(version string) {
 
 | 平台 | 格式 | 说明 |
 |------|------|------|
-| Windows | MSIX + portable zip | 开始菜单集成、开机自启 |
+| Windows | MSIX + portable zip | 开始菜单集成 |
 | macOS | .app + DMG | 拖入 Applications |
 | Linux | AppImage + .deb | 免安装 |
 

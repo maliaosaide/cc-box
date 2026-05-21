@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -120,8 +121,21 @@ func (a *App) GetSnapshotDetail(id string) (*SnapshotDetail, error) {
 		Message:   snap.Message,
 		Parent:    snap.Parent,
 		Files:     files,
-		Binary:    snap.Binary,
+		Binary:    snapshotDisplayBinaryVersions(snap.Binary),
 	}, nil
+}
+
+func snapshotDisplayBinaryVersions(binaryVersions map[string]map[string]string) map[string]map[string]string {
+	platform := config.Platform()
+	tools, ok := binaryVersions[platform]
+	if !ok {
+		return nil
+	}
+	version := strings.TrimSpace(tools["claude"])
+	if version == "" {
+		return nil
+	}
+	return map[string]map[string]string{platform: {"claude": version}}
 }
 
 // loadLocalSnapByID 按 ID 加载本地缓存快照
@@ -436,6 +450,46 @@ func claudeBinaryPlaceholderPath(res binary.ClaudeResolution) string {
 	return res.ManagedPath
 }
 
+// GetClaudeDirectories 返回 Claude 配置目录下的一级目录
+func (a *App) GetClaudeDirectories() ([]ClaudeDirectoryInfo, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	excluded := make(map[string]bool, len(cfg.Exclude.Patterns))
+	for _, pattern := range cfg.Exclude.Patterns {
+		excluded[pattern] = true
+	}
+
+	claudeDir := config.ClaudeDir()
+	entries, err := os.ReadDir(claudeDir)
+	if os.IsNotExist(err) {
+		return []ClaudeDirectoryInfo{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("读取 Claude 配置目录失败: %w", err)
+	}
+
+	dirs := make([]ClaudeDirectoryInfo, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		pattern := name + "/"
+		dirs = append(dirs, ClaudeDirectoryInfo{
+			Name:     name,
+			Path:     filepath.Join(claudeDir, name),
+			Pattern:  pattern,
+			Excluded: excluded[pattern],
+		})
+	}
+	sort.Slice(dirs, func(i, j int) bool {
+		return strings.ToLower(dirs[i].Name) < strings.ToLower(dirs[j].Name)
+	})
+	return dirs, nil
+}
+
 // AddExcludePattern 添加排除规则
 func (a *App) AddExcludePattern(pattern string) error {
 	cfg, err := config.Load()
@@ -626,6 +680,13 @@ type ClaudeBinaryResolution struct {
 	ReadOnly    bool   `json:"readOnly"`
 	IsShim      bool   `json:"isShim"`
 	Error       string `json:"error,omitempty"`
+}
+
+type ClaudeDirectoryInfo struct {
+	Name     string `json:"name"`
+	Path     string `json:"path"`
+	Pattern  string `json:"pattern"`
+	Excluded bool   `json:"excluded"`
 }
 
 type WebDAVView struct {

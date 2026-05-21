@@ -66,6 +66,10 @@ export function GetClaudeBinaryResolution() {
   return window['go']['main']['App']['GetClaudeBinaryResolution']();
 }
 
+export function GetClaudeDirectories() {
+  return window['go']['main']['App']['GetClaudeDirectories']();
+}
+
 export function GetConfig() {
   return window['go']['main']['App']['GetConfig']();
 }

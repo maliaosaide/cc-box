@@ -173,3 +173,36 @@ func TestSaveAndLoadNormalizeWebDAVRoot(t *testing.T) {
 		t.Fatalf("ConfiguredWebDAVURL = %q, want %q", got, want)
 	}
 }
+
+func TestWebDAVPasswordPrefersEnvironment(t *testing.T) {
+	withTempHome(t)
+	t.Setenv("CC_BOX_WEBDAV_PASSWORD", "from-env")
+	if err := SaveWebDAVPassword("from-store"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadWebDAVPassword()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "from-env" {
+		t.Fatalf("LoadWebDAVPassword = %q, want from-env", got)
+	}
+}
+
+func TestWebDAVPasswordFileStoreFallback(t *testing.T) {
+	home := withTempHome(t)
+	t.Setenv("CC_BOX_WEBDAV_PASSWORD", "")
+	if err := SaveWebDAVPassword("stored-pass"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadWebDAVPassword()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "stored-pass" {
+		t.Fatalf("LoadWebDAVPassword = %q, want stored-pass", got)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".cc-box", "secrets.json")); err != nil {
+		t.Fatalf("secrets.json missing: %v", err)
+	}
+}

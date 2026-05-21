@@ -1,44 +1,32 @@
 // 系统托盘
-// 托盘图标状态管理 + 右键菜单 + 自动启动
+// 托盘图标状态管理 + 右键菜单
 package main
 
 import (
 	"embed"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
-	"strings"
+	"sync"
 	"sync/atomic"
 
-	"fyne.io/systray"
+	"github.com/user/cc-box/gui/internal/desktop"
 )
 
 //go:embed icon_synced.ico icon_pending.ico icon_conflict.ico icon_syncing.ico
 var trayIcons embed.FS
 
 // TrayState 托盘同步状态
-type TrayState string
+type TrayState = desktop.TrayState
 
 const (
-	TraySynced   TrayState = "synced"
-	TrayPending  TrayState = "pending"
-	TrayConflict TrayState = "conflict"
-	TraySyncing  TrayState = "syncing"
+	TraySynced   = desktop.TraySynced
+	TrayPending  = desktop.TrayPending
+	TrayConflict = desktop.TrayConflict
+	TraySyncing  = desktop.TraySyncing
 )
 
 var (
-	trayState  = TraySynced
-	mPush      *systray.MenuItem
-	mPull      *systray.MenuItem
-	mSync      *systray.MenuItem
-	mOpen      *systray.MenuItem
-	mAutoStart *systray.MenuItem
-	mQuit      *systray.MenuItem
 	shouldQuit atomic.Bool
-	appRef     *App
-	trayReady  atomic.Bool
-	stopTray   func()
+	trayMu     sync.RWMutex
+	tray       desktop.TrayAdapter
 )
 
 var stateIconFiles = map[TrayState]string{
@@ -57,89 +45,47 @@ var stateLabels = map[TrayState]string{
 
 // StartTray 启动系统托盘
 func StartTray(app *App) {
-	appRef = app
-	start, stop := systray.RunWithExternalLoop(trayOnReady, trayOnExit)
-	stopTray = stop
-	start()
+	adapter := desktop.NewTrayAdapter(loadTrayIcons(), stateLabels)
+	_ = adapter.Start(desktop.TrayActions{
+		OnPush: func() {
+			app.QuickPush()
+		},
+		OnPull: func() {
+			app.QuickPull()
+		},
+		OnSync: func() {
+			app.QuickSync()
+		},
+		OnOpen: func() {
+			app.showWindow()
+		},
+		OnQuit: func() {
+			RequestQuit()
+			app.quitApp()
+		},
+	})
+	trayMu.Lock()
+	tray = adapter
+	trayMu.Unlock()
 }
 
 func StopTray() {
-	if stopTray != nil {
-		stopTray()
-		stopTray = nil
-	}
-}
-
-func trayOnReady() {
-	systray.SetOnTapped(func() {
-		if appRef != nil {
-			appRef.showWindow()
-		}
-	})
-
-	mPush = systray.AddMenuItem("↑ 推送配置", "推送本地变更到云端")
-	mPull = systray.AddMenuItem("↓ 拉取配置", "拉取远程变更到本地")
-	mSync = systray.AddMenuItem("⟷ 同步", "拉取并推送")
-	systray.AddSeparator()
-	mOpen = systray.AddMenuItem("打开主窗口", "显示 CC-Box 主界面")
-	mAutoStart = systray.AddMenuItemCheckbox("开机自启动", "系统启动时自动运行", isAutoStartEnabled())
-	systray.AddSeparator()
-	mQuit = systray.AddMenuItem("退出", "关闭 CC-Box")
-
-	go trayMenuLoop()
-	trayReady.Store(true)
-	UpdateTrayState(TraySynced)
-}
-
-func trayOnExit() {
-	trayReady.Store(false)
-}
-
-func trayMenuLoop() {
-	for {
-		select {
-		case <-mPush.ClickedCh:
-			appRef.QuickPush()
-		case <-mPull.ClickedCh:
-			appRef.QuickPull()
-		case <-mSync.ClickedCh:
-			appRef.QuickSync()
-		case <-mOpen.ClickedCh:
-			appRef.showWindow()
-		case <-mAutoStart.ClickedCh:
-			enable := !mAutoStart.Checked()
-			if setAutoStart(enable) {
-				if enable {
-					mAutoStart.Check()
-				} else {
-					mAutoStart.Uncheck()
-				}
-			}
-		case <-mQuit.ClickedCh:
-			RequestQuit()
-			systray.Quit()
-			appRef.quitApp()
-		}
+	trayMu.Lock()
+	adapter := tray
+	tray = nil
+	trayMu.Unlock()
+	if adapter != nil {
+		adapter.Stop()
 	}
 }
 
 // UpdateTrayState 更新托盘图标状态
 func UpdateTrayState(state TrayState) {
-	if !trayReady.Load() {
-		return
-	}
-	trayState = state
-	iconData, _ := trayIcons.ReadFile(stateIconFiles[state])
-	systray.SetIcon(iconData)
-	systray.SetTooltip("CC-Box - " + stateLabels[state])
-	if state != TraySyncing {
-		mPush.Enable()
-		mPull.Enable()
-		mSync.Enable()
-	} else {
-		mPush.Disable()
-		mPull.Disable()
-		mSync.Disable()
+	trayMu.RLock()
+	adapter := tray
+	trayMu.RUnlock()
+	if adapter != nil {
+		adapter.SetState(state)
 	}
 }
 
@@ -154,44 +100,19 @@ func ShouldQuit() bool {
 }
 
 func IsTrayReady() bool {
-	return trayReady.Load()
+	trayMu.RLock()
+	adapter := tray
+	trayMu.RUnlock()
+	return adapter != nil && adapter.IsReady()
 }
 
-// Windows 开机自启动
-
-func shortcutPath() string {
-	startup := filepath.Join(os.Getenv("APPDATA"),
-		"Microsoft", "Windows", "Start Menu", "Programs", "Startup")
-	return filepath.Join(startup, "CC-Box.lnk")
-}
-
-func isAutoStartEnabled() bool {
-	if runtime.GOOS != "windows" {
-		return false
+func loadTrayIcons() map[TrayState][]byte {
+	icons := make(map[TrayState][]byte, len(stateIconFiles))
+	for state, file := range stateIconFiles {
+		data, err := trayIcons.ReadFile(file)
+		if err == nil {
+			icons[state] = data
+		}
 	}
-	_, err := os.Stat(shortcutPath())
-	return err == nil
-}
-
-func setAutoStart(enable bool) bool {
-	if runtime.GOOS != "windows" {
-		return false
-	}
-	path := shortcutPath()
-	if !enable {
-		os.Remove(path)
-		return true
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		return false
-	}
-	script := `$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('` + powerShellSingleQuote(path) + `'); $s.TargetPath = '` + powerShellSingleQuote(exe) + `'; $s.Save()`
-	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
-	hideCommandWindow(cmd)
-	return cmd.Run() == nil
-}
-
-func powerShellSingleQuote(value string) string {
-	return strings.ReplaceAll(value, "'", "''")
+	return icons
 }

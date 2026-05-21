@@ -79,8 +79,8 @@
 
   $: data = dashboard || {
     syncStatus: 'idle', syncHealth: null, lastSync: null, claudeVersion: '-',
-    claudeLatest: true, conflicts: 0, devices: [], recentChanges: [],
-    backups: [], binaries: []
+    claudeLatest: true, claudeBinary: null, configStatus: null, conflicts: 0, devices: [],
+    recentChanges: [], backups: [], binaries: []
   }
   $: health = data.syncHealth
   $: hasConflicts = data.conflicts !== 0
@@ -88,9 +88,14 @@
   $: isWarnState = displaySyncState === 'pending' || displaySyncState === 'remote_uninitialized' || displaySyncState === 'idle'
   $: isErrorState = displaySyncState === 'error' || displaySyncState === 'connection_error' || displaySyncState === 'remote_incomplete' || displaySyncState === 'key_mismatch' || displaySyncState === 'local_error'
   $: showRecovery = health && ['remote_uninitialized', 'remote_incomplete', 'key_mismatch', 'connection_error', 'local_error'].includes(displaySyncState)
-  $: hasChanges = data.recentChanges && data.recentChanges.length
   $: hasBackups = data.backups && data.backups.length
-  $: hasBinaries = data.binaries && data.binaries.length
+  $: claudeBinary = data.claudeBinary || {
+    platformLabel: '当前平台', localVersion: data.claudeVersion, remoteVersion: '',
+    installed: !!data.claudeVersion && data.claudeVersion !== '-', statusLabel: data.claudeLatest ? '已是最新' : '可更新'
+  }
+  $: configStatus = data.configStatus || {
+    ok: true, webdavConfigured: true, passwordAvailable: true, claudeDirExists: true, message: '配置正常'
+  }
   $: hasDevices = data.devices && data.devices.length > 1
 </script>
 
@@ -177,38 +182,31 @@
       </div>
     {/if}
 
-    <!-- 版本信息（全宽） -->
+    <!-- Claude 版本（当前平台） -->
     <div class="card animate-fade-in stagger-1">
       <div class="section-label-row">
-        <span class="section-label">版本</span>
+        <div>
+          <span class="section-label">Claude 版本</span>
+          <div class="section-caption">当前平台：{claudeBinary.platformLabel || claudeBinary.platform || '当前平台'}</div>
+        </div>
         <button class="link-btn" on:click={() => navigateTo('binaries')}>管理二进制</button>
       </div>
       <div class="item-list">
-        {#if hasBinaries}
-          {#each data.binaries as bin}
-            <div class="item-row">
-              <div class="item-badge accent">{bin.name[0].toUpperCase()}</div>
-              <div class="item-main">
-                <span class="item-name">{bin.name}</span>
-                <span class="item-detail font-mono">{bin.version || '未安装'}</span>
-              </div>
-              <span class="version-tag" class:latest={bin.latest}>
-                {bin.installed ? (bin.latest ? '最新' : '可更新') : '未安装'}
-              </span>
-            </div>
-          {/each}
-        {:else}
-          <div class="item-row">
-            <div class="item-badge accent">C</div>
-            <div class="item-main">
-              <span class="item-name">claude</span>
-              <span class="item-detail font-mono">{data.claudeVersion || '未安装'}</span>
-            </div>
-            <span class="version-tag" class:latest={data.claudeLatest}>
-              {data.claudeLatest ? '最新' : '可更新'}
-            </span>
+        <div class="item-row">
+          <div class="item-badge accent">C</div>
+          <div class="item-main">
+            <span class="item-name">当前本地版本</span>
+            <span class="item-detail font-mono">{claudeBinary.localVersion || '未检测到'}</span>
           </div>
-        {/if}
+          <span class="version-tag" class:latest={claudeBinary.status === 'latest'}>{claudeBinary.statusLabel || '未知'}</span>
+        </div>
+        <div class="item-row">
+          <div class="item-badge accent">云</div>
+          <div class="item-main">
+            <span class="item-name">当前平台云端最高版本</span>
+            <span class="item-detail font-mono">{claudeBinary.remoteVersion || '暂无'}</span>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -240,32 +238,27 @@
       {/if}
     </div>
 
-    <!-- 最近变更（全宽） -->
+    <!-- 配置状态 -->
     <div class="card animate-fade-in stagger-3">
       <div class="section-label-row">
-        <span class="section-label">最近变更</span>
-        <button class="link-btn" on:click={() => navigateTo('history')}>全部</button>
+        <span class="section-label">配置状态</span>
+        {#if !configStatus.ok}
+          <button class="link-btn" on:click={() => navigateTo('settings')}>去设置</button>
+        {/if}
       </div>
-      {#if hasChanges}
-        <div class="item-list">
-          {#each data.recentChanges as change}
-            <div class="item-row">
-              <div class="change-letter"
-                   class:added={change.status === 'A'}
-                   class:modified={change.status === 'M'}
-                   class:conflict-c={change.status === 'C'}>
-                {change.status}
-              </div>
-              <div class="item-main">
-                <span class="item-name font-mono">{change.path}</span>
-                <span class="item-detail">{change.time}</span>
-              </div>
-            </div>
-          {/each}
+      <div class="item-list">
+        <div class="item-row">
+          <div class="item-badge" class:ok-badge={configStatus.ok} class:warn-badge={!configStatus.ok}>
+            {configStatus.ok ? '✓' : '!'}
+          </div>
+          <div class="item-main">
+            <span class="item-name">{configStatus.message || '配置正常'}</span>
+            <span class="item-detail">
+              WebDAV {configStatus.webdavConfigured ? '已配置' : '未配置'} · 加密密码 {configStatus.passwordAvailable ? '可用' : '不可用'} · Claude 目录 {configStatus.claudeDirExists ? '存在' : '不存在'}
+            </span>
+          </div>
         </div>
-      {:else}
-        <div class="empty-compact">暂无变更记录</div>
-      {/if}
+      </div>
     </div>
 
     <!-- 设备列表 -->
@@ -382,6 +375,12 @@
     text-transform: uppercase; letter-spacing: 0.05em;
     color: rgb(var(--text-muted));
   }
+  .section-caption {
+    margin-top: 2px;
+    font-size: 11px;
+    color: rgb(var(--text-muted));
+    opacity: 0.7;
+  }
   .section-label-row {
     display: flex; align-items: center;
     justify-content: space-between; margin-bottom: 8px;
@@ -432,6 +431,12 @@
   .item-badge.accent {
     background: rgba(196,112,78,0.08); color: rgb(var(--accent));
   }
+  .item-badge.ok-badge {
+    background: rgba(107,144,128,0.1); color: rgb(var(--state-ok));
+  }
+  .item-badge.warn-badge {
+    background: rgba(196,165,78,0.1); color: rgb(var(--state-warn));
+  }
   .item-badge.dot-badge {
     background: rgba(196,112,78,0.06);
   }
@@ -464,15 +469,4 @@
   .version-tag.latest {
     background: rgba(107,144,128,0.1); color: rgb(var(--state-ok));
   }
-
-  .change-letter {
-    width: 28px; height: 28px; border-radius: 7px;
-    display: flex; align-items: center; justify-content: center;
-    font-family: 'DM Mono', monospace; font-size: 11px;
-    font-weight: 500; flex-shrink: 0;
-    background: rgb(var(--surface-2));
-  }
-  .change-letter.added { color: rgb(var(--state-ok)); }
-  .change-letter.modified { color: rgb(var(--accent)); }
-  .change-letter.conflict-c { color: rgb(var(--state-err)); }
 </style>
