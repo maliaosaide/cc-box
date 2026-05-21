@@ -64,7 +64,7 @@ func DiscoverProjects() ([]Project, error) {
 		}
 
 		// ~/.claude/projects/ 下的目录名是编码后的项目路径
-		// 格式可能是 -Users-a-Desktop-myproject 这样的
+		// 格式可能是 -Users-alice-Desktop-myproject 这样的
 
 		// 检查是否有 .claude.json（通过路径映射找到实际项目目录）
 		localPath := decodeProjectDir(entry.Name())
@@ -162,13 +162,13 @@ func GetGitRemote(dir string) (url string, name string) {
 }
 
 // decodeProjectDir 将 ~/.claude/projects/ 下的目录名还原为实际路径
-// 目录名格式: -Users-a-Desktop-myproject → /Users/a/Desktop/myproject (macOS)
+// 目录名格式: -Users-alice-Desktop-myproject → /Users/alice/Desktop/myproject (macOS)
 //
-//	-C-Users-a-Desktop-myproject → C:\Users\a\Desktop\myproject (Windows)
+//	-C-Users-alice-Desktop-myproject → C:\Users\alice\Desktop\myproject (Windows)
 func decodeProjectDir(dirName string) string {
 	parts := strings.Split(dirName, "-")
 
-	// Windows 路径: -C-Users-a-...
+	// Windows 路径: -C-Users-alice-...
 	if len(parts) > 1 && len(parts[1]) == 1 {
 		// 驱动器号 + 路径
 		result := parts[1] + ":"
@@ -180,7 +180,7 @@ func decodeProjectDir(dirName string) string {
 		return result
 	}
 
-	// Unix 路径: -Users-a-Desktop-...
+	// Unix 路径: -Users-alice-Desktop-...
 	result := ""
 	for _, p := range parts[1:] {
 		if p != "" {

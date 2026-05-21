@@ -106,17 +106,17 @@ func TestMergeClaudeJSON_NilFields(t *testing.T) {
 }
 
 func TestDecodeProjectDir_Windows(t *testing.T) {
-	dir := "-C-Users-a-Desktop-myproject"
+	dir := "-C-Users-alice-Desktop-myproject"
 	result := decodeProjectDir(dir)
-	if result != "C:\\Users\\a\\Desktop\\myproject" {
+	if result != "C:\\Users\\alice\\Desktop\\myproject" {
 		t.Errorf("Windows 路径解码错误: %s", result)
 	}
 }
 
 func TestDecodeProjectDir_Unix(t *testing.T) {
-	dir := "-Users-a-Desktop-myproject"
+	dir := "-Users-alice-Desktop-myproject"
 	result := decodeProjectDir(dir)
-	if result != "/Users/a/Desktop/myproject" {
+	if result != "/Users/alice/Desktop/myproject" {
 		t.Errorf("Unix 路径解码错误: %s", result)
 	}
 }
