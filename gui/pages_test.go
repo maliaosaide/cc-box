@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/user/cc-box/internal/snapshot"
+	"github.com/user/cc-box/gui/internal/snapshot"
 )
 
 func TestGetSnapshotListPrefersLocalCache(t *testing.T) {

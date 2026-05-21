@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/user/cc-box/internal/config"
+	"github.com/user/cc-box/gui/internal/config"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -42,15 +42,16 @@ func (a *App) shutdown(_ context.Context) {
 	if a.watcher != nil {
 		a.watcher.Stop()
 	}
+	StopTray()
 }
 
 // OnBeforeClose 窗口关闭拦截：最小化到托盘而非退出
 func (a *App) OnBeforeClose(ctx context.Context) bool {
-	if ShouldQuit() {
-		return false // 允许关闭
+	if ShouldQuit() || !IsTrayReady() {
+		return false
 	}
 	runtime.WindowHide(ctx)
-	return true // 阻止关闭
+	return true
 }
 
 func (a *App) showWindow() {
@@ -59,6 +60,7 @@ func (a *App) showWindow() {
 }
 
 func (a *App) quitApp() {
+	RequestQuit()
 	runtime.Quit(a.ctx)
 }
 

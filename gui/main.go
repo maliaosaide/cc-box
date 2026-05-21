@@ -4,9 +4,12 @@ package main
 
 import (
 	"embed"
+	goruntime "runtime"
 
-	"github.com/user/cc-box/internal/config"
+	"github.com/user/cc-box/gui/internal/config"
 	wails "github.com/wailsapp/wails/v2"
+	"github.com/wailsapp/wails/v2/pkg/menu"
+	"github.com/wailsapp/wails/v2/pkg/menu/keys"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
@@ -22,6 +25,7 @@ func main() {
 		Title:     "CC-Box",
 		Width:     1120,
 		Height:    720,
+		Menu:      buildAppMenu(app),
 		MinWidth:  900,
 		MinHeight: 600,
 		AssetServer: &assetserver.Options{
@@ -43,6 +47,27 @@ func main() {
 	if err != nil {
 		println("Error:", err.Error())
 	}
+}
+
+func buildAppMenu(app *App) *menu.Menu {
+	appMenu := menu.NewMenu()
+	if goruntime.GOOS == "darwin" {
+		appMenu.Append(menu.AppMenu())
+	}
+
+	fileMenu := appMenu.AddSubmenu("文件")
+	fileMenu.AddText("打开主窗口", keys.CmdOrCtrl("o"), func(_ *menu.CallbackData) {
+		app.showWindow()
+	})
+	fileMenu.AddSeparator()
+	fileMenu.AddText("退出", keys.CmdOrCtrl("q"), func(_ *menu.CallbackData) {
+		app.quitApp()
+	})
+
+	if goruntime.GOOS == "darwin" {
+		appMenu.Append(menu.EditMenu())
+	}
+	return appMenu
 }
 
 func init() {

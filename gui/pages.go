@@ -11,13 +11,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/user/cc-box/internal/binary"
-	"github.com/user/cc-box/internal/config"
-	"github.com/user/cc-box/internal/crypto"
-	"github.com/user/cc-box/internal/object"
-	"github.com/user/cc-box/internal/project"
-	"github.com/user/cc-box/internal/snapshot"
-	"github.com/user/cc-box/internal/webdav"
+	"github.com/user/cc-box/gui/internal/binary"
+	"github.com/user/cc-box/gui/internal/config"
+	"github.com/user/cc-box/gui/internal/crypto"
+	"github.com/user/cc-box/gui/internal/object"
+	"github.com/user/cc-box/gui/internal/project"
+	"github.com/user/cc-box/gui/internal/snapshot"
+	"github.com/user/cc-box/gui/internal/webdav"
 )
 
 // SnapshotEntry 快照历史条目

@@ -13,12 +13,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/user/cc-box/internal/binary"
-	"github.com/user/cc-box/internal/config"
-	"github.com/user/cc-box/internal/crypto"
-	"github.com/user/cc-box/internal/object"
-	"github.com/user/cc-box/internal/snapshot"
-	"github.com/user/cc-box/internal/webdav"
+	"github.com/user/cc-box/gui/internal/binary"
+	"github.com/user/cc-box/gui/internal/config"
+	"github.com/user/cc-box/gui/internal/crypto"
+	"github.com/user/cc-box/gui/internal/object"
+	"github.com/user/cc-box/gui/internal/snapshot"
+	"github.com/user/cc-box/gui/internal/webdav"
 )
 
 // DashboardData 概览页数据

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/user/cc-box/internal/snapshot"
+	"github.com/user/cc-box/gui/internal/snapshot"
 )
 
 func TestInsertNode(t *testing.T) {

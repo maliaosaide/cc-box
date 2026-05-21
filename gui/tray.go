@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 
 	"fyne.io/systray"
 )
@@ -34,9 +35,10 @@ var (
 	mOpen      *systray.MenuItem
 	mAutoStart *systray.MenuItem
 	mQuit      *systray.MenuItem
-	shouldQuit bool
+	shouldQuit atomic.Bool
 	appRef     *App
-	trayReady  bool
+	trayReady  atomic.Bool
+	stopTray   func()
 )
 
 var stateIconFiles = map[TrayState]string{
@@ -56,10 +58,25 @@ var stateLabels = map[TrayState]string{
 // StartTray 启动系统托盘
 func StartTray(app *App) {
 	appRef = app
-	go systray.Run(trayOnReady, trayOnExit)
+	start, stop := systray.RunWithExternalLoop(trayOnReady, trayOnExit)
+	stopTray = stop
+	start()
+}
+
+func StopTray() {
+	if stopTray != nil {
+		stopTray()
+		stopTray = nil
+	}
 }
 
 func trayOnReady() {
+	systray.SetOnTapped(func() {
+		if appRef != nil {
+			appRef.showWindow()
+		}
+	})
+
 	mPush = systray.AddMenuItem("↑ 推送配置", "推送本地变更到云端")
 	mPull = systray.AddMenuItem("↓ 拉取配置", "拉取远程变更到本地")
 	mSync = systray.AddMenuItem("⟷ 同步", "拉取并推送")
@@ -70,11 +87,13 @@ func trayOnReady() {
 	mQuit = systray.AddMenuItem("退出", "关闭 CC-Box")
 
 	go trayMenuLoop()
-	trayReady = true
+	trayReady.Store(true)
 	UpdateTrayState(TraySynced)
 }
 
-func trayOnExit() {}
+func trayOnExit() {
+	trayReady.Store(false)
+}
 
 func trayMenuLoop() {
 	for {
@@ -97,7 +116,7 @@ func trayMenuLoop() {
 				}
 			}
 		case <-mQuit.ClickedCh:
-			shouldQuit = true
+			RequestQuit()
 			systray.Quit()
 			appRef.quitApp()
 		}
@@ -106,7 +125,7 @@ func trayMenuLoop() {
 
 // UpdateTrayState 更新托盘图标状态
 func UpdateTrayState(state TrayState) {
-	if !trayReady {
+	if !trayReady.Load() {
 		return
 	}
 	trayState = state
@@ -124,9 +143,18 @@ func UpdateTrayState(state TrayState) {
 	}
 }
 
+// RequestQuit 标记下一次关闭为真正退出。
+func RequestQuit() {
+	shouldQuit.Store(true)
+}
+
 // ShouldQuit 关闭窗口时判断是否真正退出
 func ShouldQuit() bool {
-	return shouldQuit
+	return shouldQuit.Load()
+}
+
+func IsTrayReady() bool {
+	return trayReady.Load()
 }
 
 // Windows 开机自启动

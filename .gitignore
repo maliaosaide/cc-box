@@ -1,9 +1,10 @@
-cc-box.exe
-gui.exe
-gui/frontend/dist/
-gui/frontend/node_modules/
-gui/frontend/.svelte-kit/
-gui/build/bin/
+/cc-box.exe
+/gui.exe
+/cli/build/bin/
+/gui/build/bin/
+/gui/frontend/dist/
+/gui/frontend/node_modules/
+/gui/frontend/.svelte-kit/
 
 # 敏感文件
 *.key
