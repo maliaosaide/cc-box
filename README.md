@@ -98,20 +98,19 @@ CC-Box 不是简单地把文件上传覆盖。每次 push 都会生成快照，�
 | CLI | 喜欢终端、脚本和自动化的用户 | 初始化、push/pull、查看状态、回滚、CI/脚本调用 |
 | GUI | 喜欢可视化操作的桌面用户 | 查看状态、处理冲突、浏览 diff、管理二进制、托盘常驻 |
 
-两个版本可以独立使用。你只想要命令行，就用 `cli/`；你只想用桌面界面，就用 `gui/`。
+两个入口可以独立使用，但共享 `core/` 中的同步、加密、快照、WebDAV 和 Claude 二进制管理能力。你只想要命令行，就用 `cli/`；你只想用桌面界面，就用 `gui/`。
 
 ## 快速开始
 
 ### CLI 版
 
 ```bash
-cd cli
-go build -o build/bin/cc-box.exe ./cmd/cc-box/
+go -C cli build -o build/bin/cc-box.exe ./cmd/cc-box/
 
-./build/bin/cc-box.exe init
-./build/bin/cc-box.exe status
-./build/bin/cc-box.exe push
-./build/bin/cc-box.exe pull
+./cli/build/bin/cc-box.exe init
+./cli/build/bin/cc-box.exe status
+./cli/build/bin/cc-box.exe push
+./cli/build/bin/cc-box.exe pull
 ```
 
 常用命令：
@@ -168,21 +167,34 @@ GUI 详细说明见：[gui/README.md](./gui/README.md)
 
 ```text
 cc-box/
+├── core/                        # CLI 和 GUI 共享的核心能力
+│   ├── binary/                  # Claude 二进制上传、下载、索引和平台识别
+│   ├── config/                  # 本地配置、路径和 keyring 适配
+│   ├── crypto/                  # 加密密码派生和数据加密
+│   ├── normalize/               # 跨平台路径和内容规范化
+│   ├── object/                  # 对象哈希和对象存储
+│   ├── pathutil/                # 安全路径处理
+│   ├── snapshot/                # 文件扫描、快照和 diff 数据
+│   ├── sync/                    # 合并、冲突和历史处理
+│   ├── webdav/                  # WebDAV 客户端和锁
+│   ├── go.mod
+│   └── go.sum
 ├── cli/                         # 命令行版
 │   ├── README.md                # CLI 使用说明
-│   ├── cmd/                     # CLI 入口
-│   ├── internal/                # CLI 业务实现
+│   ├── cmd/cc-box/              # CLI 入口
+│   ├── internal/cli/            # Cobra 命令层
+│   ├── internal/project/        # 项目级 .claude.json 同步
 │   ├── go.mod
 │   └── go.sum
 ├── gui/                         # 桌面 GUI 版
 │   ├── README.md                # GUI 使用说明
 │   ├── frontend/                # Svelte 前端
-│   ├── internal/                # GUI 业务实现
+│   ├── internal/desktop/        # 桌面平台适配
+│   ├── internal/project/        # GUI 项目配置管理
 │   ├── main.go                  # Wails 入口
 │   ├── wails.json
 │   ├── go.mod
 │   └── go.sum
-├── Makefile                     # 统一构建和测试入口
 └── README.md                    # 项目总览
 ```
 
@@ -200,18 +212,10 @@ cc-box/
 
 ## 构建
 
-从根目录使用 Makefile：
+当前根目录没有统一构建脚本，CLI 和 GUI 分别在各自 module 中构建：
 
 ```bash
-make build       # 构建 CLI 和 GUI
-make build-cli   # 只构建 CLI
-make build-gui   # 只构建 GUI
-```
-
-没有 `make` 时可以分别构建：
-
-```bash
-cd cli && go build -o build/bin/cc-box.exe ./cmd/cc-box/
+go -C cli build -o build/bin/cc-box.exe ./cmd/cc-box/
 cd gui && wails build -clean -nopackage -m -nosyncgomod
 ```
 
@@ -224,17 +228,12 @@ gui/build/bin/cc-box-gui.exe
 
 ## 测试
 
-```bash
-make test       # 测试 CLI 和 GUI
-make test-cli   # 只测试 CLI
-make test-gui   # 只测试 GUI
-```
-
-或直接执行：
+从仓库根目录分别测试三个 Go module：
 
 ```bash
-cd cli && go test ./...
-cd gui && go test ./...
+go -C core test ./...
+go -C cli test ./...
+go -C gui test ./...
 ```
 
 ## 环境要求
@@ -267,13 +266,13 @@ cd gui && go test ./...
 
 ## 开发说明
 
-当前仓库中 CLI 和 GUI 是两个独立应用：
+当前仓库拆成三个 Go module：
 
-- 只开发命令行能力，进入 `cli/`。
-- 只开发桌面界面，进入 `gui/`。
-- 根目录没有 Go module。
+- `core/`：CLI 和 GUI 共享的数据能力，包括配置、加密、对象、快照、同步、WebDAV 和 Claude 二进制管理。
+- `cli/`：命令行应用，保留 Cobra 命令层和 CLI 专属逻辑。
+- `gui/`：Wails 桌面应用，保留窗口、托盘、前端绑定和 GUI 专属逻辑。
 
-如果要保持两个版本行为一致，需要分别同步修改两边对应实现。
+根目录没有 Go module。只改命令行入口时进入 `cli/`，只改桌面体验时进入 `gui/`；改共享同步、加密、快照、WebDAV 或二进制能力时优先改 `core/`，并同时验证 CLI 和 GUI。
 
 ## License
 

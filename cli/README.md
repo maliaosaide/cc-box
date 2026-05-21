@@ -157,19 +157,13 @@ CC_BOX_WEBDAV_PASSWORD=your-password ./build/bin/cc-box.exe status
 ```text
 cli/
 ├── cmd/cc-box/                  # CLI 启动入口
-├── internal/cli/                # 命令定义和命令执行逻辑
-├── internal/config/             # 配置管理
-├── internal/crypto/             # 加密密码、密钥派生、数据加密
-├── internal/webdav/             # WebDAV 访问
-├── internal/object/             # 对象存储和哈希
-├── internal/snapshot/           # 快照、扫描、diff
-├── internal/sync/               # 合并和冲突处理
-├── internal/binary/             # Claude 二进制管理
-├── internal/project/            # 项目级配置同步
-├── internal/normalize/          # 跨平台路径和内容规范化
+├── internal/cli/                # Cobra 命令定义和命令执行逻辑
+├── internal/project/            # 项目级 .claude.json 同步
 ├── go.mod
 └── go.sum
 ```
+
+CLI 依赖根目录的 `core/` module。配置、加密、WebDAV、对象存储、快照、同步、规范化和 Claude 二进制管理等共享能力都在 `../core/` 中维护。
 
 ## 技术栈
 
@@ -192,7 +186,7 @@ go build -o build/bin/cc-box.exe ./cmd/cc-box/
 从仓库根目录也可以执行：
 
 ```bash
-make build-cli
+go -C cli build -o build/bin/cc-box.exe ./cmd/cc-box/
 ```
 
 构建产物：
@@ -212,13 +206,13 @@ go test ./...
 从仓库根目录也可以执行：
 
 ```bash
-make test-cli
+go -C cli test ./...
 ```
 
-测试覆盖配置、加密、快照、合并、WebDAV、二进制管理、项目配置同步等主要能力。
+CLI 测试覆盖命令层、项目配置同步以及对共享 `core/` 能力的调用路径；共享核心能力的单元测试在 `core/` module 中运行。
 
 ## 与 GUI 的关系
 
-CLI 和 GUI 是两个独立应用。CLI 可以单独开发、构建和发布，不需要依赖 GUI。
+CLI 和 GUI 是两个独立应用，但都依赖 `core/`。CLI 可以单独开发、构建和发布，不需要依赖 GUI。
 
-如果你只需要命令行能力，只关注当前 `cli/` 目录即可。
+如果你只需要命令行入口，只关注当前 `cli/` 目录即可；如果修改同步、加密、快照、WebDAV 或 Claude 二进制管理，需要同时关注 `../core/`。

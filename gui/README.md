@@ -199,7 +199,7 @@ wails build -clean -nopackage -m -nosyncgomod
 从仓库根目录也可以执行：
 
 ```bash
-make build-gui
+cd gui && wails build -clean -nopackage -m -nosyncgomod
 ```
 
 构建产物：
@@ -246,10 +246,10 @@ go test ./...
 从仓库根目录也可以执行：
 
 ```bash
-make test-gui
+go -C gui test ./...
 ```
 
-当前测试覆盖 GUI 数据处理、文件树、diff、冲突处理、Dashboard 状态、虚拟 WebDAV 流程、二进制生命周期、密钥轮转，以及 GUI 自带 `internal/` 业务逻辑。
+当前测试覆盖 GUI 数据处理、文件树、diff、冲突处理、Dashboard 状态、虚拟 WebDAV 流程、二进制生命周期、密钥轮转，以及 GUI 自带 `internal/` 业务逻辑。共享核心能力的单元测试在 `core/` module 中运行。
 
 ## 手动验证建议
 
@@ -266,6 +266,6 @@ GUI 是桌面应用，构建通过不等于界面交互一定正常。发布前�
 
 ## 与 CLI 的关系
 
-GUI 和 CLI 是两个独立应用。GUI 可以单独开发、构建和发布，不需要依赖 CLI。
+GUI 和 CLI 是两个独立应用，但都依赖根目录的 `core/` module。GUI 可以单独开发、构建和发布，不需要依赖 CLI。
 
-如果你只需要桌面图形界面，只关注当前 `gui/` 目录即可。
+如果你只需要桌面图形界面，只关注当前 `gui/` 目录即可；如果修改同步、加密、快照、WebDAV 或 Claude 二进制管理，需要同时关注 `../core/`。
