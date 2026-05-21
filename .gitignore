@@ -6,15 +6,6 @@
 /gui/frontend/node_modules/
 /gui/frontend/.svelte-kit/
 
-# 发布排除
-/CLAUDE.md
-/CLI_GUI_DEVELOPMENT_REFERENCE.md
-/CROSS_PLATFORM_COMPATIBILITY_PLAN.md
-/DESIGN.md
-/IMPROVEMENT-PLAN.md
-/Makefile
-/.claude/
-
 # 敏感文件
 *.key
 *.pem
