@@ -1,45 +1,84 @@
 <script>
   import { onMount, createEventDispatcher } from 'svelte'
   import { EventsOn } from '../../wailsjs/runtime/runtime.js'
-  import { GetDashboard, QuickPush, QuickPull, QuickSync, RepairRemoteFromLocal } from '../../wailsjs/go/main/App.js'
+  import { GetDashboardLocal, RefreshDashboardRemote, QuickPush, QuickPull, QuickSync, RepairRemoteFromLocal } from '../../wailsjs/go/main/App.js'
 
   export let syncState = 'idle'
   export let theme = 'dark'
+  export let active = false
   const dispatch = createEventDispatcher()
 
   let dashboard = null
   let loading = true
+  let remoteChecking = false
   let actionLoading = ''
   let actionError = ''
   let progress = null
   let currentOpId = null
+  let dirty = false
 
-  onMount(async () => {
-    await refresh()
+  $: if (active && dirty && !remoteChecking) {
+    dirty = false
+    refreshRemote()
+  }
+
+  onMount(() => {
+    loadInitial()
     EventsOn('op:progress', (e) => {
       if (!e.operation || (!e.operation.startsWith('quick-') && e.operation !== 'repair-remote')) return
       if (e.opId === currentOpId || (actionLoading === 'sync' && (e.operation === 'quick-pull' || e.operation === 'quick-push'))) progress = e
     })
     EventsOn('op:complete', async (e) => {
-      if (!e || e.opId !== currentOpId) return
-      actionLoading = ''; progress = null; currentOpId = null
-      if (e.status === 'error') {
-        actionError = e.error || '同步失败'
-        await refresh()
-      } else {
-        actionError = ''
-        await refresh()
+      if (!e) return
+      if (e.opId === currentOpId) {
+        actionLoading = ''; progress = null; currentOpId = null
+        actionError = e.status === 'error' ? (e.error || '同步失败') : ''
+        await refreshRemote()
+        return
+      }
+      if (affectsDashboard(e.operation)) {
+        if (active) await refreshRemote()
+        else dirty = true
       }
     })
   })
 
-  async function refresh() {
+  async function loadInitial() {
+    await loadLocal()
+    if (dashboard && dashboard.syncStatus !== 'local_error') await refreshRemote()
+  }
+
+  async function loadLocal() {
     try {
-      dashboard = await GetDashboard()
-      if (dashboard && dashboard.conflicts) syncState = 'conflict'
-      else syncState = dashboard?.syncStatus || 'idle'
-    } catch (e) { syncState = 'error' }
+      dashboard = await GetDashboardLocal()
+      syncState = dashboard?.syncStatus || 'checking'
+    } catch (e) {
+      syncState = 'error'
+    }
     loading = false
+  }
+
+  async function refreshRemote() {
+    if (remoteChecking) return
+    remoteChecking = true
+    if (!actionLoading) syncState = 'checking'
+    try {
+      dashboard = await RefreshDashboardRemote()
+      syncState = dashboard?.conflicts ? 'conflict' : (dashboard?.syncStatus || 'idle')
+    } catch (e) {
+      const message = e?.message || String(e)
+      syncState = 'connection_error'
+      if (dashboard) {
+        dashboard = {
+          ...dashboard,
+          syncStatus: 'connection_error',
+          syncHealth: { ...(dashboard.syncHealth || {}), status: 'connection_error', code: 'remote_refresh_failed', message, canRepair: false }
+        }
+      }
+    } finally {
+      remoteChecking = false
+      loading = false
+    }
   }
 
   async function doAction(action) {
@@ -47,7 +86,7 @@
     try {
       currentOpId = action === 'push' ? await QuickPush() : action === 'pull' ? await QuickPull() : await QuickSync()
     } catch (e) {
-      actionLoading = ''; syncState = 'error'; actionError = e.message || String(e)
+      actionLoading = ''; progress = null; currentOpId = null; syncState = 'error'; actionError = e.message || String(e)
     }
   }
 
@@ -57,19 +96,24 @@
     try {
       currentOpId = await RepairRemoteFromLocal()
     } catch (e) {
-      actionLoading = ''; syncState = 'error'; actionError = e.message || String(e)
+      actionLoading = ''; progress = null; currentOpId = null; syncState = 'error'; actionError = e.message || String(e)
     }
   }
 
   function navigateTo(page) { dispatch('navigate', { page }) }
 
+  function affectsDashboard(operation) {
+    return operation && (operation.startsWith('quick-') || operation.startsWith('bulk-') || operation === 'repair-remote' || operation === 'binary-upload')
+  }
+
   function statusLabel(state) {
+    if (state === 'checking') return '正在检查远程...'
     if (state === 'syncing') return '同步中'
     if (state === 'conflict') return `${data.conflicts} 个冲突`
     if (state === 'pending') return '待同步'
     if (state === 'remote_uninitialized') return '远程未初始化'
     if (state === 'remote_incomplete') return '远程数据不完整'
-    if (state === 'key_mismatch') return '密钥不匹配'
+    if (state === 'key_mismatch') return '加密密码不匹配'
     if (state === 'connection_error') return '连接异常'
     if (state === 'local_error') return '本地配置异常'
     if (state === 'error') return '连接异常'
@@ -85,9 +129,10 @@
   $: health = data.syncHealth
   $: hasConflicts = data.conflicts !== 0
   $: displaySyncState = hasConflicts ? 'conflict' : (syncState || data.syncStatus || 'idle')
+  $: isCheckingState = displaySyncState === 'checking'
   $: isWarnState = displaySyncState === 'pending' || displaySyncState === 'remote_uninitialized' || displaySyncState === 'idle'
   $: isErrorState = displaySyncState === 'error' || displaySyncState === 'connection_error' || displaySyncState === 'remote_incomplete' || displaySyncState === 'key_mismatch' || displaySyncState === 'local_error'
-  $: showRecovery = health && ['remote_uninitialized', 'remote_incomplete', 'key_mismatch', 'connection_error', 'local_error'].includes(displaySyncState)
+  $: showRecovery = health && !isCheckingState && ['remote_uninitialized', 'remote_incomplete', 'key_mismatch', 'connection_error', 'local_error'].includes(displaySyncState)
   $: hasBackups = data.backups && data.backups.length
   $: claudeBinary = data.claudeBinary || {
     platformLabel: '当前平台', localVersion: data.claudeVersion, remoteVersion: '',
@@ -118,12 +163,13 @@
             <span>暗色</span>
           {/if}
         </button>
-        <div class="status-pill" class:conflict={displaySyncState === 'conflict'} class:warn={isWarnState} class:err={isErrorState} class:syncing={displaySyncState === 'syncing'}>
-          <div class="status-dot" class:ok={displaySyncState === 'synced'} class:warn={isWarnState} class:err={isErrorState || displaySyncState === 'conflict'} class:syncing={displaySyncState === 'syncing'}></div>
+        <div class="status-pill" class:conflict={displaySyncState === 'conflict'} class:warn={isWarnState} class:err={isErrorState} class:syncing={displaySyncState === 'syncing' || isCheckingState}>
+          <div class="status-dot" class:ok={displaySyncState === 'synced'} class:warn={isWarnState} class:err={isErrorState || displaySyncState === 'conflict'} class:syncing={displaySyncState === 'syncing' || isCheckingState}></div>
           <span class="status-text">{statusLabel(displaySyncState)}</span>
           {#if displaySyncState === 'conflict'}
-            <button class="status-link" on:click={() => navigateTo('files')}>解决</button>
+            <button class="status-link danger" on:click={() => navigateTo('files')}>解决</button>
           {/if}
+          <button class="status-link" disabled={remoteChecking || !!actionLoading} on:click={refreshRemote}>重新检查</button>
         </div>
         <div class="toolbar-divider"></div>
         <div class="action-group">
@@ -341,10 +387,12 @@
   .status-dot.syncing { background: rgb(var(--state-sync)); }
   .status-text { font-size: 12px; font-family: 'DM Mono', monospace; color: rgb(var(--text-secondary)); }
   .status-link {
-    font-size: 11px; color: rgb(var(--state-err)); background: none;
+    font-size: 11px; color: rgb(var(--text-muted)); background: none;
     border: none; cursor: pointer; margin-left: 4px; transition: color 0.2s;
   }
+  .status-link.danger { color: rgb(var(--state-err)); }
   .status-link:hover { color: rgb(var(--accent)); }
+  .status-link:disabled { opacity: 0.45; cursor: not-allowed; }
   .toolbar-divider { width: 1px; height: 20px; background: rgb(var(--border)); }
   .action-group { display: flex; gap: 4px; }
   .action-btn {

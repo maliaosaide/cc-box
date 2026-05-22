@@ -239,6 +239,24 @@ export namespace main {
 	        this.excluded = source["excluded"];
 	    }
 	}
+	export class ClaudeFileInfo {
+	    name: string;
+	    path: string;
+	    pattern: string;
+	    excluded: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new ClaudeFileInfo(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.path = source["path"];
+	        this.pattern = source["pattern"];
+	        this.excluded = source["excluded"];
+	    }
+	}
 	export class ConfigStatus {
 	    ok: boolean;
 	    webdavConfigured: boolean;
@@ -708,13 +726,31 @@ export namespace main {
 	        this.modified = source["modified"];
 	    }
 	}
+	export class FileFailure {
+	    path: string;
+	    fullPath: string;
+	    error: string;
+
+	    static createFrom(source: any = {}) {
+	        return new FileFailure(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.fullPath = source["fullPath"];
+	        this.error = source["error"];
+	    }
+	}
 	export class FileNode {
 	    name: string;
 	    path: string;
+	    fullPath?: string;
 	    isDir: boolean;
 	    status: string;
 	    size: number;
 	    modified: string;
+	    error?: string;
 	    children?: FileNode[];
 	    expanded?: boolean;
 
@@ -726,10 +762,12 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
 	        this.path = source["path"];
+	        this.fullPath = source["fullPath"];
 	        this.isDir = source["isDir"];
 	        this.status = source["status"];
 	        this.size = source["size"];
 	        this.modified = source["modified"];
+	        this.error = source["error"];
 	        this.children = this.convertValues(source["children"], FileNode);
 	        this.expanded = source["expanded"];
 	    }
@@ -757,6 +795,9 @@ export namespace main {
 	    total: number;
 	    changed: number;
 	    conflicts: number;
+	    failed: number;
+	    failures?: FileFailure[];
+	    checking?: boolean;
 
 	    static createFrom(source: any = {}) {
 	        return new FileTreeResult(source);
@@ -768,6 +809,9 @@ export namespace main {
 	        this.total = source["total"];
 	        this.changed = source["changed"];
 	        this.conflicts = source["conflicts"];
+	        this.failed = source["failed"];
+	        this.failures = this.convertValues(source["failures"], FileFailure);
+	        this.checking = source["checking"];
 	    }
 
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

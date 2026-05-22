@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import { GetConfig, SetConfigField, TestConnection, SetWebDAVPassword, AddExcludePattern, RemoveExcludePattern, GetClaudeDirectories, GetEncryptionStatus, VerifyEncryptionKey, ChangeEncryptionPassword, PreviewEncryptionPassword, SaveEncryptionPassword } from '../../wailsjs/go/main/App.js'
+  import { GetConfig, SetConfigField, TestConnection, SetWebDAVPassword, AddExcludePattern, RemoveExcludePattern, GetClaudeDirectories, GetClaudeExcludeFiles, GetEncryptionStatus, VerifyEncryptionKey, ChangeEncryptionPassword, PreviewEncryptionPassword, SaveEncryptionPassword } from '../../wailsjs/go/main/App.js'
 
   let activeTab = 'connection'
 
@@ -44,7 +44,10 @@
   }
   let excludeList = []
   let claudeDirs = []
+  let claudeFiles = []
   let encStatus = null
+  let excludeLoaded = false
+  let encryptionLoaded = false
   let verifyResult = null
   let verifyLoading = false
   let inputEncPass = ''
@@ -60,10 +63,14 @@
   let confirmEncPass = ''
   let changePassLoading = false
 
-  const defaultPatterns = ['sessions/', 'cache/', 'debug/', 'telemetry/', 'downloads/', 'paste-cache/', 'shell-snapshots/', 'file-history/', 'session-env/', 'ide/', 'backups/', 'plans/', 'tasks/', 'teams/', 'plugins/data/', '*.lock']
+  const defaultPatterns = []
 
   $: availableClaudeDirs = claudeDirs.filter(dir => !dir.excluded)
+  $: availableClaudeFiles = claudeFiles.filter(file => !file.excluded)
   $: excludedDirectoryPatterns = excludeList.filter(isDirectoryPattern)
+  $: excludedFilePatterns = excludeList.filter(isManagedFilePattern)
+  $: if (cfg && activeTab === 'exclude') ensureExcludeLoaded()
+  $: if (cfg && activeTab === 'encryption') ensureEncryptionStatus()
 
   onMount(async () => {
     await loadConfig()
@@ -94,9 +101,9 @@
           claudeJSON: cfg.claudeJSONPathRaw || '',
         }
         excludeList = [...(cfg.exclude || [])]
-        await loadClaudeDirectories()
+        excludeLoaded = false
+        encryptionLoaded = false
       }
-      try { encStatus = await GetEncryptionStatus() } catch (e) { }
     } catch (e) {
       error = e.message || String(e)
     }
@@ -216,6 +223,18 @@
     await loadConfig()
   }
 
+  async function ensureExcludeLoaded() {
+    if (excludeLoaded) return
+    excludeLoaded = true
+    await Promise.all([loadClaudeDirectories(), loadClaudeExcludeFiles()])
+  }
+
+  async function ensureEncryptionStatus() {
+    if (encryptionLoaded) return
+    encryptionLoaded = true
+    try { encStatus = await GetEncryptionStatus() } catch (e) { encStatus = null }
+  }
+
   async function loadClaudeDirectories() {
     try {
       claudeDirs = await GetClaudeDirectories()
@@ -225,22 +244,41 @@
     }
   }
 
-  async function excludeDirectory(dir) {
+  async function loadClaudeExcludeFiles() {
     try {
-      await AddExcludePattern(dir.pattern)
-      if (!excludeList.includes(dir.pattern)) excludeList = [...excludeList, dir.pattern]
-      claudeDirs = claudeDirs.map(item => item.pattern === dir.pattern ? { ...item, excluded: true } : item)
+      claudeFiles = await GetClaudeExcludeFiles()
+    } catch (e) {
+      claudeFiles = []
+      error = e.message || String(e)
+    }
+  }
+
+  async function excludeDirectory(dir) {
+    await excludePattern(dir.pattern, 'directory')
+  }
+
+  async function excludeFile(file) {
+    await excludePattern(file.pattern, 'file')
+  }
+
+  async function excludePattern(pattern, kind) {
+    try {
+      await AddExcludePattern(pattern)
+      if (!excludeList.includes(pattern)) excludeList = [...excludeList, pattern]
+      if (kind === 'directory') claudeDirs = claudeDirs.map(item => item.pattern === pattern ? { ...item, excluded: true } : item)
+      if (kind === 'file') claudeFiles = claudeFiles.map(item => item.pattern === pattern ? { ...item, excluded: true } : item)
       showSaved()
     } catch (e) {
       error = e.message || String(e)
     }
   }
 
-  async function restoreDirectory(pattern) {
+  async function restorePattern(pattern) {
     try {
       await RemoveExcludePattern(pattern)
       excludeList = excludeList.filter(x => x !== pattern)
       claudeDirs = claudeDirs.map(item => item.pattern === pattern ? { ...item, excluded: false } : item)
+      claudeFiles = claudeFiles.map(item => item.pattern === pattern ? { ...item, excluded: false } : item)
       showSaved()
     } catch (e) {
       error = e.message || String(e)
@@ -251,9 +289,18 @@
     return String(pattern || '').endsWith('/') && !String(pattern || '').includes('*')
   }
 
+  function isManagedFilePattern(pattern) {
+    return claudeFiles.some(item => item.pattern === pattern)
+  }
+
   function directoryLabel(pattern) {
     const dir = claudeDirs.find(item => item.pattern === pattern)
     return dir ? `${dir.name}/` : pattern
+  }
+
+  function fileLabel(pattern) {
+    const file = claudeFiles.find(item => item.pattern === pattern)
+    return file ? file.name : pattern
   }
 
   async function verifyKey() {
@@ -720,8 +767,37 @@
       <div class="card animate-fade-in">
         <div class="exclude-header">
           <div>
+            <span class="info-label">同步文件</span>
+            <div class="hint">可单独管理 {cfg.claudeDir} 下的 settings.json，点击 × 可排除文件。</div>
+          </div>
+          <span class="text-xs text-txt-muted">{availableClaudeFiles.length} 个文件</span>
+        </div>
+        <div class="exclude-list">
+          {#if availableClaudeFiles.length === 0}
+            <div class="empty-compact">没有可同步的文件</div>
+          {:else}
+            {#each availableClaudeFiles as file (file.pattern)}
+              <div class="exclude-row">
+                <div class="exclude-left">
+                  <span class="exclude-pattern font-mono">{file.name}</span>
+                  <span class="exclude-path font-mono">{file.path}</span>
+                </div>
+                <button class="exclude-action remove" title="排除文件" on:click={() => excludeFile(file)}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14">
+                    <path d="M18 6L6 18M6 6l12 12"/>
+                  </svg>
+                </button>
+              </div>
+            {/each}
+          {/if}
+        </div>
+      </div>
+
+      <div class="card animate-fade-in">
+        <div class="exclude-header">
+          <div>
             <span class="info-label">已排除目录</span>
-            <div class="hint">点击 + 恢复同步；文件级规则暂不在这里管理。</div>
+            <div class="hint">点击 + 恢复同步。</div>
           </div>
           <span class="text-xs text-txt-muted">{excludedDirectoryPatterns.length} 条规则</span>
         </div>
@@ -737,7 +813,36 @@
                     {isDefaultPattern(pattern) ? '默认' : '自定义'}
                   </span>
                 </div>
-                <button class="exclude-action add" title="恢复同步" on:click={() => restoreDirectory(pattern)}>
+                <button class="exclude-action add" title="恢复同步" on:click={() => restorePattern(pattern)}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14">
+                    <path d="M12 5v14M5 12h14"/>
+                  </svg>
+                </button>
+              </div>
+            {/each}
+          {/if}
+        </div>
+      </div>
+
+      <div class="card animate-fade-in">
+        <div class="exclude-header">
+          <div>
+            <span class="info-label">已排除文件</span>
+            <div class="hint">点击 + 恢复同步；这里只管理 settings.json。</div>
+          </div>
+          <span class="text-xs text-txt-muted">{excludedFilePatterns.length} 条规则</span>
+        </div>
+        <div class="exclude-list">
+          {#if excludedFilePatterns.length === 0}
+            <div class="empty-compact">暂无排除文件</div>
+          {:else}
+            {#each excludedFilePatterns as pattern (pattern)}
+              <div class="exclude-row">
+                <div class="exclude-left">
+                  <span class="exclude-pattern font-mono">{fileLabel(pattern)}</span>
+                  <span class="exclude-type custom">自定义</span>
+                </div>
+                <button class="exclude-action add" title="恢复同步" on:click={() => restorePattern(pattern)}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14">
                     <path d="M12 5v14M5 12h14"/>
                   </svg>

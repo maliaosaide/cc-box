@@ -17,6 +17,8 @@ import (
 
 const ClaudePathEnv = "CC_BOX_CLAUDE_PATH"
 
+const claudeResolutionCacheTTL = 24 * time.Hour
+
 type ClaudeResolution struct {
 	CurrentPath string `json:"currentPath"`
 	ManagedPath string `json:"managedPath"`
@@ -25,6 +27,7 @@ type ClaudeResolution struct {
 	Valid       bool   `json:"valid"`
 	ReadOnly    bool   `json:"readOnly"`
 	IsShim      bool   `json:"isShim"`
+	Stale       bool   `json:"stale"`
 	Error       string `json:"error,omitempty"`
 }
 
@@ -39,6 +42,7 @@ type claudeBinaryCache struct {
 	Path        string    `json:"path"`
 	ManagedPath string    `json:"managed_path"`
 	Source      string    `json:"source"`
+	Version     string    `json:"version"`
 	ReadOnly    bool      `json:"read_only"`
 	IsShim      bool      `json:"is_shim"`
 	UpdatedAt   time.Time `json:"updated_at"`
@@ -46,6 +50,10 @@ type claudeBinaryCache struct {
 
 func ResolveClaudeBinary() ClaudeResolution {
 	return resolveClaudeBinary(false)
+}
+
+func ResolveClaudeBinaryCached() ClaudeResolution {
+	return resolveClaudeBinaryFast(claudeResolutionCacheTTL)
 }
 
 func RedetectClaudeBinary() ClaudeResolution {
@@ -127,6 +135,7 @@ func resolveClaudeBinary(skipCache bool) ClaudeResolution {
 		if err != nil {
 			return invalidClaudeResolution(managedPath, fmt.Sprintf("手动配置的 Claude 路径不可用: %v", err))
 		}
+		_ = saveClaudeCache(res, "configured")
 		return res
 	}
 
@@ -135,6 +144,7 @@ func resolveClaudeBinary(skipCache bool) ClaudeResolution {
 		if err != nil {
 			return invalidClaudeResolution(managedPath, fmt.Sprintf("环境变量 %s 指向的 Claude 路径不可用: %v", ClaudePathEnv, err))
 		}
+		_ = saveClaudeCache(res, "environment")
 		return res
 	}
 
@@ -163,6 +173,45 @@ func resolveClaudeBinary(skipCache bool) ClaudeResolution {
 	return invalidClaudeResolution(managedPath, message)
 }
 
+func resolveClaudeBinaryFast(maxAge time.Duration) ClaudeResolution {
+	managedPath := ResolveClaudeManagedPath()
+	cached, hasCache := readClaudeCache(managedPath)
+
+	cfg, cfgErr := config.Load()
+	if cfgErr == nil && strings.TrimSpace(cfg.Binary.ClaudePath) != "" {
+		res, err := resolveCandidateFast(claudeCandidate{path: cfg.Binary.ClaudePath, source: "configured"}, managedPath, cached, hasCache, maxAge)
+		if err != nil {
+			return invalidClaudeResolution(managedPath, fmt.Sprintf("手动配置的 Claude 路径不可用: %v", err))
+		}
+		return res
+	}
+
+	if envPath := strings.TrimSpace(os.Getenv(ClaudePathEnv)); envPath != "" {
+		res, err := resolveCandidateFast(claudeCandidate{path: envPath, source: "environment", readOnly: true}, managedPath, cached, hasCache, maxAge)
+		if err != nil {
+			return invalidClaudeResolution(managedPath, fmt.Sprintf("环境变量 %s 指向的 Claude 路径不可用: %v", ClaudePathEnv, err))
+		}
+		return res
+	}
+
+	if hasCache {
+		res, err := resolveCandidateFast(claudeCandidate{path: cached.Path, source: "cache", readOnly: cached.ReadOnly}, managedPath, cached, hasCache, maxAge)
+		if err == nil {
+			res.Source = "cache"
+			return res
+		}
+	}
+
+	for _, candidate := range append(binDirCandidates(), append(pathCandidates(), commonCandidates()...)...) {
+		res, err := resolveCandidateFast(candidate, managedPath, cached, hasCache, maxAge)
+		if err == nil {
+			return res
+		}
+	}
+
+	return invalidClaudeResolution(managedPath, "未找到可用的 Claude 二进制")
+}
+
 func resolveCandidate(candidate claudeCandidate, managedPath string) (ClaudeResolution, error) {
 	path := expandBinaryPath(candidate.path)
 	if path == "" {
@@ -175,11 +224,11 @@ func resolveCandidate(candidate claudeCandidate, managedPath string) (ClaudeReso
 	if info.IsDir() {
 		return ClaudeResolution{}, fmt.Errorf("%s 是目录", path)
 	}
+	isShim := isScriptShim(path)
 	version, err := DetectVersion(path)
 	if err != nil {
 		return ClaudeResolution{}, err
 	}
-	isShim := isScriptShim(path)
 	readOnly := candidate.readOnly || isShim || !samePath(path, managedPath)
 	if candidate.source == "configured" && !isShim {
 		readOnly = false
@@ -198,18 +247,78 @@ func resolveCandidate(candidate claudeCandidate, managedPath string) (ClaudeReso
 	}, nil
 }
 
-func resolveCachedClaude(managedPath string) (ClaudeResolution, bool) {
+func resolveCandidateFast(candidate claudeCandidate, managedPath string, cached claudeBinaryCache, hasCache bool, maxAge time.Duration) (ClaudeResolution, error) {
+	path := expandBinaryPath(candidate.path)
+	if path == "" {
+		return ClaudeResolution{}, errors.New("路径为空")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return ClaudeResolution{}, err
+	}
+	if info.IsDir() {
+		return ClaudeResolution{}, fmt.Errorf("%s 是目录", path)
+	}
+	isShim := isScriptShim(path)
+	readOnly := candidate.readOnly || isShim || !samePath(path, managedPath)
+	if candidate.source == "configured" && !isShim {
+		readOnly = false
+	}
+	if candidate.source == "bin_dir" && samePath(path, managedPath) && !isShim {
+		readOnly = false
+	}
+
+	version := ""
+	stale := true
+	if hasCache && samePath(cached.Path, path) {
+		version = cached.Version
+		readOnly = cached.ReadOnly || readOnly
+		isShim = cached.IsShim || isShim
+		stale = isClaudeCacheStale(cached, maxAge)
+	}
+	if version == "" {
+		stale = true
+	}
+
+	return ClaudeResolution{
+		CurrentPath: path,
+		ManagedPath: managedPath,
+		Source:      candidate.source,
+		Version:     version,
+		Valid:       true,
+		ReadOnly:    readOnly,
+		IsShim:      isShim,
+		Stale:       stale,
+	}, nil
+}
+
+func readClaudeCache(managedPath string) (claudeBinaryCache, bool) {
 	data, err := os.ReadFile(claudeCachePath())
 	if err != nil {
-		return ClaudeResolution{}, false
+		return claudeBinaryCache{}, false
 	}
 	var cached claudeBinaryCache
 	if err := json.Unmarshal(data, &cached); err != nil {
 		_ = ClearClaudeResolutionCache()
-		return ClaudeResolution{}, false
+		return claudeBinaryCache{}, false
 	}
-	if !samePath(cached.ManagedPath, managedPath) {
+	if cached.Path == "" || !samePath(cached.ManagedPath, managedPath) {
 		_ = ClearClaudeResolutionCache()
+		return claudeBinaryCache{}, false
+	}
+	return cached, true
+}
+
+func isClaudeCacheStale(cached claudeBinaryCache, maxAge time.Duration) bool {
+	if maxAge <= 0 || cached.UpdatedAt.IsZero() {
+		return true
+	}
+	return time.Since(cached.UpdatedAt) > maxAge
+}
+
+func resolveCachedClaude(managedPath string) (ClaudeResolution, bool) {
+	cached, ok := readClaudeCache(managedPath)
+	if !ok {
 		return ClaudeResolution{}, false
 	}
 	res, err := resolveCandidate(claudeCandidate{path: cached.Path, source: "cache", readOnly: cached.ReadOnly}, managedPath)
@@ -228,6 +337,7 @@ func saveClaudeCache(res ClaudeResolution, source string) error {
 		Path:        res.CurrentPath,
 		ManagedPath: res.ManagedPath,
 		Source:      source,
+		Version:     res.Version,
 		ReadOnly:    res.ReadOnly,
 		IsShim:      res.IsShim,
 		UpdatedAt:   time.Now().UTC(),

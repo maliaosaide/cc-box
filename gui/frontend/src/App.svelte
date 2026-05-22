@@ -13,6 +13,7 @@
   let initialized = false
   let loading = true
   let currentPage = 'dashboard'
+  let mountedPages = { dashboard: true }
   let syncState = 'idle'
   let theme = 'dark'
 
@@ -31,6 +32,8 @@
     document.documentElement.dataset.theme = theme
     localStorage.setItem('cc-box-theme', theme)
   }
+
+  $: if (!mountedPages[currentPage]) mountedPages = { ...mountedPages, [currentPage]: true }
 
   function handleInitComplete() { initialized = true; currentPage = 'dashboard' }
   function navigate(e) { if (e.detail?.page) currentPage = e.detail.page }
@@ -55,24 +58,36 @@
     <div class="flex-1 flex overflow-hidden">
       <Sidebar bind:currentPage={currentPage} {syncState} {theme} on:navigate={() => {}} on:toggleTheme={toggleTheme} />
       <main class="main-content">
-        <div class="page-panel" class:active={currentPage === 'dashboard'}>
-          <Dashboard bind:syncState {theme} on:navigate={navigate} on:toggleTheme={toggleTheme} />
-        </div>
-        <div class="page-panel" class:active={currentPage === 'files'}>
-          <Files bind:syncState on:navigate={navigate} />
-        </div>
-        <div class="page-panel" class:active={currentPage === 'binaries'}>
-          <Binaries on:navigate={navigate} />
-        </div>
-        <div class="page-panel" class:active={currentPage === 'projects'}>
-          <Projects on:navigate={navigate} />
-        </div>
-        <div class="page-panel" class:active={currentPage === 'history'}>
-          <History on:navigate={navigate} />
-        </div>
-        <div class="page-panel" class:active={currentPage === 'settings'}>
-          <Settings on:navigate={navigate} />
-        </div>
+        {#if mountedPages.dashboard}
+          <div class="page-panel" class:active={currentPage === 'dashboard'}>
+            <Dashboard bind:syncState {theme} active={currentPage === 'dashboard'} on:navigate={navigate} on:toggleTheme={toggleTheme} />
+          </div>
+        {/if}
+        {#if mountedPages.files}
+          <div class="page-panel" class:active={currentPage === 'files'}>
+            <Files bind:syncState active={currentPage === 'files'} on:navigate={navigate} />
+          </div>
+        {/if}
+        {#if mountedPages.binaries}
+          <div class="page-panel" class:active={currentPage === 'binaries'}>
+            <Binaries active={currentPage === 'binaries'} on:navigate={navigate} />
+          </div>
+        {/if}
+        {#if mountedPages.projects}
+          <div class="page-panel" class:active={currentPage === 'projects'}>
+            <Projects on:navigate={navigate} />
+          </div>
+        {/if}
+        {#if mountedPages.history}
+          <div class="page-panel" class:active={currentPage === 'history'}>
+            <History active={currentPage === 'history'} on:navigate={navigate} />
+          </div>
+        {/if}
+        {#if mountedPages.settings}
+          <div class="page-panel" class:active={currentPage === 'settings'}>
+            <Settings on:navigate={navigate} />
+          </div>
+        {/if}
       </main>
     </div>
   </div>

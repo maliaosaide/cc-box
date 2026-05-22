@@ -15,6 +15,8 @@
       case 'added': return 'A'
       case 'deleted': return 'D'
       case 'conflict': return 'C'
+      case 'failed': return '!'
+      case 'checking': return '…'
       default: return '·'
     }
   }
@@ -26,6 +28,8 @@
       case 'added': return 'st-add'
       case 'deleted': return 'st-del'
       case 'conflict': return 'st-conflict'
+      case 'failed': return 'st-failed'
+      case 'checking': return 'st-checking'
       default: return ''
     }
   }
@@ -41,8 +45,8 @@
     dispatch('toggle', { path })
   }
 
-  function selectFile(path, status) {
-    dispatch('select', { path, status })
+  function selectFile(node) {
+    dispatch('select', { path: node.path, status: node.status, error: node.error, fullPath: node.fullPath })
   }
 
   $: isExpanded = expandedDirs.has(node.path)
@@ -50,40 +54,49 @@
     ? (node.children || [])
     : (node.children || []).filter(c => {
         if (c.isDir) return hasMatchingChild(c, filter)
-        if (filter === 'changed') return c.status !== 'synced'
+        if (filter === 'changed') return isChangedStatus(c.status)
         if (filter === 'conflict') return c.status === 'conflict'
+        if (filter === 'failed') return c.status === 'failed'
         return true
       })
+
+  function isChangedStatus(status) {
+    return ['modified', 'added', 'deleted', 'conflict'].includes(status)
+  }
 
   function hasMatchingChild(n, f) {
     if (!n.children) return false
     for (const c of n.children) {
       if (c.isDir && hasMatchingChild(c, f)) return true
-      if (f === 'changed' && c.status !== 'synced') return true
+      if (f === 'changed' && isChangedStatus(c.status)) return true
       if (f === 'conflict' && c.status === 'conflict') return true
+      if (f === 'failed' && c.status === 'failed') return true
     }
     return false
   }
 
   function aggregateStatus(n) {
-    let hasConflict = false, hasModified = false, hasAdded = false, hasDeleted = false, hasSynced = false
+    let hasFailed = false, hasConflict = false, hasModified = false, hasAdded = false, hasDeleted = false, hasChecking = false
     function walk(node) {
       if (!node.children) return
       for (const c of node.children) {
         if (c.isDir) { walk(c); continue }
         switch (c.status) {
+          case 'failed': hasFailed = true; break
           case 'conflict': hasConflict = true; break
           case 'modified': hasModified = true; break
           case 'added': hasAdded = true; break
           case 'deleted': hasDeleted = true; break
-          default: hasSynced = true
+          case 'checking': hasChecking = true; break
         }
       }
     }
     walk(n)
+    if (hasFailed) return 'failed'
     if (hasConflict) return 'conflict'
     if (hasModified || hasAdded) return 'modified'
     if (hasDeleted) return 'deleted'
+    if (hasChecking) return 'checking'
     return 'synced'
   }
 </script>
@@ -106,7 +119,7 @@
   {/if}
 {:else}
   <button class="tree-file" class:selected={selectedPath === node.path} type="button"
-       on:click={() => selectFile(node.path, node.status)}>
+       on:click={() => selectFile(node)}>
     <span class="status-badge {statusClass(node.status)}">{statusIcon(node.status)}</span>
     <span class="tree-name">{node.name}</span>
     <span class="tree-meta">{formatSize(node.size)}</span>
@@ -151,5 +164,7 @@
   .st-mod { color: rgb(var(--accent)); }
   .st-add { color: rgb(var(--state-ok)); }
   .st-del { color: rgb(var(--text-muted)); opacity: 0.5; }
+  .st-checking { color: rgb(var(--text-muted)); }
+  .st-failed { color: rgb(var(--state-err)); background: rgba(184,92,92,0.08); }
   .st-conflict { color: rgb(var(--state-err)); background: rgba(184,92,92,0.08); }
 </style>

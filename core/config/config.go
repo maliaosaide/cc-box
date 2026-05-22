@@ -66,25 +66,8 @@ type ExcludeConfig struct {
 	Patterns []string `mapstructure:"patterns"`
 }
 
-// DefaultExcludePatterns 默认排除规则
-var DefaultExcludePatterns = []string{
-	"sessions/",
-	"cache/",
-	"debug/",
-	"telemetry/",
-	"downloads/",
-	"paste-cache/",
-	"shell-snapshots/",
-	"file-history/",
-	"session-env/",
-	"ide/",
-	"backups/",
-	"plans/",
-	"tasks/",
-	"teams/",
-	"plugins/data/",
-	"*.lock",
-}
+// DefaultExcludePatterns 默认不排除任何目录
+var DefaultExcludePatterns = []string{}
 
 // DefaultConfig 返回带默认值的配置
 func DefaultConfig() *Config {

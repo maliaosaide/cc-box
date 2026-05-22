@@ -1,4 +1,8 @@
-# CC-Box
+<div align="center">
+  <img src="./gui/assets/icons/generated/appicon.png" alt="CC-Box 图标" width="128" height="128" />
+
+  <h1>CC-Box</h1>
+</div>
 
 把 Claude Code 配置、项目设置和 Claude 二进制版本装进一个可同步、可回滚、可加密的工具箱。
 

@@ -103,8 +103,13 @@ type ConfigStatus struct {
 	Message           string `json:"message"`
 }
 
-// GetDashboard 返回概览页数据
+// GetDashboard 返回完整概览页数据，保留给旧调用使用
 func (a *App) GetDashboard() (*DashboardData, error) {
+	return a.RefreshDashboardRemote()
+}
+
+// GetDashboardLocal 返回不依赖远程请求的首屏概览数据
+func (a *App) GetDashboardLocal() (*DashboardData, error) {
 	if !config.IsInitialized() {
 		return nil, fmt.Errorf("未初始化")
 	}
@@ -114,22 +119,50 @@ func (a *App) GetDashboard() (*DashboardData, error) {
 		return nil, err
 	}
 
-	claudeBinary := collectClaudeBinaryInfo(nil)
+	return a.buildDashboardBase(cfg), nil
+}
+
+// RefreshDashboardRemote 在本地概览数据基础上补充远程同步状态
+func (a *App) RefreshDashboardRemote() (*DashboardData, error) {
+	if !config.IsInitialized() {
+		return nil, fmt.Errorf("未初始化")
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+
+	data := a.buildDashboardBase(cfg)
+	if data.SyncStatus == "local_error" {
+		return data, nil
+	}
+
+	client, key, err := a.loadClientKey(cfg)
+	if err != nil {
+		data.setSyncHealth("local_error", "local_credentials_error", err.Error(), false, "", "")
+		return data, nil
+	}
+	a.fillDashboardFromSnapshots(data, cfg, client, key)
+
+	return data, nil
+}
+
+func (a *App) buildDashboardBase(cfg *config.Config) *DashboardData {
+	claudeBinary := a.collectClaudeBinaryInfo(nil)
 	data := &DashboardData{
-		SyncStatus:    "idle",
-		SyncHealth:    SyncHealth{Status: "idle", Code: "idle", Message: "尚未同步"},
+		SyncStatus:    "checking",
+		SyncHealth:    SyncHealth{Status: "checking", Code: "checking_remote", Message: "本地数据已加载，正在检查远程..."},
 		ClaudeVersion: claudeBinary.LocalVersion,
 		ClaudeLatest:  claudeBinary.Status == "latest",
 		ClaudeBinary:  claudeBinary,
 		ConfigStatus:  buildConfigStatus(cfg),
-		Conflicts:     0,
 		Devices:       []DeviceInfo{},
 		RecentChanges: []ChangeInfo{},
 		Backups:       []BackupInfo{},
 		Binaries:      []BinaryInfo{},
 	}
 
-	// 当前设备
 	data.Devices = append(data.Devices, DeviceInfo{
 		Name:       cfg.Device.Name,
 		Platform:   config.Platform(),
@@ -138,14 +171,55 @@ func (a *App) GetDashboard() (*DashboardData, error) {
 		IsCurrent:  true,
 	})
 
-	client, key, err := a.loadClientKey(cfg)
-	if err != nil {
-		data.setSyncHealth("connection_error", "local_credentials_error", err.Error(), false, "", "")
-		return data, nil
+	if !data.ConfigStatus.OK {
+		data.setSyncHealth("local_error", "local_config_invalid", data.ConfigStatus.Message, false, "", "")
 	}
-	a.fillDashboardFromSnapshots(data, cfg, client, key)
 
-	return data, nil
+	localHeadStr, err := readLocalHeadID()
+	if err == nil && localHeadStr != "" {
+		if err := validateSnapshotID(localHeadStr); err != nil {
+			data.setSyncHealth("local_error", "local_head_invalid", err.Error(), false, localHeadStr, "")
+		}
+	}
+
+	entries, _ := a.GetLocalSnapshotList(3)
+	data.fillBackups(cfg, entries)
+	fillDashboardConflicts(data)
+
+	return data
+}
+
+func (d *DashboardData) fillBackups(cfg *config.Config, entries []SnapshotEntry) {
+	d.Backups = []BackupInfo{}
+	if d.LastSync == "" && len(entries) > 0 {
+		d.LastSync = entries[0].Timestamp
+	}
+	for i, e := range entries {
+		if i >= 3 {
+			break
+		}
+		deviceName := e.Device
+		if deviceName == cfg.Device.ID {
+			deviceName = cfg.Device.Name
+		}
+		d.Backups = append(d.Backups, BackupInfo{
+			ID:      e.ID,
+			Message: e.Message,
+			Device:  deviceName,
+			Time:    e.Timestamp,
+		})
+	}
+}
+
+func fillDashboardConflicts(data *DashboardData) {
+	conflictFiles := listConflicts()
+	data.Conflicts = len(conflictFiles)
+	data.ConflictFiles = []ConflictRef{}
+	for path := range conflictFiles {
+		if len(data.ConflictFiles) < 10 {
+			data.ConflictFiles = append(data.ConflictFiles, ConflictRef{Path: path})
+		}
+	}
 }
 
 // fillDashboardFromSnapshots 从真实快照数据填充概览
@@ -204,40 +278,15 @@ func (a *App) fillDashboardFromSnapshots(data *DashboardData, cfg *config.Config
 	// 上次同步时间
 	data.LastSync = snap.Timestamp.Local().Format("2006-01-02 15:04")
 
-	// 备份列表（最多3个）
 	entries, _ := a.GetSnapshotList(3)
-	for i, e := range entries {
-		if i >= 3 {
-			break
-		}
-		deviceName := e.Device
-		// 找设备友好名称
-		if deviceName == cfg.Device.ID {
-			deviceName = cfg.Device.Name
-		}
-		data.Backups = append(data.Backups, BackupInfo{
-			ID:      e.ID,
-			Message: e.Message,
-			Device:  deviceName,
-			Time:    e.Timestamp,
-		})
-	}
+	data.fillBackups(cfg, entries)
 
-	data.ClaudeBinary = collectClaudeBinaryInfo(client)
+	data.ClaudeBinary = a.collectClaudeBinaryRemoteInfo(data.ClaudeBinary, client)
 	data.ClaudeVersion = data.ClaudeBinary.LocalVersion
 	data.ClaudeLatest = data.ClaudeBinary.Status == "latest"
 
-	// 冲突
-	// 从远程加载设备列表
 	a.loadRemoteDevices(data, cfg, client)
-
-	conflictFiles := listConflicts()
-	data.Conflicts = len(conflictFiles)
-	for path := range conflictFiles {
-		if len(data.ConflictFiles) < 10 {
-			data.ConflictFiles = append(data.ConflictFiles, ConflictRef{Path: path})
-		}
-	}
+	fillDashboardConflicts(data)
 }
 
 func (d *DashboardData) setSyncHealth(status, code, message string, canRepair bool, localHead, remoteHead string) {
@@ -305,6 +354,7 @@ func (a *App) loadClientKey(cfg *config.Config) (*webdav.Client, []byte, error) 
 		return nil, nil, err
 	}
 	client := newConfiguredWebDAVClient(cfg, pass)
+	client.SetTimeout(8 * time.Second)
 	return client, key, nil
 }
 
@@ -317,9 +367,12 @@ func (a *App) QuickPush() int64 {
 		}
 
 		scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
-		scanResult, err := scanner.Scan()
+		scanResult, err := scanner.ScanPartial()
 		if err != nil {
 			return fmt.Errorf("扫描失败: %w", err)
+		}
+		if err := requireCompleteScan(scanResult); err != nil {
+			return err
 		}
 
 		localHead, _ := os.ReadFile(config.CCBoxDir() + "/HEAD")
@@ -556,9 +609,12 @@ func (a *App) RepairRemoteFromLocal() int64 {
 		}
 
 		scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
-		scanResult, err := scanner.Scan()
+		scanResult, err := scanner.ScanPartial()
 		if err != nil {
 			return fmt.Errorf("扫描失败: %w", err)
+		}
+		if err := requireCompleteScan(scanResult); err != nil {
+			return err
 		}
 
 		store := object.NewStore(client, key, config.CCBoxDir()+"/cache/objects")
@@ -696,7 +752,7 @@ func dirExists(path string) bool {
 	return err == nil && info.IsDir()
 }
 
-func collectClaudeBinaryInfo(client *webdav.Client) ClaudeBinaryInfo {
+func (a *App) collectClaudeBinaryInfo(client *webdav.Client) ClaudeBinaryInfo {
 	platform := config.Platform()
 	info := ClaudeBinaryInfo{
 		Platform:      platform,
@@ -705,14 +761,27 @@ func collectClaudeBinaryInfo(client *webdav.Client) ClaudeBinaryInfo {
 		StatusLabel:   "当前平台暂无云端版本",
 	}
 
-	resolution := binary.ResolveClaudeBinary()
+	resolution := binary.ResolveClaudeBinaryCached()
 	if resolution.Valid {
 		info.Installed = true
 		info.LocalVersion = resolution.Version
 	}
 
+	return a.collectClaudeBinaryRemoteInfo(info, client)
+}
+
+func (a *App) collectClaudeBinaryRemoteInfo(info ClaudeBinaryInfo, client *webdav.Client) ClaudeBinaryInfo {
+	platform := info.Platform
+	if platform == "" {
+		platform = config.Platform()
+		info.Platform = platform
+	}
+	if info.PlatformLabel == "" {
+		info.PlatformLabel = platformLabel(platform)
+	}
+
 	if client != nil {
-		if idx, err := binary.LoadIndex(client); err == nil {
+		if idx, err := a.loadBinaryIndexCached(client); err == nil {
 			info.RemoteVersion = highestRemoteBinaryVersion(idx.GetBinaryInfo(platform, "claude"))
 		}
 	}

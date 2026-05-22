@@ -75,6 +75,7 @@ func (a *App) GetSnapshotList(limit int) ([]SnapshotEntry, error) {
 	if err != nil {
 		return nil, err
 	}
+	client.SetTimeout(8 * time.Second)
 
 	headData, _, err := client.GET("HEAD")
 	if err != nil {
@@ -92,13 +93,12 @@ func (a *App) GetSnapshotList(limit int) ([]SnapshotEntry, error) {
 
 // GetSnapshotDetail 返回快照详情
 func (a *App) GetSnapshotDetail(id string) (*SnapshotDetail, error) {
-	_, client, key, err := a.loadClients()
-	if err != nil {
-		return nil, err
-	}
-
 	snap, err := a.loadLocalSnapByID(id)
 	if err != nil {
+		_, client, key, clientErr := a.loadClients()
+		if clientErr != nil {
+			return nil, clientErr
+		}
 		snap, err = a.loadSnapByID(client, key, id)
 		if err != nil {
 			return nil, err
@@ -267,7 +267,7 @@ func (a *App) GetConfig() (*ConfigView, error) {
 		verDir = v.GetString("binary.versionsdir")
 	}
 	claudeBinaryPath := v.GetString("binary.claude_path")
-	resolution := binary.ResolveClaudeBinary()
+	resolution := binary.ResolveClaudeBinaryCached()
 	webdavBaseURL := ""
 	webdavHeadURL := ""
 	if strings.TrimSpace(cfg.WebDAV.URL) != "" {
@@ -490,6 +490,26 @@ func (a *App) GetClaudeDirectories() ([]ClaudeDirectoryInfo, error) {
 	return dirs, nil
 }
 
+// GetClaudeExcludeFiles 返回可单独排除的 Claude 配置文件
+func (a *App) GetClaudeExcludeFiles() ([]ClaudeFileInfo, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	excluded := make(map[string]bool, len(cfg.Exclude.Patterns))
+	for _, pattern := range cfg.Exclude.Patterns {
+		excluded[pattern] = true
+	}
+
+	const settingsPattern = "settings.json"
+	return []ClaudeFileInfo{{
+		Name:     settingsPattern,
+		Path:     filepath.Join(config.ClaudeDir(), settingsPattern),
+		Pattern:  settingsPattern,
+		Excluded: excluded[settingsPattern],
+	}}, nil
+}
+
 // AddExcludePattern 添加排除规则
 func (a *App) AddExcludePattern(pattern string) error {
 	cfg, err := config.Load()
@@ -533,6 +553,35 @@ func parseInt(s string) (int, error) {
 	return v, nil
 }
 
+const guiDisplayCacheTTL = 30 * time.Second
+
+func (a *App) loadBinaryIndexCached(client *webdav.Client) (*binary.Index, error) {
+	a.cacheMu.Lock()
+	if a.binaryIndexCache != nil && time.Since(a.binaryIndexCached) < guiDisplayCacheTTL {
+		idx := a.binaryIndexCache
+		a.cacheMu.Unlock()
+		return idx, nil
+	}
+	a.cacheMu.Unlock()
+
+	idx, err := binary.LoadIndex(client)
+	if err != nil {
+		return nil, err
+	}
+	a.cacheMu.Lock()
+	a.binaryIndexCache = idx
+	a.binaryIndexCached = time.Now()
+	a.cacheMu.Unlock()
+	return idx, nil
+}
+
+func (a *App) clearBinaryIndexCache() {
+	a.cacheMu.Lock()
+	a.binaryIndexCache = nil
+	a.binaryIndexCached = time.Time{}
+	a.cacheMu.Unlock()
+}
+
 // TestConnection 测试 WebDAV 连接
 func (a *App) TestConnection() (*ConnectionTest, error) {
 	cfg, err := config.Load()
@@ -546,6 +595,7 @@ func (a *App) TestConnection() (*ConnectionTest, error) {
 	}
 
 	client := newConfiguredWebDAVClient(cfg, pass)
+	client.SetTimeout(8 * time.Second)
 	start := time.Now()
 
 	_, _, err = client.GET("HEAD")
@@ -560,9 +610,25 @@ func (a *App) TestConnection() (*ConnectionTest, error) {
 
 // GetProjectList 返回已追踪项目列表和 orphan 列表
 func (a *App) GetProjectList() (*ProjectListResult, error) {
+	if result, ok := a.cachedProjectList(); ok {
+		go func() { _, _ = a.RefreshProjectList() }()
+		return result, nil
+	}
+	return a.RefreshProjectList()
+}
+
+func (a *App) RefreshProjectList() (*ProjectListResult, error) {
+	result, err := a.discoverProjectList()
+	if err != nil {
+		return nil, err
+	}
+	a.storeProjectListCache(result)
+	return result, nil
+}
+
+func (a *App) discoverProjectList() (*ProjectListResult, error) {
 	result := &ProjectListResult{}
 
-	// 发现本地项目
 	projects, err := project.DiscoverProjects()
 	if err != nil {
 		return nil, fmt.Errorf("扫描项目失败: %w", err)
@@ -588,7 +654,6 @@ func (a *App) GetProjectList() (*ProjectListResult, error) {
 		})
 	}
 
-	// 加载 orphan 项目
 	orphanIdx, err := project.LoadOrphanIndex()
 	if err == nil {
 		for _, o := range orphanIdx.Orphans {
@@ -617,7 +682,11 @@ func (a *App) GetProjectDetail(projectPath string) (string, error) {
 
 // AddProjectPath 添加项目路径
 func (a *App) AddProjectPath(dir string) error {
-	return project.AddTrackedProject(dir)
+	if err := project.AddTrackedProject(dir); err != nil {
+		return err
+	}
+	a.clearProjectListCache()
+	return nil
 }
 
 // DeleteOrphan 删除 orphan 记录
@@ -633,12 +702,76 @@ func (a *App) DeleteOrphan(remote string) error {
 		}
 	}
 	idx.Orphans = filtered
-	return project.SaveOrphanIndex(idx)
+	if err := project.SaveOrphanIndex(idx); err != nil {
+		return err
+	}
+	a.clearProjectListCache()
+	return nil
 }
 
 type ProjectListResult struct {
 	Projects []ProjectInfo `json:"projects"`
 	Orphans  []OrphanInfo  `json:"orphans"`
+}
+
+type projectListCacheFile struct {
+	UpdatedAt time.Time          `json:"updatedAt"`
+	Result    *ProjectListResult `json:"result"`
+}
+
+const projectListCacheTTL = 24 * time.Hour
+
+func (a *App) cachedProjectList() (*ProjectListResult, bool) {
+	a.cacheMu.Lock()
+	if a.projectListCache != nil && time.Since(a.projectListCached) < projectListCacheTTL {
+		result := a.projectListCache
+		a.cacheMu.Unlock()
+		return result, true
+	}
+	a.cacheMu.Unlock()
+
+	data, err := os.ReadFile(projectListCachePath())
+	if err != nil {
+		return nil, false
+	}
+	var cached projectListCacheFile
+	if err := json.Unmarshal(data, &cached); err != nil || cached.Result == nil || time.Since(cached.UpdatedAt) >= projectListCacheTTL {
+		return nil, false
+	}
+	a.cacheMu.Lock()
+	a.projectListCache = cached.Result
+	a.projectListCached = cached.UpdatedAt
+	a.cacheMu.Unlock()
+	return cached.Result, true
+}
+
+func (a *App) storeProjectListCache(result *ProjectListResult) {
+	now := time.Now()
+	a.cacheMu.Lock()
+	a.projectListCache = result
+	a.projectListCached = now
+	a.cacheMu.Unlock()
+	path := projectListCachePath()
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return
+	}
+	data, err := json.MarshalIndent(projectListCacheFile{UpdatedAt: now, Result: result}, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(path, data, 0600)
+}
+
+func (a *App) clearProjectListCache() {
+	a.cacheMu.Lock()
+	a.projectListCache = nil
+	a.projectListCached = time.Time{}
+	a.cacheMu.Unlock()
+	_ = os.Remove(projectListCachePath())
+}
+
+func projectListCachePath() string {
+	return filepath.Join(config.CCBoxDir(), "cache", "project-list.json")
 }
 
 // ConfigView 配置视图
@@ -683,6 +816,13 @@ type ClaudeBinaryResolution struct {
 }
 
 type ClaudeDirectoryInfo struct {
+	Name     string `json:"name"`
+	Path     string `json:"path"`
+	Pattern  string `json:"pattern"`
+	Excluded bool   `json:"excluded"`
+}
+
+type ClaudeFileInfo struct {
 	Name     string `json:"name"`
 	Path     string `json:"path"`
 	Pattern  string `json:"pattern"`
@@ -778,7 +918,7 @@ type BinaryPageData struct {
 func (a *App) GetBinaryPage() (*BinaryPageData, error) {
 	platform := config.Platform()
 	verDir := config.VersionsDir()
-	resolution := binary.ResolveClaudeBinary()
+	resolution := binary.ResolveClaudeBinaryCached()
 
 	data := &BinaryPageData{
 		Platform:       platform,
@@ -800,8 +940,9 @@ func (a *App) GetBinaryPage() (*BinaryPageData, error) {
 	if err != nil {
 		return data, nil
 	}
+	client.SetTimeout(8 * time.Second)
 
-	idx, err := binary.LoadIndex(client)
+	idx, err := a.loadBinaryIndexCached(client)
 	if err != nil {
 		return data, nil
 	}
@@ -944,6 +1085,7 @@ func (a *App) SwitchBinaryVersion(version string, source string) error {
 	}
 
 	_ = binary.ClearClaudeResolutionCache()
+	a.clearBinaryIndexCache()
 	return nil
 }
 
@@ -964,7 +1106,11 @@ func (a *App) UploadBinaryVersion(version string) int64 {
 		}
 
 		a.emitProgress(opID, "binary-upload", 0, int64(len(data)), 0, 1, "正在上传 "+version+"...")
-		return binary.Upload(client, key, "claude", data, version, a.progressCallback(opID, "binary-upload"))
+		if err := binary.Upload(client, key, "claude", data, version, a.progressCallback(opID, "binary-upload")); err != nil {
+			return err
+		}
+		a.clearBinaryIndexCache()
+		return nil
 	})
 }
 
@@ -994,7 +1140,11 @@ func (a *App) UploadCurrentBinary() int64 {
 		}
 
 		a.emitProgress(opID, "binary-upload", 0, int64(len(data)), 0, 1, "正在上传当前版本 "+version+"...")
-		return binary.Upload(client, key, "claude", data, version, a.progressCallback(opID, "binary-upload"))
+		if err := binary.Upload(client, key, "claude", data, version, a.progressCallback(opID, "binary-upload")); err != nil {
+			return err
+		}
+		a.clearBinaryIndexCache()
+		return nil
 	})
 }
 
@@ -1028,7 +1178,8 @@ func (a *App) GetBinaryStorage() (*BinaryStorageInfo, error) {
 	}
 	_, client, _, err := a.loadClients()
 	if err == nil {
-		idx, err := binary.LoadIndex(client)
+		client.SetTimeout(8 * time.Second)
+		idx, err := a.loadBinaryIndexCached(client)
 		if err == nil {
 			platform := config.Platform()
 			binInfo := idx.GetBinaryInfo(platform, "claude")
@@ -1055,7 +1206,11 @@ func (a *App) DeleteCloudBinaryVersion(version string) error {
 	if err != nil {
 		return err
 	}
-	return binary.DeleteRemoteVersion(client, key, "claude", version, config.Platform())
+	if err := binary.DeleteRemoteVersion(client, key, "claude", version, config.Platform()); err != nil {
+		return err
+	}
+	a.clearBinaryIndexCache()
+	return nil
 }
 
 // RevertToSnapshot 回滚到指定快照版本
@@ -1071,9 +1226,12 @@ func (a *App) RevertToSnapshot(snapID string) error {
 	}
 
 	scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
-	scanResult, err := scanner.Scan()
+	scanResult, err := scanner.ScanPartial()
 	if err != nil {
 		return fmt.Errorf("扫描失败: %w", err)
+	}
+	if err := requireCompleteScan(scanResult); err != nil {
+		return err
 	}
 
 	parentHead, _ := readLocalHeadID()

@@ -12,10 +12,11 @@ import (
 )
 
 var (
-	opCounter  atomic.Int64
-	opCancels  = make(map[int64]context.CancelFunc)
-	opCancelMu sync.Mutex
-	opResults  = make(map[int64]error)
+	opCounter    atomic.Int64
+	opCancels    = make(map[int64]context.CancelFunc)
+	opOperations = make(map[int64]string)
+	opCancelMu   sync.Mutex
+	opResults    = make(map[int64]error)
 )
 
 // ProgressEvent 进度事件
@@ -32,9 +33,10 @@ type ProgressEvent struct {
 
 // OpResult 操作结果事件
 type OpResult struct {
-	OpID   int64  `json:"opId"`
-	Error  string `json:"error,omitempty"`
-	Status string `json:"status"` // "success" | "error"
+	OpID      int64  `json:"opId"`
+	Operation string `json:"operation"`
+	Error     string `json:"error,omitempty"`
+	Status    string `json:"status"` // "success" | "error"
 }
 
 // StartAsync 启动异步操作，返回 opId
@@ -44,6 +46,7 @@ func (a *App) StartAsync(operation string, fn func(ctx context.Context, opID int
 
 	opCancelMu.Lock()
 	opCancels[opID] = cancel
+	opOperations[opID] = operation
 	opCancelMu.Unlock()
 
 	go func() {
@@ -51,13 +54,14 @@ func (a *App) StartAsync(operation string, fn func(ctx context.Context, opID int
 		defer func() {
 			opCancelMu.Lock()
 			delete(opCancels, opID)
+			delete(opOperations, opID)
 			opResults[opID] = err
 			opCancelMu.Unlock()
 		}()
 
 		err = fn(ctx, opID)
 
-		result := OpResult{OpID: opID, Status: "success"}
+		result := OpResult{OpID: opID, Operation: operation, Status: "success"}
 		if err != nil {
 			result.Status = "error"
 			result.Error = err.Error()
@@ -72,11 +76,12 @@ func (a *App) StartAsync(operation string, fn func(ctx context.Context, opID int
 func (a *App) CancelOperation(opID int64) {
 	opCancelMu.Lock()
 	cancel, ok := opCancels[opID]
+	operation := opOperations[opID]
 	opCancelMu.Unlock()
 
 	if ok {
 		cancel()
-		a.eventsEmit("op:cancelled", OpResult{OpID: opID, Status: "error", Error: "已取消"})
+		a.eventsEmit("op:cancelled", OpResult{OpID: opID, Operation: operation, Status: "error", Error: "已取消"})
 	}
 }
 

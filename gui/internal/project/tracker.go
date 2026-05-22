@@ -3,6 +3,7 @@
 package project
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Project 项目信息
@@ -123,7 +125,9 @@ func DiscoverProjects() ([]Project, error) {
 // GetGitRemote 获取项目的 git remote URL
 // 优先 origin，其次第一个可用的 remote
 func GetGitRemote(dir string) (url string, name string) {
-	cmd := exec.Command("git", "remote", "-v")
+	ctx, cancel := context.WithTimeout(context.Background(), 800*time.Millisecond)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "remote", "-v")
 	cmd.Dir = dir
 	hideCommandWindow(cmd)
 	output, err := cmd.Output()

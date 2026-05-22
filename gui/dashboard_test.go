@@ -42,6 +42,28 @@ func TestGetDashboardRemoteHeadRetriesTransientFailure(t *testing.T) {
 	}
 }
 
+func TestCollectClaudeBinaryRemoteInfoKeepsLocalVersion(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/binaries/index.json" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"platforms":{"windows-amd64":{"claude":{"current":"2.0.0"}}}}`))
+	}))
+	defer server.Close()
+
+	app := NewApp()
+	info := app.collectClaudeBinaryRemoteInfo(ClaudeBinaryInfo{
+		Platform:      "windows-amd64",
+		PlatformLabel: "Windows",
+		LocalVersion:  "1.0.0",
+		Installed:     true,
+	}, webdav.NewClient(server.URL, "", ""))
+	if info.LocalVersion != "1.0.0" || info.RemoteVersion != "2.0.0" || info.Status != "update_available" {
+		t.Fatalf("ClaudeBinaryInfo = %+v, want local 1.0.0 and remote 2.0.0", info)
+	}
+}
+
 func TestGetDashboardRemoteHeadDoesNotRetryNotFound(t *testing.T) {
 	oldDelay := dashboardRemoteHeadRetryDelay
 	dashboardRemoteHeadRetryDelay = time.Hour

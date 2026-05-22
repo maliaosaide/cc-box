@@ -21,6 +21,7 @@ import (
 func (a *App) TestWebDAVConnection(url, username, password, root string) error {
 	fullURL := buildWebDAVURL(url, root)
 	client := webdav.NewClient(fullURL, username, password)
+	client.SetTimeout(8 * time.Second)
 	_, err := client.PROPFIND("", 0)
 	if err != nil {
 		return fmt.Errorf("连接失败: %w", err)
@@ -32,6 +33,7 @@ func (a *App) TestWebDAVConnection(url, username, password, root string) error {
 func (a *App) DetectExistingSetup(url, username, password, root string) (bool, error) {
 	fullURL := buildWebDAVURL(url, root)
 	client := webdav.NewClient(fullURL, username, password)
+	client.SetTimeout(8 * time.Second)
 	exists, err := client.Exists("salt.bin")
 	if err != nil {
 		return false, err
@@ -92,9 +94,12 @@ func (a *App) InitNewDevice(url, username, password, root, encPassword, deviceNa
 
 	// 扫描配置文件
 	scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
-	scanResult, err := scanner.Scan()
+	scanResult, err := scanner.ScanPartial()
 	if err != nil {
 		return fmt.Errorf("扫描配置文件失败: %w", err)
+	}
+	if err := requireCompleteScan(scanResult); err != nil {
+		return err
 	}
 
 	// 上传文件 objects

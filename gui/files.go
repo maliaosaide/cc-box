@@ -25,10 +25,12 @@ import (
 type FileNode struct {
 	Name     string      `json:"name"`
 	Path     string      `json:"path"`
+	FullPath string      `json:"fullPath,omitempty"`
 	IsDir    bool        `json:"isDir"`
-	Status   string      `json:"status"` // synced, modified, added, deleted, conflict, excluded
+	Status   string      `json:"status"` // synced, modified, added, deleted, conflict, failed
 	Size     int64       `json:"size"`
 	Modified string      `json:"modified"`
+	Error    string      `json:"error,omitempty"`
 	Children []*FileNode `json:"children,omitempty"`
 	Expanded bool        `json:"expanded,omitempty"`
 }
@@ -83,12 +85,21 @@ type conflictMetadata struct {
 	RemoteExists   bool      `json:"remote_exists"`
 }
 
+type FileFailure struct {
+	Path     string `json:"path"`
+	FullPath string `json:"fullPath"`
+	Error    string `json:"error"`
+}
+
 // FileTreeResult 文件树返回结果
 type FileTreeResult struct {
-	Root      *FileNode `json:"root"`
-	Total     int       `json:"total"`
-	Changed   int       `json:"changed"`
-	Conflicts int       `json:"conflicts"`
+	Root      *FileNode     `json:"root"`
+	Total     int           `json:"total"`
+	Changed   int           `json:"changed"`
+	Conflicts int           `json:"conflicts"`
+	Failed    int           `json:"failed"`
+	Failures  []FileFailure `json:"failures,omitempty"`
+	Checking  bool          `json:"checking,omitempty"`
 }
 
 // loadClients 加载配置、WebDAV 客户端、密钥
@@ -242,87 +253,257 @@ func (a *App) loadRemoteSnap(client *webdav.Client, key []byte) (*snapshot.Snaps
 	return snap, nil
 }
 
+// GetFileTreeLocal 返回不依赖远程请求和内容 hash 的本地文件树
+func (a *App) GetFileTreeLocal() (*FileTreeResult, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	files, failures, err := scanFileTreeMetadata(config.ClaudeDir(), cfg.Exclude.Patterns)
+	if err != nil {
+		return nil, fmt.Errorf("扫描失败: %w", err)
+	}
+	var localSnap *snapshot.Snapshot
+	if headID, err := readLocalHeadID(); err == nil && headID != "" {
+		localSnap, _ = a.loadLocalSnapByID(headID)
+	}
+	return buildFileTreePreviewResult(files, failures, localSnap), nil
+}
+
+func scanFileTreeMetadata(root string, exclude []string) (map[string]snapshot.FileEntry, []FileFailure, error) {
+	files := make(map[string]snapshot.FileEntry)
+	failures := []FileFailure{}
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			failures = append(failures, fileFailureFromPath(root, path, err))
+			return nil
+		}
+		if info == nil {
+			return nil
+		}
+		if path == root {
+			return nil
+		}
+		relPath := normalize.RelativePath(root, path)
+		if info.IsDir() {
+			if isFileTreeExcluded(relPath, true, exclude) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if isFileTreeExcluded(relPath, false, exclude) {
+			return nil
+		}
+		fileInfo, ok, statErr := readableFileTreeInfo(path, info)
+		if statErr != nil {
+			failures = append(failures, fileFailureFromPath(root, path, statErr))
+			return nil
+		}
+		if !ok {
+			return nil
+		}
+		files[relPath] = snapshot.FileEntry{Size: fileInfo.Size(), Modified: fileInfo.ModTime().UTC()}
+		return nil
+	})
+	return files, failures, err
+}
+
+func readableFileTreeInfo(path string, info os.FileInfo) (os.FileInfo, bool, error) {
+	if info.Mode().IsRegular() {
+		return info, true, nil
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		targetInfo, err := os.Stat(path)
+		if err != nil {
+			return nil, false, err
+		}
+		if targetInfo.Mode().IsRegular() {
+			return targetInfo, true, nil
+		}
+		return nil, false, fmt.Errorf("符号链接目标不是普通文件: %s", targetInfo.Mode().String())
+	}
+	return nil, false, fmt.Errorf("不是普通文件: %s", info.Mode().String())
+}
+
+func fileFailureFromPath(root, path string, err error) FileFailure {
+	if path == "" {
+		path = root
+	}
+	relPath := normalize.RelativePath(root, path)
+	if relPath == "." {
+		relPath = ""
+	}
+	return FileFailure{Path: relPath, FullPath: path, Error: err.Error()}
+}
+
+func fileFailuresFromScan(failures []snapshot.ScanFailure) []FileFailure {
+	result := make([]FileFailure, 0, len(failures))
+	for _, failure := range failures {
+		result = append(result, FileFailure{Path: failure.Path, FullPath: failure.FullPath, Error: failure.Error})
+	}
+	return result
+}
+
+func requireCompleteScan(scanResult *snapshot.ScanResult) error {
+	if err := scanResult.FailureError(); err != nil {
+		return fmt.Errorf("存在失败文件，请在配置文件页查看并修复后重试: %w", err)
+	}
+	return nil
+}
+
+func isFileTreeExcluded(relPath string, isDir bool, patterns []string) bool {
+	for _, pattern := range patterns {
+		if matchFileTreeExclude(relPath, pattern, isDir) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchFileTreeExclude(relPath, pattern string, isDir bool) bool {
+	if strings.HasSuffix(pattern, "/") {
+		dirName := strings.TrimSuffix(pattern, "/")
+		parts := strings.Split(relPath, "/")
+		for _, part := range parts {
+			if matchFileTreeGlob(part, dirName) {
+				return true
+			}
+		}
+		return false
+	}
+	if strings.Contains(pattern, "*") {
+		return matchFileTreeGlob(filepath.Base(relPath), pattern)
+	}
+	return relPath == pattern || strings.HasPrefix(relPath, pattern+"/")
+}
+
+func matchFileTreeGlob(name, pattern string) bool {
+	if pattern == "*" {
+		return true
+	}
+	if strings.HasPrefix(pattern, "*") {
+		return strings.HasSuffix(name, pattern[1:])
+	}
+	if strings.HasSuffix(pattern, "*") {
+		return strings.HasPrefix(name, pattern[:len(pattern)-1])
+	}
+	return name == pattern
+}
+
 // GetFileTree 返回配置文件树及同步状态
 func (a *App) GetFileTree() (*FileTreeResult, error) {
 	cfg, client, key, err := a.loadClients()
 	if err != nil {
 		return nil, err
 	}
+	client.SetTimeout(8 * time.Second)
 
-	// 扫描本地文件
 	scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
-	scanResult, err := scanner.Scan()
+	scanResult, err := scanner.ScanPartial()
 	if err != nil {
 		return nil, fmt.Errorf("扫描失败: %w", err)
 	}
 
-	// 加载本地快照
 	localSnap, _ := a.loadLocalSnap(client, key)
-
-	// 加载远程快照
-	remoteSnap, _ := a.loadRemoteSnap(client, key)
-
-	// 读取远程 HEAD 用于比对
 	remoteHeadData, _, _ := client.GET("HEAD")
 	remoteHeadStr := strings.TrimSpace(string(remoteHeadData))
-
-	// 计算每个文件的同步状态
-	statusMap := make(map[string]string)
-	for path := range scanResult.Files {
-		statusMap[path] = computeFileStatus(path, scanResult.Files, localSnap, remoteSnap, remoteHeadStr)
+	var remoteSnap *snapshot.Snapshot
+	if remoteHeadStr != "" {
+		remoteSnap, _ = a.loadRemoteSnapByID(client, key, remoteHeadStr)
 	}
 
-	// 检查快照中有但本地没有的（已删除）
+	return buildFileTreeResult(scanResult.Files, fileFailuresFromScan(scanResult.Failures), localSnap, remoteSnap, remoteHeadStr), nil
+}
+
+func buildFileTreePreviewResult(files map[string]snapshot.FileEntry, failures []FileFailure, localSnap *snapshot.Snapshot) *FileTreeResult {
+	return buildFileTreeNodes(files, failures, localSnap, true, func(string) string { return "checking" })
+}
+
+func buildFileTreeResult(files map[string]snapshot.FileEntry, failures []FileFailure, localSnap, remoteSnap *snapshot.Snapshot, remoteHeadStr string) *FileTreeResult {
+	localHeadStr, _ := readLocalHeadID()
+	return buildFileTreeNodes(files, failures, localSnap, false, func(path string) string {
+		return computeFileStatus(path, files, localSnap, remoteSnap, localHeadStr, remoteHeadStr)
+	})
+}
+
+func buildFileTreeNodes(files map[string]snapshot.FileEntry, failures []FileFailure, localSnap *snapshot.Snapshot, checking bool, statusFor func(string) string) *FileTreeResult {
+	statusMap := make(map[string]string)
+	for path := range files {
+		statusMap[path] = statusFor(path)
+	}
 	if localSnap != nil {
 		for path := range localSnap.Files {
-			if _, exists := scanResult.Files[path]; !exists {
+			if _, exists := files[path]; !exists {
 				statusMap[path] = "deleted"
 			}
 		}
 	}
 
-	// 检查冲突目录
-	conflictFiles := listConflicts()
+	failureMap := make(map[string]FileFailure, len(failures))
+	for _, failure := range failures {
+		path := failure.Path
+		if path == "" {
+			path = ".claude"
+			failure.Path = path
+		}
+		failureMap[path] = failure
+		statusMap[path] = "failed"
+	}
 
-	// 构建文件树
+	conflictFiles := listConflicts()
 	root := &FileNode{Name: ".claude", Path: "", IsDir: true, Expanded: true}
 	changed := 0
 	conflicts := 0
+	failed := 0
 
 	for path, status := range statusMap {
-		if _, isConflict := conflictFiles[path]; isConflict {
-			status = "conflict"
+		if status != "failed" {
+			if _, isConflict := conflictFiles[path]; isConflict {
+				status = "conflict"
+			}
 		}
-		if status != "synced" {
+		if isChangedFileStatus(status) {
 			changed++
 		}
 		if status == "conflict" {
 			conflicts++
 		}
+		if status == "failed" {
+			failed++
+		}
 
-		entry, hasEntry := scanResult.Files[path]
-		if !hasEntry {
-			// 已删除文件
-			if old, ok := localSnap.Files[path]; ok {
-				insertNode(root, path, status, old.Size, old.Modified)
-			}
+		failure := failureMap[path]
+		entry, hasEntry := files[path]
+		if hasEntry {
+			insertNodeWithMeta(root, path, status, entry.Size, entry.Modified, failure.Error, failure.FullPath)
 			continue
 		}
-		insertNode(root, path, status, entry.Size, entry.Modified)
+		if localSnap != nil {
+			if old, ok := localSnap.Files[path]; ok {
+				insertNodeWithMeta(root, path, status, old.Size, old.Modified, failure.Error, failure.FullPath)
+				continue
+			}
+		}
+		if status == "failed" {
+			insertNodeWithMeta(root, path, status, 0, time.Time{}, failure.Error, failure.FullPath)
+		}
 	}
 
 	sortNodes(root)
+	return &FileTreeResult{Root: root, Total: len(statusMap), Changed: changed, Conflicts: conflicts, Failed: failed, Failures: failures, Checking: checking}
+}
 
-	return &FileTreeResult{
-		Root:      root,
-		Total:     len(statusMap),
-		Changed:   changed,
-		Conflicts: conflicts,
-	}, nil
+func isChangedFileStatus(status string) bool {
+	switch status {
+	case "modified", "added", "deleted", "conflict":
+		return true
+	default:
+		return false
+	}
 }
 
 // computeFileStatus 计算单个文件的同步状态
-func computeFileStatus(path string, current map[string]snapshot.FileEntry, localSnap, remoteSnap *snapshot.Snapshot, remoteHeadStr string) string {
+func computeFileStatus(path string, current map[string]snapshot.FileEntry, localSnap, remoteSnap *snapshot.Snapshot, localHeadStr, remoteHeadStr string) string {
 	cur, ok := current[path]
 	if !ok {
 		return "deleted"
@@ -346,9 +527,7 @@ func computeFileStatus(path string, current map[string]snapshot.FileEntry, local
 
 	// 检查远程是否有更新
 	if remoteSnap != nil && localSnap != nil {
-		localHead, _ := os.ReadFile(config.CCBoxDir() + "/HEAD")
-
-		if strings.TrimSpace(string(localHead)) != remoteHeadStr {
+		if localHeadStr != remoteHeadStr {
 			if remoteEntry, exists := remoteSnap.Files[path]; exists {
 				if localSnap != nil {
 					if localEntry, ok := localSnap.Files[path]; ok {
@@ -392,6 +571,10 @@ func listConflicts() map[string]bool {
 
 // insertNode 向文件树插入路径节点
 func insertNode(root *FileNode, relPath, status string, size int64, modified time.Time) {
+	insertNodeWithMeta(root, relPath, status, size, modified, "", "")
+}
+
+func insertNodeWithMeta(root *FileNode, relPath, status string, size int64, modified time.Time, message, fullPath string) {
 	parts := strings.Split(relPath, "/")
 	current := root
 
@@ -402,10 +585,12 @@ func insertNode(root *FileNode, relPath, status string, size int64, modified tim
 			current.Children = append(current.Children, &FileNode{
 				Name:     part,
 				Path:     relPath,
+				FullPath: fullPath,
 				IsDir:    false,
 				Status:   status,
 				Size:     size,
 				Modified: formatTime(modified),
+				Error:    message,
 			})
 		} else {
 			found := findChild(current, part)
@@ -707,9 +892,12 @@ func (a *App) BulkSync(action string) int64 {
 
 func (a *App) doBulkPush(ctx context.Context, opID int64, cfg *config.Config, client *webdav.Client, key []byte) error {
 	scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
-	scanResult, err := scanner.Scan()
+	scanResult, err := scanner.ScanPartial()
 	if err != nil {
 		return fmt.Errorf("扫描失败: %w", err)
+	}
+	if err := requireCompleteScan(scanResult); err != nil {
+		return err
 	}
 
 	localHead, _ := os.ReadFile(config.CCBoxDir() + "/HEAD")
@@ -842,9 +1030,12 @@ type pullMergeResult struct {
 
 func (a *App) applyRemoteSnapshot(ctx context.Context, opID int64, operation string, cfg *config.Config, client *webdav.Client, key []byte, remoteHead string, remoteSnap *snapshot.Snapshot) (*pullMergeResult, error) {
 	scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
-	scanResult, err := scanner.Scan()
+	scanResult, err := scanner.ScanPartial()
 	if err != nil {
 		return nil, fmt.Errorf("扫描失败: %w", err)
+	}
+	if err := requireCompleteScan(scanResult); err != nil {
+		return nil, err
 	}
 
 	localHead, _ := os.ReadFile(config.CCBoxDir() + "/HEAD")

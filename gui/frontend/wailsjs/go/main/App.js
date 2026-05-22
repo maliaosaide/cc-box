@@ -70,6 +70,10 @@ export function GetClaudeDirectories() {
   return window['go']['main']['App']['GetClaudeDirectories']();
 }
 
+export function GetClaudeExcludeFiles() {
+  return window['go']['main']['App']['GetClaudeExcludeFiles']();
+}
+
 export function GetConfig() {
   return window['go']['main']['App']['GetConfig']();
 }
@@ -80,6 +84,10 @@ export function GetConflictDetail(arg1) {
 
 export function GetDashboard() {
   return window['go']['main']['App']['GetDashboard']();
+}
+
+export function GetDashboardLocal() {
+  return window['go']['main']['App']['GetDashboardLocal']();
 }
 
 export function GetEncryptionStatus() {
@@ -96,6 +104,10 @@ export function GetFileDiff(arg1) {
 
 export function GetFileTree() {
   return window['go']['main']['App']['GetFileTree']();
+}
+
+export function GetFileTreeLocal() {
+  return window['go']['main']['App']['GetFileTreeLocal']();
 }
 
 export function GetLocalSnapshotList(arg1) {
@@ -156,6 +168,14 @@ export function QuickSync() {
 
 export function RedetectClaudeBinary() {
   return window['go']['main']['App']['RedetectClaudeBinary']();
+}
+
+export function RefreshDashboardRemote() {
+  return window['go']['main']['App']['RefreshDashboardRemote']();
+}
+
+export function RefreshProjectList() {
+  return window['go']['main']['App']['RefreshProjectList']();
 }
 
 export function RemoveExcludePattern(arg1) {

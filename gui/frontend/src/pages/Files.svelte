@@ -2,13 +2,14 @@
   import { onMount, createEventDispatcher } from 'svelte'
   import { EventsOn } from '../../wailsjs/runtime/runtime.js'
   import {
-    GetFileTree, GetFileContent, GetFileDiff,
+    GetFileTreeLocal, GetFileTree, GetFileContent, GetFileDiff,
     GetConflictDetail, ResolveConflict, ExcludeFile,
     BulkSync, SaveMergedConflict
   } from '../../wailsjs/go/main/App.js'
   import TreeNode from '../lib/components/TreeNode.svelte'
 
   export let syncState = 'idle'
+  export let active = false
   const dispatch = createEventDispatcher()
 
   let tree = null
@@ -20,35 +21,64 @@
   let fileDetail = null
   let diffResult = null
   let conflictDetail = null
+  let failureDetail = null
   let conflictChoice = ''
   let view = 'content'
   let actionLoading = false
   let progress = null
   let excludeConfirm = ''
   let expandedDirs = new Set([''])
+  let dirty = false
+
+  $: if (active && dirty) {
+    dirty = false
+    refreshTree()
+  }
 
   onMount(async () => {
     await refreshTree()
     EventsOn('op:progress', (e) => {
       if (e.operation && e.operation.startsWith('bulk-')) progress = e
     })
-    EventsOn('op:complete', () => {
-      actionLoading = false; progress = null; refreshTree()
+    EventsOn('op:complete', (e) => {
+      if (!affectsFiles(e?.operation)) return
+      actionLoading = false; progress = null
+      if (e.status === 'error') error = e.error || '同步失败'
+      if (active) refreshTree()
+      else dirty = true
     })
   })
 
   async function refreshTree() {
-    loading = true; error = ''
-    try { tree = await GetFileTree() } catch (e) { error = e.message || String(e) }
+    loading = !tree; error = ''
+    try {
+      tree = await GetFileTreeLocal()
+      loading = false
+      const remoteTree = await GetFileTree()
+      tree = remoteTree
+    } catch (e) {
+      if (!tree) error = e.message || String(e)
+    }
     loading = false
   }
 
+  function affectsFiles(operation) {
+    return operation && (operation.startsWith('bulk-') || operation.startsWith('quick-') || operation === 'repair-remote')
+  }
+
   async function handleSelect(e) {
-    const { path, status } = e.detail
+    const { path, status, error: failureError, fullPath } = e.detail
     selectedPath = path
     selectedStatus = status
     view = 'content'
-    diffResult = null; conflictDetail = null; conflictChoice = ''
+    diffResult = null; conflictDetail = null; failureDetail = null; conflictChoice = ''
+
+    if (status === 'failed') {
+      view = 'failed'
+      failureDetail = { path, fullPath, error: failureError }
+      fileDetail = null
+      return
+    }
 
     if (status === 'conflict') {
       view = 'conflict'
@@ -80,7 +110,7 @@
       if (choice === 'merged') await SaveMergedConflict(selectedPath, conflictDetail.merged || conflictDetail.local)
       else await ResolveConflict(selectedPath, choice)
       await refreshTree()
-      selectedPath = ''; conflictDetail = null; view = 'content'
+      selectedPath = ''; conflictDetail = null; failureDetail = null; view = 'content'
     } catch (e) { error = e.message || String(e) }
   }
 
@@ -100,11 +130,11 @@
   }
 
   function statusIcon(s) {
-    const map = { synced: '✓', modified: 'M', added: 'A', deleted: 'D', conflict: 'C' }
+    const map = { synced: '✓', modified: 'M', added: 'A', deleted: 'D', conflict: 'C', failed: '!', checking: '…' }
     return map[s] || '·'
   }
   function statusClass(s) {
-    const map = { synced: 'st-ok', modified: 'st-mod', added: 'st-add', deleted: 'st-del', conflict: 'st-conflict' }
+    const map = { synced: 'st-ok', modified: 'st-mod', added: 'st-add', deleted: 'st-del', conflict: 'st-conflict', failed: 'st-failed', checking: 'st-checking' }
     return map[s] || ''
   }
   function formatSize(b) {
@@ -114,11 +144,16 @@
     return (b / 1024 / 1024).toFixed(1) + ' MB'
   }
 
+  function isChangedStatus(status) {
+    return ['modified', 'added', 'deleted', 'conflict'].includes(status)
+  }
+
   function matchesFilter(node, activeFilter) {
     if (activeFilter === 'all') return true
     if (node.isDir) return (node.children || []).some(child => matchesFilter(child, activeFilter))
-    if (activeFilter === 'changed') return node.status !== 'synced'
+    if (activeFilter === 'changed') return isChangedStatus(node.status)
     if (activeFilter === 'conflict') return node.status === 'conflict'
+    if (activeFilter === 'failed') return node.status === 'failed'
     return true
   }
 
@@ -130,7 +165,7 @@
     <h1 class="section-title">配置文件</h1>
     <div class="toolbar-right">
       {#if tree}
-        <span class="stat">{tree.total} 个文件{#if tree.changed > 0}，<span class="stat-hl">{tree.changed} 个变更</span>{/if}</span>
+        <span class="stat">{tree.total} 个文件{#if tree.checking}，正在检查状态...{:else if tree.failed > 0}，<span class="stat-err">{tree.failed} 个失败</span>{:else if tree.changed > 0}，<span class="stat-hl">{tree.changed} 个变更</span>{/if}</span>
         <div class="toolbar-divider"></div>
       {/if}
       <div class="action-group">
@@ -152,6 +187,10 @@
       <button class="link-btn" on:click={() => { error = '' }}>关闭</button>
     </div>
   {/if}
+
+  <div class="sync-notice animate-fade-in">
+    <span>未被排除规则命中的配置文件都会同步，包括大文件和敏感配置；不想上传的文件请添加到排除规则。</span>
+  </div>
 
   {#if progress}
     <div class="progress-section animate-fade-in">
@@ -185,6 +224,9 @@
           </button>
           <button class="filter-btn filter-conflict" class:active={filter === 'conflict'} on:click={() => filter = 'conflict'}>
             冲突<span class="filter-count" class:has-conflict={tree.conflicts > 0}>{tree.conflicts}</span>
+          </button>
+          <button class="filter-btn filter-failed" class:active={filter === 'failed'} on:click={() => filter = 'failed'}>
+            失败文件<span class="filter-count" class:has-conflict={tree.failed > 0}>（{tree.failed}）</span>
           </button>
         </div>
         <div class="tree-list">
@@ -243,6 +285,31 @@
               <button class="btn-primary" disabled={!conflictChoice} on:click={() => resolveConflict(conflictChoice)}>
                 {conflictChoice ? `以${conflictChoice === 'local' ? '本地' : '远程'}为准` : '请选择版本'}
               </button>
+            </div>
+          </div>
+        {:else if view === 'failed' && failureDetail}
+          <div class="failed-view">
+            <div class="detail-header">
+              <div class="detail-title-row">
+                <span class="status-badge st-failed">!</span>
+                <span class="font-mono text-sm text-txt-primary">{selectedPath}</span>
+              </div>
+              <span class="failed-label">失败文件</span>
+            </div>
+            <div class="failed-body">
+              <div class="failed-row">
+                <span>来源路径</span>
+                <code>{failureDetail.fullPath || selectedPath}</code>
+              </div>
+              <div class="failed-row">
+                <span>失败原因</span>
+                <code>{failureDetail.error || '无法读取文件'}</code>
+              </div>
+              <p>修复权限、锁定或符号链接问题后，可重新上传。未加入排除规则的文件必须成功上传。</p>
+              <div class="failed-actions">
+                <button class="btn-ghost" on:click={() => excludeConfirm = selectedPath}>加入排除规则</button>
+                <button class="btn-primary" disabled={actionLoading} on:click={() => doBulkSync('push')}>重新上传失败文件</button>
+              </div>
             </div>
           </div>
         {:else if view === 'diff' && diffResult}
@@ -322,6 +389,7 @@
   .toolbar-right { display: flex; align-items: center; gap: 10px; }
   .stat { font-size: 11px; font-family: 'DM Mono', monospace; color: rgb(var(--text-muted)); }
   .stat-hl { color: rgb(var(--accent)); }
+  .stat-err { color: rgb(var(--state-err)); }
   .toolbar-divider { width: 1px; height: 20px; background: rgb(var(--border)); }
   .action-group { display: flex; gap: 4px; }
   .action-btn {
@@ -343,6 +411,11 @@
     padding: 8px 12px; border-radius: 6px;
     background: rgba(184,92,92,0.08); border: 1px solid rgba(184,92,92,0.15);
     font-size: 12px; color: rgb(var(--state-err));
+  }
+  .sync-notice {
+    padding: 8px 12px; border-radius: 6px;
+    background: rgba(196,112,78,0.06); border: 1px solid rgba(196,112,78,0.14);
+    font-size: 12px; color: rgb(var(--text-muted));
   }
 
   .content-layout {
@@ -370,7 +443,7 @@
     background: rgba(196,112,78,0.1); color: rgb(var(--accent));
     border-color: rgba(196,112,78,0.2);
   }
-  .filter-btn.filter-conflict.active {
+  .filter-btn.filter-conflict.active, .filter-btn.filter-failed.active {
     background: rgba(184,92,92,0.08); color: rgb(var(--state-err));
     border-color: rgba(184,92,92,0.2);
   }
@@ -380,7 +453,7 @@
     background: rgb(var(--surface-2)); color: rgb(var(--text-muted));
   }
   .filter-btn.active .filter-count { background: rgba(196,112,78,0.15); color: rgb(var(--accent)); }
-  .filter-btn.filter-conflict.active .filter-count { background: rgba(184,92,92,0.12); color: rgb(var(--state-err)); }
+  .filter-btn.filter-conflict.active .filter-count, .filter-btn.filter-failed.active .filter-count { background: rgba(184,92,92,0.12); color: rgb(var(--state-err)); }
   .filter-count.has-conflict { background: rgba(184,92,92,0.12); color: rgb(var(--state-err)); }
   .tree-list { flex: 1; overflow-y: auto; padding: 4px 0; }
 
@@ -411,7 +484,17 @@
   .st-mod { color: rgb(var(--accent)); }
   .st-add { color: rgb(var(--state-ok)); }
   .st-del { color: rgb(var(--text-muted)); opacity: 0.5; }
+  .st-checking { color: rgb(var(--text-muted)); }
+  .st-failed { color: rgb(var(--state-err)); background: rgba(184,92,92,0.08); }
   .st-conflict { color: rgb(var(--state-err)); background: rgba(184,92,92,0.08); }
+
+  .failed-view { display: flex; flex-direction: column; flex: 1; }
+  .failed-label { font-size: 11px; color: rgb(var(--state-err)); font-family: 'DM Mono', monospace; }
+  .failed-body { padding: 14px; display: flex; flex-direction: column; gap: 12px; font-size: 12px; color: rgb(var(--text-secondary)); }
+  .failed-row { display: flex; flex-direction: column; gap: 4px; }
+  .failed-row span { color: rgb(var(--text-muted)); }
+  .failed-row code { color: rgb(var(--text-primary)); font-family: 'DM Mono', monospace; word-break: break-all; }
+  .failed-actions { display: flex; gap: 8px; }
 
   .file-content {
     flex: 1; overflow: auto; padding: 12px 14px; margin: 0;

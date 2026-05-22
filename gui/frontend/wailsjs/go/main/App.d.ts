@@ -36,11 +36,15 @@ export function GetClaudeBinaryResolution():Promise<main.ClaudeBinaryResolution>
 
 export function GetClaudeDirectories():Promise<Array<main.ClaudeDirectoryInfo>>;
 
+export function GetClaudeExcludeFiles():Promise<Array<main.ClaudeFileInfo>>;
+
 export function GetConfig():Promise<main.ConfigView>;
 
 export function GetConflictDetail(arg1:string):Promise<main.ConflictDetail>;
 
 export function GetDashboard():Promise<main.DashboardData>;
+
+export function GetDashboardLocal():Promise<main.DashboardData>;
 
 export function GetEncryptionStatus():Promise<main.EncryptionStatus>;
 
@@ -49,6 +53,8 @@ export function GetFileContent(arg1:string):Promise<main.FileDetail>;
 export function GetFileDiff(arg1:string):Promise<main.DiffResult>;
 
 export function GetFileTree():Promise<main.FileTreeResult>;
+
+export function GetFileTreeLocal():Promise<main.FileTreeResult>;
 
 export function GetLocalSnapshotList(arg1:number):Promise<Array<main.SnapshotEntry>>;
 
@@ -79,6 +85,10 @@ export function QuickPush():Promise<number>;
 export function QuickSync():Promise<number>;
 
 export function RedetectClaudeBinary():Promise<main.ClaudeBinaryResolution>;
+
+export function RefreshDashboardRemote():Promise<main.DashboardData>;
+
+export function RefreshProjectList():Promise<main.ProjectListResult>;
 
 export function RemoveExcludePattern(arg1:string):Promise<void>;
 

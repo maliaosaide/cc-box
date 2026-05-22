@@ -208,6 +208,80 @@ func TestDashboardMarksMissingRemoteHeadUninitialized(t *testing.T) {
 	}
 }
 
+func TestGetDashboardLocalDoesNotRequireRemote(t *testing.T) {
+	preserveEnv(t, "HOME", "USERPROFILE", "CC_BOX_WEBDAV_PASSWORD")
+	webdavServer := newVirtualWebDAVServer(t)
+	device := newVirtualDevice(t)
+	writeTextFile(t, filepath.Join(device.claudeDir, "settings.json"), `{"theme":"light"}`)
+	activateDevice(t, device)
+	if err := device.app.InitNewDevice(webdavServer.server.URL+"/dav", "user", virtualWebDAVPassword, "/cc-box-local-dashboard/", "secret", "device-a"); err != nil {
+		t.Fatalf("InitNewDevice: %v", err)
+	}
+	webdavServer.server.Close()
+
+	dashboard, err := device.app.GetDashboardLocal()
+	if err != nil {
+		t.Fatalf("GetDashboardLocal: %v", err)
+	}
+	if dashboard.SyncStatus != "checking" || dashboard.SyncHealth.Code != "checking_remote" {
+		t.Fatalf("local dashboard health = %+v, want checking_remote", dashboard.SyncHealth)
+	}
+	if len(dashboard.Backups) == 0 || dashboard.Backups[0].Message == "" {
+		t.Fatalf("local dashboard should include cached backups: %+v", dashboard.Backups)
+	}
+	if len(dashboard.Devices) != 1 || !dashboard.Devices[0].IsCurrent {
+		t.Fatalf("local dashboard devices = %+v, want current device only", dashboard.Devices)
+	}
+}
+
+func TestRefreshDashboardRemoteReportsSynced(t *testing.T) {
+	preserveEnv(t, "HOME", "USERPROFILE", "CC_BOX_WEBDAV_PASSWORD")
+	webdavServer := newVirtualWebDAVServer(t)
+	device := newVirtualDevice(t)
+	writeTextFile(t, filepath.Join(device.claudeDir, "settings.json"), `{"theme":"light"}`)
+	activateDevice(t, device)
+	if err := device.app.InitNewDevice(webdavServer.server.URL+"/dav", "user", virtualWebDAVPassword, "/cc-box-refresh-synced/", "secret", "device-a"); err != nil {
+		t.Fatalf("InitNewDevice: %v", err)
+	}
+
+	dashboard, err := device.app.RefreshDashboardRemote()
+	if err != nil {
+		t.Fatalf("RefreshDashboardRemote: %v", err)
+	}
+	if dashboard.SyncStatus != "synced" || dashboard.SyncHealth.Code != "synced" {
+		t.Fatalf("remote dashboard health = %+v, want synced", dashboard.SyncHealth)
+	}
+}
+
+func TestRefreshDashboardRemoteReportsPending(t *testing.T) {
+	preserveEnv(t, "HOME", "USERPROFILE", "CC_BOX_WEBDAV_PASSWORD")
+	webdavServer := newVirtualWebDAVServer(t)
+	device := newVirtualDevice(t)
+	writeTextFile(t, filepath.Join(device.claudeDir, "settings.json"), `{"theme":"light"}`)
+	activateDevice(t, device)
+	if err := device.app.InitNewDevice(webdavServer.server.URL+"/dav", "user", virtualWebDAVPassword, "/cc-box-refresh-pending/", "secret", "device-a"); err != nil {
+		t.Fatalf("InitNewDevice: %v", err)
+	}
+	initialHead := readHead(t)
+	writeTextFile(t, filepath.Join(device.claudeDir, "settings.json"), `{"theme":"dark"}`)
+	waitAsyncSuccess(t, device.app.QuickPush())
+	remoteHead := readHead(t)
+	if remoteHead == initialHead {
+		t.Fatalf("QuickPush did not advance HEAD")
+	}
+	if err := os.WriteFile(filepath.Join(config.CCBoxDir(), "HEAD"), []byte(initialHead), 0600); err != nil {
+		t.Fatalf("restore local HEAD: %v", err)
+	}
+
+	dashboard, err := device.app.RefreshDashboardRemote()
+	if err != nil {
+		t.Fatalf("RefreshDashboardRemote: %v", err)
+	}
+	if dashboard.SyncStatus != "pending" || dashboard.SyncHealth.LocalHead != initialHead || dashboard.SyncHealth.RemoteHead != remoteHead {
+		t.Fatalf("remote dashboard health = %+v, want pending %s -> %s", dashboard.SyncHealth, initialHead, remoteHead)
+	}
+}
+
 func TestQuickSyncDoesNotInitializeEmptyRemote(t *testing.T) {
 	preserveEnv(t, "HOME", "USERPROFILE", "CC_BOX_WEBDAV_PASSWORD")
 	webdavServer := newVirtualWebDAVServer(t)

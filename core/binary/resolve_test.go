@@ -15,6 +15,7 @@ func withResolveTempHome(t *testing.T) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	t.Setenv(ClaudePathEnv, "")
 	return home
 }
 
@@ -130,6 +131,68 @@ func TestClearClaudeResolutionCacheIgnoresMissingFile(t *testing.T) {
 	withResolveTempHome(t)
 	if err := ClearClaudeResolutionCache(); err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
+	}
+}
+
+func TestResolveClaudeBinaryCachedUsesStoredVersionWithoutExecutingShim(t *testing.T) {
+	home := withResolveTempHome(t)
+	dir := filepath.Join(home, "npm")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(dir, "executed")
+	launcherName := "claude"
+	script := []byte("#!/bin/sh\n: > '" + strings.ReplaceAll(marker, "'", "'\\''") + "'\necho Claude Code 0.0.0\n")
+	if runtime.GOOS == "windows" {
+		launcherName = "claude.cmd"
+		script = []byte("@echo off\r\ntype nul > \"" + marker + "\"\r\necho Claude Code 0.0.0\r\n")
+	}
+	launcher := filepath.Join(dir, launcherName)
+	if err := os.WriteFile(launcher, script, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.Binary.BinDir = filepath.Join(home, "managed")
+	cfg.Binary.ClaudePath = launcher
+	if err := config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	managed := ResolveClaudeManagedPath()
+	if err := saveClaudeCache(ClaudeResolution{CurrentPath: launcher, ManagedPath: managed, Version: "9.9.9", Valid: true, ReadOnly: true, IsShim: true}, "configured"); err != nil {
+		t.Fatal(err)
+	}
+
+	got := ResolveClaudeBinaryCached()
+	if !got.Valid || got.Version != "9.9.9" || !got.IsShim || got.Stale {
+		t.Fatalf("ResolveClaudeBinaryCached() = %+v, want cached shim version", got)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("cached resolve executed shim; marker stat err = %v", err)
+	}
+}
+
+func TestResolveClaudeBinaryFastMarksExpiredCacheStale(t *testing.T) {
+	home := withResolveTempHome(t)
+	bin := filepath.Join(home, "bin", managedBinaryName("claude"))
+	if err := os.MkdirAll(filepath.Dir(bin), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bin, []byte{'M', 'Z', 0, 1, 2, 3}, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.Binary.BinDir = filepath.Join(home, "managed")
+	if err := config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	managed := ResolveClaudeManagedPath()
+	if err := saveClaudeCache(ClaudeResolution{CurrentPath: bin, ManagedPath: managed, Version: "1.2.3", Valid: true}, "bin_dir"); err != nil {
+		t.Fatal(err)
+	}
+
+	got := resolveClaudeBinaryFast(0)
+	if !got.Valid || got.Version != "1.2.3" || !got.Stale {
+		t.Fatalf("resolveClaudeBinaryFast(0) = %+v, want stale cached version", got)
 	}
 }
 

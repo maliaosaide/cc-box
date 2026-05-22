@@ -3,6 +3,8 @@
   import { EventsOn } from '../../wailsjs/runtime/runtime.js'
   import { GetBinaryPage, SwitchBinaryVersion, UploadBinaryVersion, UploadCurrentBinary, GetBinaryStorage, DeleteLocalVersion, DeleteCloudBinaryVersion, RedetectClaudeBinary, BrowseFile, SetConfigField } from '../../wailsjs/go/main/App.js'
 
+  export let active = false
+
   let activeTab = 'claude'
   let binData = null
   let storage = null
@@ -37,23 +39,23 @@
       if (e.operation === 'binary-upload') uploadProgress = e
     })
     EventsOn('op:complete', (e) => {
-      if (uploadProgress) {
-        if (e.status === 'error') {
-          error = e.error || '上传失败'
-        } else {
-          msg = '上传完成'
-          loadBinary()
-        }
-        uploadProgress = null
+      if (e?.operation !== 'binary-upload' || !uploadProgress) return
+      if (e.status === 'error') {
+        error = e.error || '上传失败'
+      } else {
+        msg = '上传完成'
+        if (active) loadBinary()
       }
+      uploadProgress = null
     })
   })
 
   async function loadBinary() {
     loading = true; error = ''
     try {
-      binData = await GetBinaryPage()
-      storage = await GetBinaryStorage()
+      const [page, stats] = await Promise.all([GetBinaryPage(), GetBinaryStorage()])
+      binData = page
+      storage = stats
     }
     catch (e) { error = e.message || String(e) }
     loading = false

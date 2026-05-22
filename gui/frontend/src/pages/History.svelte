@@ -1,7 +1,9 @@
 <script>
   import { onMount } from 'svelte'
   import { EventsOn } from '../../wailsjs/runtime/runtime.js'
-  import { GetLocalSnapshotList, GetSnapshotList, GetSnapshotDetail, RevertToSnapshot } from '../../wailsjs/go/main/App.js'
+  import { GetSnapshotList, GetSnapshotDetail, RevertToSnapshot } from '../../wailsjs/go/main/App.js'
+
+  export let active = false
 
   let snapshots = []
   let filtered = []
@@ -14,19 +16,26 @@
   let loadCount = 20
   let deviceFilter = ''
   let devices = []
+  let dirty = false
+
+  $: if (active && dirty) {
+    dirty = false
+    refresh()
+  }
 
   onMount(async () => {
     await refresh()
-    EventsOn('op:complete', () => refresh())
+    EventsOn('op:complete', (e) => {
+      if (!affectsHistory(e?.operation)) return
+      if (active) refresh()
+      else dirty = true
+    })
   })
 
   async function refresh() {
-    loading = true; error = ''
+    loading = !snapshots.length; error = ''
     try {
-      snapshots = await GetLocalSnapshotList(loadCount) || []
-      if (!snapshots.length) {
-        snapshots = await GetSnapshotList(loadCount) || []
-      }
+      snapshots = await GetSnapshotList(loadCount) || []
       const devSet = new Set()
       snapshots.forEach(s => { if (s.device) devSet.add(s.device) })
       devices = [...devSet]
@@ -45,6 +54,10 @@
   async function loadMore() {
     loadCount += 20
     await refresh()
+  }
+
+  function affectsHistory(operation) {
+    return operation && (operation.startsWith('bulk-') || operation.startsWith('quick-') || operation === 'repair-remote')
   }
 
   async function toggleDetail(id) {

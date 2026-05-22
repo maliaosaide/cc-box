@@ -15,6 +15,7 @@
     { id: 'settings', label: '设置', icon: 'settings' },
   ]
 
+  $: isCheckingState = syncState === 'checking'
   $: isWarnState = syncState === 'conflict' || syncState === 'pending' || syncState === 'remote_uninitialized' || syncState === 'idle'
   $: isErrorState = syncState === 'error' || syncState === 'connection_error' || syncState === 'remote_incomplete' || syncState === 'key_mismatch' || syncState === 'local_error'
 
@@ -68,15 +69,16 @@
   </div>
 
   <!-- Sync status -->
-  <div class="sidebar-status" class:syncing={syncState === 'syncing'} class:warn={isWarnState} class:err={isErrorState}>
-    <div class="status-dot" class:syncing={syncState === 'syncing'} class:warn={isWarnState} class:err={isErrorState}></div>
+  <div class="sidebar-status" class:syncing={syncState === 'syncing' || isCheckingState} class:warn={isWarnState} class:err={isErrorState}>
+    <div class="status-dot" class:syncing={syncState === 'syncing' || isCheckingState} class:warn={isWarnState} class:err={isErrorState}></div>
     <span class="status-text">
-      {#if syncState === 'syncing'}同步中...
+      {#if syncState === 'checking'}正在检查远程...
+      {:else if syncState === 'syncing'}同步中...
       {:else if syncState === 'conflict'}存在冲突
       {:else if syncState === 'pending'}待同步
       {:else if syncState === 'remote_uninitialized'}远程未初始化
       {:else if syncState === 'remote_incomplete'}远程数据不完整
-      {:else if syncState === 'key_mismatch'}密钥不匹配
+      {:else if syncState === 'key_mismatch'}加密密码不匹配
       {:else if syncState === 'connection_error' || syncState === 'error'}连接异常
       {:else if syncState === 'local_error'}本地配置异常
       {:else if syncState === 'synced'}已同步

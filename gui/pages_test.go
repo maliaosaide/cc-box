@@ -101,6 +101,48 @@ func TestSnapshotDisplayBinaryVersionsReturnsNilWithoutCurrentClaude(t *testing.
 	}
 }
 
+func TestGetClaudeExcludeFilesReturnsSettingsJSON(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	claudeDir := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		t.Fatalf("create claude dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{}"), 0600); err != nil {
+		t.Fatalf("write settings.json: %v", err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Claude.Path = claudeDir
+	if err := config.Save(cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	files, err := (&App{}).GetClaudeExcludeFiles()
+	if err != nil {
+		t.Fatalf("GetClaudeExcludeFiles returned error: %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %+v", files)
+	}
+	if files[0].Name != "settings.json" || files[0].Pattern != "settings.json" || files[0].Path != filepath.Join(claudeDir, "settings.json") || files[0].Excluded {
+		t.Fatalf("unexpected settings.json item: %+v", files[0])
+	}
+
+	cfg.Exclude.Patterns = []string{"settings.json"}
+	if err := config.Save(cfg); err != nil {
+		t.Fatalf("save excluded config: %v", err)
+	}
+	files, err = (&App{}).GetClaudeExcludeFiles()
+	if err != nil {
+		t.Fatalf("GetClaudeExcludeFiles returned error after exclude: %v", err)
+	}
+	if !files[0].Excluded {
+		t.Fatalf("settings.json should be marked excluded: %+v", files[0])
+	}
+}
+
 func TestGetClaudeDirectoriesReturnsTopLevelDirectories(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

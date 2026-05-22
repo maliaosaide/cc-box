@@ -5,7 +5,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"sync"
+	"time"
 
+	"github.com/user/cc-box/core/binary"
 	"github.com/user/cc-box/core/config"
 	"github.com/user/cc-box/gui/internal/desktop"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -15,6 +18,12 @@ import (
 type App struct {
 	ctx     context.Context
 	watcher *Watcher
+
+	cacheMu           sync.Mutex
+	binaryIndexCache  *binary.Index
+	binaryIndexCached time.Time
+	projectListCache  *ProjectListResult
+	projectListCached time.Time
 }
 
 // NewApp 创建 App 实例

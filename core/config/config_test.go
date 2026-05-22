@@ -73,6 +73,13 @@ json_path = "~/custom-claude.json"
 	}
 }
 
+func TestDefaultConfigDoesNotExcludeDirectories(t *testing.T) {
+	cfg := DefaultConfig()
+	if len(cfg.Exclude.Patterns) != 0 {
+		t.Fatalf("default exclude patterns = %+v, want none", cfg.Exclude.Patterns)
+	}
+}
+
 func TestSaveWritesSnakeCaseKeys(t *testing.T) {
 	home := withTempHome(t)
 	cfg := DefaultConfig()

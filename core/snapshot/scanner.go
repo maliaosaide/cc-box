@@ -16,7 +16,6 @@ import (
 type Scanner struct {
 	root    string
 	exclude []string
-	maxSize int64 // 单文件最大大小
 }
 
 // NewScanner 创建扫描器
@@ -24,14 +23,47 @@ func NewScanner(root string, excludePatterns []string) *Scanner {
 	return &Scanner{
 		root:    root,
 		exclude: excludePatterns,
-		maxSize: 50 * 1024 * 1024, // 50MB
 	}
 }
 
 // ScanResult 扫描结果
 type ScanResult struct {
-	Files map[string]FileEntry
-	Stats ScanStats
+	Files    map[string]FileEntry
+	Stats    ScanStats
+	Failures []ScanFailure
+}
+
+// ScanFailure 记录扫描中无法读取的文件或目录
+type ScanFailure struct {
+	Path     string `json:"path"`
+	FullPath string `json:"fullPath"`
+	Error    string `json:"error"`
+}
+
+func (r *ScanResult) HasFailures() bool {
+	return r != nil && len(r.Failures) > 0
+}
+
+func (r *ScanResult) FailureError() error {
+	if !r.HasFailures() {
+		return nil
+	}
+	first := r.Failures[0]
+	if len(r.Failures) == 1 {
+		return fmt.Errorf("%s: %s", first.Path, first.Error)
+	}
+	return fmt.Errorf("%d 个文件扫描失败，首个失败: %s: %s", len(r.Failures), first.Path, first.Error)
+}
+
+func (r *ScanResult) addFailure(root, path string, err error) {
+	if path == "" {
+		path = root
+	}
+	relPath := normalize.RelativePath(root, path)
+	if relPath == "." {
+		relPath = ""
+	}
+	r.Failures = append(r.Failures, ScanFailure{Path: relPath, FullPath: path, Error: err.Error()})
 }
 
 // ScanStats 扫描统计
@@ -42,15 +74,28 @@ type ScanStats struct {
 	SkippedSize int64
 }
 
-// Scan 扫描目录，返回文件条目映射
+// Scan 扫描目录，返回文件条目映射；扫描失败会作为错误返回，避免静默漏同步
 func (s *Scanner) Scan() (*ScanResult, error) {
+	result, err := s.ScanPartial()
+	if err != nil {
+		return result, err
+	}
+	if err := result.FailureError(); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+// ScanPartial 扫描目录并保留失败列表，用于 GUI 展示失败文件
+func (s *Scanner) ScanPartial() (*ScanResult, error) {
 	result := &ScanResult{
 		Files: make(map[string]FileEntry),
 	}
 
 	err := filepath.Walk(s.root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // 跳过不可访问的文件
+			result.addFailure(s.root, path, err)
+			return nil
 		}
 
 		// 跳过目录本身
@@ -71,16 +116,14 @@ func (s *Scanner) Scan() (*ScanResult, error) {
 			return nil
 		}
 
-		// 永远排除的文件
-		if isAlwaysExcluded(relPath) {
-			result.Stats.Skipped++
-			return nil
-		}
-
-		// 大小限制
-		if info.Size() > s.maxSize {
+		fileInfo, ok, statErr := readableRegularFileInfo(path, info)
+		if statErr != nil {
 			result.Stats.Skipped++
 			result.Stats.SkippedSize += info.Size()
+			result.addFailure(s.root, path, statErr)
+			return nil
+		}
+		if !ok {
 			return nil
 		}
 
@@ -88,6 +131,8 @@ func (s *Scanner) Scan() (*ScanResult, error) {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			result.Stats.Skipped++
+			result.Stats.SkippedSize += fileInfo.Size()
+			result.addFailure(s.root, path, err)
 			return nil
 		}
 
@@ -97,12 +142,12 @@ func (s *Scanner) Scan() (*ScanResult, error) {
 
 		result.Files[relPath] = FileEntry{
 			Hash:     hash,
-			Size:     info.Size(),
-			Modified: info.ModTime().UTC(),
+			Size:     fileInfo.Size(),
+			Modified: fileInfo.ModTime().UTC(),
 		}
 
 		result.Stats.TotalFiles++
-		result.Stats.TotalSize += info.Size()
+		result.Stats.TotalSize += fileInfo.Size()
 
 		return nil
 	})
@@ -112,6 +157,23 @@ func (s *Scanner) Scan() (*ScanResult, error) {
 	}
 
 	return result, nil
+}
+
+func readableRegularFileInfo(path string, info os.FileInfo) (os.FileInfo, bool, error) {
+	if info.Mode().IsRegular() {
+		return info, true, nil
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		targetInfo, err := os.Stat(path)
+		if err != nil {
+			return nil, false, err
+		}
+		if targetInfo.Mode().IsRegular() {
+			return targetInfo, true, nil
+		}
+		return nil, false, fmt.Errorf("符号链接目标不是普通文件: %s", targetInfo.Mode().String())
+	}
+	return nil, false, fmt.Errorf("不是普通文件: %s", info.Mode().String())
 }
 
 // isExcluded 检查路径是否匹配排除规则
@@ -162,21 +224,6 @@ func matchGlob(name, pattern string) bool {
 		return strings.HasPrefix(name, pattern[:len(pattern)-1])
 	}
 	return name == pattern
-}
-
-// isAlwaysExcluded 永远排除的文件
-func isAlwaysExcluded(relPath string) bool {
-	alwaysExclude := []string{
-		".credentials.json",
-		"settings.local.json",
-		"stats-cache.json",
-	}
-	for _, name := range alwaysExclude {
-		if filepath.Base(relPath) == name {
-			return true
-		}
-	}
-	return false
 }
 
 // EmptySnapshot 创建空快照（用于首次 init）
