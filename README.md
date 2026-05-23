@@ -8,6 +8,8 @@
 
 CC-Box 面向经常在多台电脑上使用 Claude Code 的用户：你不再需要手动复制 `~/.claude/`，不需要反复配置 MCP、skills、commands，也不需要担心某次同步把本地配置覆盖坏。它用类似 Git 的快照方式管理 Claude Code 配置，并通过 WebDAV 在多设备之间同步。
 
+当前版本：`v0.2.2`。这一版重点加固了同步安全、跨平台路径处理、二进制版本并发更新、GUI 单实例启动、托盘状态联动和配置文件页面筛选体验。
+
 ## 为什么需要 CC-Box
 
 Claude Code 越用越顺手，配置也会越来越多：
@@ -30,6 +32,7 @@ CC-Box 要解决的就是这个问题：**让 Claude Code 的配置像代码一�
 | 版本化快照 | 每次同步都有历史记录，可查看、对比和回滚。 |
 | 端到端加密 | 上传前加密，远程只保存加密后的内容。 |
 | 冲突可处理 | 本地和远程同时修改时，不是简单覆盖，而是保留冲突并支持选择。 |
+| 安全同步语义 | HEAD 更新、二进制索引和初始化流程使用条件写入/锁，降低多设备并发覆盖风险。 |
 | 二进制版本管理 | Claude 可执行文件也能备份、下载、切换和清理。 |
 | 项目配置同步 | 支持项目级 `.claude.json`，多设备共享项目 MCP 配置。 |
 | CLI + GUI 双入口 | 自动化用 CLI，日常桌面管理用 GUI。 |
@@ -147,7 +150,7 @@ wails build -clean -nopackage -m -nosyncgomod
 gui/build/bin/cc-box-gui.exe
 ```
 
-GUI 版提供初始化向导、同步概览、文件 diff、冲突处理、二进制版本管理、项目配置管理、历史快照、设置页和系统托盘。
+GUI 版提供初始化向导、同步概览、文件 diff、冲突处理、二进制版本管理、项目配置管理、历史快照、设置页和系统托盘。桌面端支持单实例启动：重复打开时会唤起已有窗口；同步状态会同步反映到页面和托盘。
 
 GUI 详细说明见：[gui/README.md](./gui/README.md)
 
@@ -163,7 +166,8 @@ GUI 详细说明见：[gui/README.md](./gui/README.md)
 | 加密密码管理 | 支持 | 支持 |
 | Claude 二进制管理 | 支持 | 支持 |
 | 项目级 `.claude.json` 同步 | 支持 | 支持 |
-| 系统托盘 | 不适用 | 支持 |
+| 系统托盘 | 不适用 | 支持，状态与同步任务联动 |
+| 单实例桌面应用 | 不适用 | 支持，重复启动会唤起已有窗口 |
 | 文件变化监听 | 不适用 | 支持 |
 | 脚本自动化 | 支持 | 不适用 |
 
@@ -175,7 +179,7 @@ cc-box/
 │   ├── binary/                  # Claude 二进制上传、下载、索引和平台识别
 │   ├── config/                  # 本地配置、路径和 keyring 适配
 │   ├── crypto/                  # 加密密码派生和数据加密
-│   ├── normalize/               # 跨平台路径和内容规范化
+│   ├── normalize/               # 跨平台路径和换行辅助处理
 │   ├── object/                  # 对象哈希和对象存储
 │   ├── pathutil/                # 安全路径处理
 │   ├── snapshot/                # 文件扫描、快照和 diff 数据
@@ -232,12 +236,13 @@ gui/build/bin/cc-box-gui.exe
 
 ## 测试
 
-从仓库根目录分别测试三个 Go module：
+从仓库根目录分别测试三个 Go module，并构建前端：
 
 ```bash
 go -C core test ./...
 go -C cli test ./...
 go -C gui test ./...
+npm --prefix gui/frontend run build
 ```
 
 ## 环境要求
@@ -266,7 +271,7 @@ go -C gui test ./...
 - Synology WebDAV
 - 自建 WebDAV 服务
 
-实际兼容性取决于服务端对 WebDAV 方法、鉴权、ETag 和大文件上传的支持情况。
+实际兼容性取决于服务端对 WebDAV 方法、鉴权、ETag 和大文件上传的支持情况。多设备并发同步依赖服务端正确支持 `ETag`、`If-Match` 和 `If-None-Match`。
 
 ## 开发说明
 
