@@ -264,16 +264,20 @@
       <div class="tree-panel">
         <div class="filter-bar">
           <button class="filter-btn" class:active={filter === 'all'} on:click={() => filter = 'all'}>
-            全部<span class="filter-count">{tree.total}</span>
+            <span class="filter-label">文件</span>
+            <span class="filter-count">{tree.total}</span>
           </button>
           <button class="filter-btn" class:active={filter === 'changed'} on:click={() => filter = 'changed'}>
-            已变更<span class="filter-count">{tree.changed}</span>
+            <span class="filter-label">已变更</span>
+            <span class="filter-count">{tree.changed}</span>
           </button>
           <button class="filter-btn filter-conflict" class:active={filter === 'conflict'} on:click={() => filter = 'conflict'}>
-            冲突<span class="filter-count" class:has-conflict={tree.conflicts > 0}>{tree.conflicts}</span>
+            <span class="filter-label">冲突</span>
+            <span class="filter-count" class:has-conflict={tree.conflicts > 0}>{tree.conflicts}</span>
           </button>
           <button class="filter-btn filter-failed" class:active={filter === 'failed'} on:click={() => filter = 'failed'}>
-            失败文件<span class="filter-count" class:has-conflict={tree.failed > 0}>（{tree.failed}）</span>
+            <span class="filter-label">错误</span>
+            <span class="filter-count" class:has-conflict={tree.failed > 0}>{tree.failed}</span>
           </button>
         </div>
         <div class="tree-list">
@@ -471,37 +475,42 @@
   }
 
   .tree-panel {
-    width: 260px; min-width: 260px;
+    width: 340px; min-width: 340px;
     background: rgb(var(--surface-1));
     display: flex; flex-direction: column;
   }
-  .filter-bar { display: flex; gap: 2px; padding: 8px 8px 4px; border-bottom: 1px solid rgb(var(--border)); }
-  .filter-btn {
-    flex: 1; padding: 5px 8px; border-radius: 5px;
-    font-size: 11px; font-weight: 500;
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    color: rgb(var(--text-muted)); background: transparent;
-    border: 1px solid transparent; cursor: pointer;
-    transition: all 0.2s;
-    display: flex; align-items: center; justify-content: center; gap: 6px;
+  .filter-bar {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px;
+    padding: 9px 10px; border-bottom: 1px solid rgb(var(--border));
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
   }
-  .filter-btn:hover { color: rgb(var(--text-secondary)); background: rgb(var(--surface-2)); }
+  .filter-btn {
+    min-height: 44px; padding: 7px 6px; border-radius: 8px;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    color: rgb(var(--text-muted)); background: rgba(var(--surface-2), 0.5);
+    border: 1px solid rgba(var(--border), 0.9); cursor: pointer;
+    transition: all 0.2s ease-out;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  }
+  .filter-btn:hover { color: rgb(var(--text-secondary)); background: rgb(var(--surface-2)); transform: translateY(-1px); }
   .filter-btn.active {
-    background: rgba(196,112,78,0.1); color: rgb(var(--accent));
-    border-color: rgba(196,112,78,0.2);
+    background: rgba(196,112,78,0.12); color: rgb(var(--accent));
+    border-color: rgba(196,112,78,0.35); box-shadow: inset 0 0 0 1px rgba(196,112,78,0.1);
   }
   .filter-btn.filter-conflict.active, .filter-btn.filter-failed.active {
-    background: rgba(184,92,92,0.08); color: rgb(var(--state-err));
-    border-color: rgba(184,92,92,0.2);
+    background: rgba(184,92,92,0.1); color: rgb(var(--state-err));
+    border-color: rgba(184,92,92,0.35);
+  }
+  .filter-label {
+    font-size: 10px; line-height: 1; font-weight: 600; letter-spacing: 0.02em; white-space: nowrap;
   }
   .filter-count {
-    font-size: 10px; font-family: 'DM Mono', monospace;
-    padding: 1px 5px; border-radius: 3px;
-    background: rgb(var(--surface-2)); color: rgb(var(--text-muted));
+    font-size: 14px; line-height: 1.1; font-weight: 700; font-family: 'DM Mono', monospace;
+    color: rgb(var(--text-secondary));
   }
-  .filter-btn.active .filter-count { background: rgba(196,112,78,0.15); color: rgb(var(--accent)); }
-  .filter-btn.filter-conflict.active .filter-count, .filter-btn.filter-failed.active .filter-count { background: rgba(184,92,92,0.12); color: rgb(var(--state-err)); }
-  .filter-count.has-conflict { background: rgba(184,92,92,0.12); color: rgb(var(--state-err)); }
+  .filter-btn.active .filter-count { color: rgb(var(--accent)); }
+  .filter-btn.filter-conflict.active .filter-count, .filter-btn.filter-failed.active .filter-count { color: rgb(var(--state-err)); }
+  .filter-count.has-conflict { color: rgb(var(--state-err)); }
   .tree-list { flex: 1; overflow-y: auto; padding: 4px 0; }
 
   .detail-panel {
