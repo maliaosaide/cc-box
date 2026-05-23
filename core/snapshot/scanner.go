@@ -1,5 +1,5 @@
 // 文件扫描器
-// 扫描 ~/.claude/ 目录，应用排除规则，计算规范化哈希
+// 扫描 ~/.claude/ 目录，应用排除规则，计算内容哈希
 package snapshot
 
 import (
@@ -91,6 +91,7 @@ func (s *Scanner) ScanPartial() (*ScanResult, error) {
 	result := &ScanResult{
 		Files: make(map[string]FileEntry),
 	}
+	pathSources := make(map[string]string)
 
 	err := filepath.Walk(s.root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -126,6 +127,14 @@ func (s *Scanner) ScanPartial() (*ScanResult, error) {
 		if !ok {
 			return nil
 		}
+		caseKey := strings.ToLower(relPath)
+		if previousPath, exists := pathSources[caseKey]; exists {
+			result.Stats.Skipped++
+			result.Stats.SkippedSize += fileInfo.Size()
+			result.addFailure(s.root, path, fmt.Errorf("路径大小写冲突: %s 与 %s 规范化为 %s", previousPath, path, caseKey))
+			return nil
+		}
+		pathSources[caseKey] = path
 
 		// 读取文件内容并计算哈希
 		data, err := os.ReadFile(path)
@@ -136,9 +145,7 @@ func (s *Scanner) ScanPartial() (*ScanResult, error) {
 			return nil
 		}
 
-		// 规范化后计算哈希
-		hashData := normalize.HashContent(data)
-		hash := object.ComputeHash(hashData)
+		hash := object.ComputeHash(data)
 
 		result.Files[relPath] = FileEntry{
 			Hash:     hash,
@@ -164,14 +171,7 @@ func readableRegularFileInfo(path string, info os.FileInfo) (os.FileInfo, bool, 
 		return info, true, nil
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		targetInfo, err := os.Stat(path)
-		if err != nil {
-			return nil, false, err
-		}
-		if targetInfo.Mode().IsRegular() {
-			return targetInfo, true, nil
-		}
-		return nil, false, fmt.Errorf("符号链接目标不是普通文件: %s", targetInfo.Mode().String())
+		return nil, false, fmt.Errorf("符号链接不同步")
 	}
 	return nil, false, fmt.Errorf("不是普通文件: %s", info.Mode().String())
 }

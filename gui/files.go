@@ -124,11 +124,7 @@ func (a *App) loadClients() (*config.Config, *webdav.Client, []byte, error) {
 }
 
 func readObjectData(fullPath string) ([]byte, error) {
-	data, err := os.ReadFile(fullPath)
-	if err != nil {
-		return nil, err
-	}
-	return normalize.HashContent(data), nil
+	return os.ReadFile(fullPath)
 }
 
 func safeJoin(root, relPath string) (string, error) {
@@ -845,6 +841,7 @@ func (a *App) ResolveConflict(relPath, choice string) error {
 	}
 
 	removeConflictFiles(relPath)
+	a.emitDataChanged("files", "resolve-conflict")
 	return nil
 }
 
@@ -872,7 +869,11 @@ func (a *App) ExcludeFile(relPath string) error {
 	}
 
 	cfg.Exclude.Patterns = append(cfg.Exclude.Patterns, pattern)
-	return config.Save(cfg)
+	if err := config.Save(cfg); err != nil {
+		return err
+	}
+	a.emitDataChanged("config", "exclude-file")
+	return nil
 }
 
 // BulkSync 批量同步（push 或 pull），返回 opId
@@ -1393,6 +1394,7 @@ func (a *App) SaveMergedConflict(relPath, content string) error {
 		return err
 	}
 	removeConflictFiles(relPath)
+	a.emitDataChanged("files", "save-merged-conflict")
 	return nil
 }
 

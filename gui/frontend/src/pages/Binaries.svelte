@@ -4,6 +4,7 @@
   import { GetBinaryPage, SwitchBinaryVersion, UploadBinaryVersion, UploadCurrentBinary, GetBinaryStorage, DeleteLocalVersion, DeleteCloudBinaryVersion, RedetectClaudeBinary, BrowseFile, SetConfigField } from '../../wailsjs/go/main/App.js'
 
   export let active = false
+  export let refreshToken = 0
 
   let activeTab = 'claude'
   let binData = null
@@ -13,9 +14,16 @@
   let msg = ''
   let switching = ''
   let uploading = ''
+  let uploadOpId = null
   let uploadProgress = null
   let detecting = false
   let promptHidden = false
+  let lastRefreshToken = 0
+
+  $: if (active && refreshToken !== lastRefreshToken && !uploadOpId) {
+    lastRefreshToken = refreshToken
+    loadBinary()
+  }
 
   const tabs = [
     { id: 'claude', label: 'Claude', active: true },
@@ -36,10 +44,10 @@
   onMount(async () => {
     await loadBinary()
     EventsOn('op:progress', (e) => {
-      if (e.operation === 'binary-upload') uploadProgress = e
+      if (e.operation === 'binary-upload' && (!uploadOpId || e.opId === uploadOpId)) uploadProgress = e
     })
     EventsOn('op:complete', (e) => {
-      if (e?.operation !== 'binary-upload' || !uploadProgress) return
+      if (e?.operation !== 'binary-upload' || (uploadOpId && e.opId !== uploadOpId)) return
       if (e.status === 'error') {
         error = e.error || '上传失败'
       } else {
@@ -47,6 +55,8 @@
         if (active) loadBinary()
       }
       uploadProgress = null
+      uploadOpId = null
+      uploading = ''
     })
   })
 
@@ -113,16 +123,34 @@
     switching = ''
   }
 
-  function upload(version) {
+  async function upload(version) {
+    if (uploadOpId) return
     msg = ''; error = ''
     uploading = version
-    UploadBinaryVersion(version)
+    uploadProgress = { message: '准备上传...', percent: 0 }
+    try {
+      uploadOpId = await UploadBinaryVersion(version)
+    } catch (e) {
+      error = e.message || String(e)
+      uploading = ''
+      uploadOpId = null
+      uploadProgress = null
+    }
   }
 
-  function uploadCurrent() {
+  async function uploadCurrent() {
+    if (uploadOpId) return
     msg = ''; error = ''
     uploading = 'current'
-    UploadCurrentBinary()
+    uploadProgress = { message: '准备上传...', percent: 0 }
+    try {
+      uploadOpId = await UploadCurrentBinary()
+    } catch (e) {
+      error = e.message || String(e)
+      uploading = ''
+      uploadOpId = null
+      uploadProgress = null
+    }
   }
 
   async function deleteVersion(version) {
@@ -227,7 +255,7 @@
         </span>
         <div class="item-actions">
           <button class="btn-sm btn-upload"
-                  disabled={!binData.localExists || binData.binaryShim || currentUploaded || !!uploadProgress}
+                  disabled={!binData.localExists || binData.binaryShim || currentUploaded || !!uploadOpId}
                   on:click={uploadCurrent}>
             {#if currentUploaded}已上传
             {:else if uploadProgress && uploading === 'current'}上传中...
@@ -313,7 +341,7 @@
                 {/if}
                 {#if ver.isLocal && !ver.isRemote}
                   <button class="btn-sm btn-upload"
-                          disabled={!!uploadProgress}
+                          disabled={!!uploadOpId}
                           on:click={() => upload(ver.version)}>
                     {uploadProgress && uploading === ver.version ? '上传中...' : '上传'}
                   </button>
@@ -367,7 +395,7 @@
                   </button>
                 {/if}
                 <button class="btn-sm btn-upload"
-                        disabled={!!uploadProgress}
+                        disabled={!!uploadOpId}
                         on:click={() => upload(ver.version)}>
                   上传
                 </button>

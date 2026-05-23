@@ -412,6 +412,7 @@ func (a *App) SetConfigField(section, key, value string) error {
 	if clearClaudeCache {
 		_ = binary.ClearClaudeResolutionCache()
 	}
+	a.emitDataChanged("config", "set-config-field")
 	return nil
 }
 
@@ -427,7 +428,9 @@ func (a *App) GetClaudeBinaryResolution() *ClaudeBinaryResolution {
 
 // RedetectClaudeBinary 清除缓存并重新检测 Claude 二进制
 func (a *App) RedetectClaudeBinary() *ClaudeBinaryResolution {
-	return toClaudeBinaryResolution(binary.RedetectClaudeBinary())
+	result := toClaudeBinaryResolution(binary.RedetectClaudeBinary())
+	a.emitDataChanged("binary", "redetect-claude")
+	return result
 }
 
 func toClaudeBinaryResolution(res binary.ClaudeResolution) *ClaudeBinaryResolution {
@@ -611,7 +614,12 @@ func (a *App) TestConnection() (*ConnectionTest, error) {
 // GetProjectList 返回已追踪项目列表和 orphan 列表
 func (a *App) GetProjectList() (*ProjectListResult, error) {
 	if result, ok := a.cachedProjectList(); ok {
-		go func() { _, _ = a.RefreshProjectList() }()
+		go func() {
+			refreshed, err := a.RefreshProjectList()
+			if err == nil {
+				a.eventsEmit("projects:updated", refreshed)
+			}
+		}()
 		return result, nil
 	}
 	return a.RefreshProjectList()
@@ -627,7 +635,7 @@ func (a *App) RefreshProjectList() (*ProjectListResult, error) {
 }
 
 func (a *App) discoverProjectList() (*ProjectListResult, error) {
-	result := &ProjectListResult{}
+	result := &ProjectListResult{Projects: []ProjectInfo{}, Orphans: []OrphanInfo{}}
 
 	projects, err := project.DiscoverProjects()
 	if err != nil {
@@ -686,6 +694,7 @@ func (a *App) AddProjectPath(dir string) error {
 		return err
 	}
 	a.clearProjectListCache()
+	a.emitDataChanged("projects", "add-project")
 	return nil
 }
 
@@ -706,6 +715,7 @@ func (a *App) DeleteOrphan(remote string) error {
 		return err
 	}
 	a.clearProjectListCache()
+	a.emitDataChanged("projects", "delete-orphan")
 	return nil
 }
 
@@ -1073,19 +1083,28 @@ func (a *App) SwitchBinaryVersion(version string, source string) error {
 
 	if source == "remote" {
 		_, client, _, err := a.loadClients()
-		if err == nil {
-			idx, err := binary.LoadIndex(client)
-			if err == nil {
-				if info := idx.GetBinaryInfo(config.Platform(), "claude"); info != nil {
-					info.Current = version
-					_ = binary.SaveIndex(client, idx)
-				}
+		if err != nil {
+			return err
+		}
+		platform := config.Platform()
+		if err := binary.UpdateIndex(client, func(idx *binary.Index) error {
+			info := idx.GetBinaryInfo(platform, "claude")
+			if info == nil {
+				return fmt.Errorf("没有可用的 Claude 二进制")
 			}
+			if _, exists := info.Versions[version]; !exists {
+				return fmt.Errorf("版本 %s 不存在云端", version)
+			}
+			info.Current = version
+			return nil
+		}); err != nil {
+			return fmt.Errorf("更新远程二进制索引失败: %w", err)
 		}
 	}
 
 	_ = binary.ClearClaudeResolutionCache()
 	a.clearBinaryIndexCache()
+	a.emitDataChanged("binary", "switch-binary")
 	return nil
 }
 
@@ -1197,7 +1216,11 @@ func (a *App) GetBinaryStorage() (*BinaryStorageInfo, error) {
 // DeleteLocalVersion 删除本地版本文件
 func (a *App) DeleteLocalVersion(version string) error {
 	verDir := config.VersionsDir()
-	return os.Remove(filepath.Join(verDir, version))
+	if err := os.Remove(filepath.Join(verDir, version)); err != nil {
+		return err
+	}
+	a.emitDataChanged("binary", "delete-local-version")
+	return nil
 }
 
 // DeleteCloudBinaryVersion 删除云端二进制版本
@@ -1210,6 +1233,7 @@ func (a *App) DeleteCloudBinaryVersion(version string) error {
 		return err
 	}
 	a.clearBinaryIndexCache()
+	a.emitDataChanged("binary", "delete-cloud-version")
 	return nil
 }
 
@@ -1408,6 +1432,7 @@ func (a *App) RevertToSnapshot(snapID string) error {
 		return fmt.Errorf("缓存恢复快照失败: %w", err)
 	}
 
+	a.emitDataChanged("sync", "revert-snapshot")
 	return nil
 }
 

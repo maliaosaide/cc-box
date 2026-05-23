@@ -9,32 +9,66 @@ import (
 
 // DeleteRemoteVersion 从云端删除指定二进制版本
 func DeleteRemoteVersion(client *webdav.Client, key []byte, name, version, platform string) error {
+	return withBinaryVersionLock(client, platform, name, version, func() error {
+		current, err := loadVersionForDelete(client, platform, name, version)
+		if err != nil {
+			return err
+		}
+		deleteWithIndex := func() error {
+			v, deletePhysical, err := removeVersionFromIndex(client, platform, name, version)
+			if err != nil || !deletePhysical {
+				return err
+			}
+			return deleteBinaryPayload(client, platform, name, version, v)
+		}
+		if current.Chunked {
+			return withBinaryHashLock(client, current.Hash, deleteWithIndex)
+		}
+		return deleteWithIndex()
+	})
+}
+
+func loadVersionForDelete(client *webdav.Client, platform, name, version string) (Version, error) {
 	idx, err := LoadIndex(client)
 	if err != nil {
-		return err
+		return Version{}, err
 	}
-
 	info := idx.GetBinaryInfo(platform, name)
 	if info == nil {
-		return fmt.Errorf("平台 %s 上没有 %s 的记录", platform, name)
+		return Version{}, fmt.Errorf("平台 %s 上没有 %s 的记录", platform, name)
 	}
-
 	v, exists := info.Versions[version]
 	if !exists {
-		return fmt.Errorf("版本 %s 不存在", version)
+		return Version{}, fmt.Errorf("版本 %s 不存在", version)
 	}
+	return v, nil
+}
 
-	deletePhysical := !v.Chunked || countBinaryHashRefs(idx, v.Hash) == 1
+func removeVersionFromIndex(client *webdav.Client, platform, name, version string) (Version, bool, error) {
+	var removed Version
+	deletePhysical := false
+	if err := UpdateIndex(client, func(idx *Index) error {
+		info := idx.GetBinaryInfo(platform, name)
+		if info == nil {
+			return fmt.Errorf("平台 %s 上没有 %s 的记录", platform, name)
+		}
 
-	// 先移除索引，避免 SaveIndex 失败时留下指向已删除实体的版本记录
-	delete(info.Versions, version)
-	if err := SaveIndex(client, idx); err != nil {
-		return err
-	}
-	if !deletePhysical {
+		current, exists := info.Versions[version]
+		if !exists {
+			return fmt.Errorf("版本 %s 不存在", version)
+		}
+
+		removed = current
+		deletePhysical = !removed.Chunked || countBinaryHashRefs(idx, removed.Hash) == 1
+		delete(info.Versions, version)
 		return nil
+	}); err != nil {
+		return Version{}, false, err
 	}
+	return removed, deletePhysical, nil
+}
 
+func deleteBinaryPayload(client *webdav.Client, platform, name, version string, v Version) error {
 	if v.Chunked {
 		basePath := fmt.Sprintf("binaries/parts/%s/", v.Hash)
 		manifestData, _, err := client.GET(basePath + "manifest.json")

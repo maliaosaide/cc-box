@@ -112,7 +112,7 @@ func showFileDiff(targetPath string, changes []snapshot.Change, remoteSnap *snap
 		if err != nil {
 			return fmt.Errorf("读取本地文件失败: %w", err)
 		}
-		localData = normalizeContent(data)
+		localData = data
 	}
 
 	// 获取远程内容

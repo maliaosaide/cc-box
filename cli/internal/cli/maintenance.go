@@ -11,7 +11,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/user/cc-box/core/config"
-	"github.com/user/cc-box/core/crypto"
 	"github.com/user/cc-box/core/object"
 	"github.com/user/cc-box/core/snapshot"
 	"github.com/user/cc-box/core/webdav"
@@ -148,9 +147,17 @@ func runRestore(cmd *cobra.Command, args []string) error {
 
 // restoreFromSnapshot 从指定快照恢复配置文件
 func restoreFromSnapshot(snapID string) error {
-	_, client, key, err := loadClientAndKey()
+	if err := validateSnapshotID(snapID); err != nil {
+		return err
+	}
+
+	cfg, client, key, err := loadClientAndKey()
 	if err != nil {
 		return err
+	}
+	localHead, err := loadLocalHEAD()
+	if err != nil {
+		return fmt.Errorf("读取本地 HEAD 失败: %w", err)
 	}
 
 	// 加载目标快照
@@ -160,10 +167,6 @@ func restoreFromSnapshot(snapID string) error {
 	}
 
 	// 扫描本地文件
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
 	scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
 	scanResult, err := scanner.Scan()
 	if err != nil {
@@ -191,7 +194,8 @@ func restoreFromSnapshot(snapID string) error {
 		return nil
 	}
 
-	fmt.Printf("将从快照 %s 恢复:\n", snapID[:12])
+	shortID := snapshotShortID(snapID)
+	fmt.Printf("将从快照 %s 恢复:\n", shortID)
 	fmt.Printf("  恢复 %d 个文件\n", len(toRestore))
 	if len(toDelete) > 0 {
 		fmt.Printf("  删除 %d 个快照中不存在的文件\n", len(toDelete))
@@ -210,40 +214,52 @@ func restoreFromSnapshot(snapID string) error {
 	for _, path := range toRestore {
 		entry, ok := snap.Files[path]
 		if !ok {
-			continue
+			return fmt.Errorf("目标快照缺少文件: %s", path)
 		}
 		data, err := store.Download(entry.Hash)
 		if err != nil {
-			fmt.Printf("  下载失败 %s: %v\n", path, err)
-			continue
+			return fmt.Errorf("下载文件 %s 失败: %w", path, err)
 		}
-		fullPath := filepath.Join(config.ClaudeDir(), filepath.FromSlash(path))
-		os.MkdirAll(filepath.Dir(fullPath), 0700)
+		fullPath, err := safeClaudePath(path)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0700); err != nil {
+			return fmt.Errorf("创建目录 %s 失败: %w", filepath.Dir(fullPath), err)
+		}
 		if err := os.WriteFile(fullPath, data, 0600); err != nil {
-			fmt.Printf("  写入失败 %s: %v\n", path, err)
-			continue
+			return fmt.Errorf("写入文件 %s 失败: %w", path, err)
 		}
 		applied++
 	}
 
 	// 删除快照中不存在的文件
 	for _, path := range toDelete {
-		fullPath := filepath.Join(config.ClaudeDir(), filepath.FromSlash(path))
-		os.Remove(fullPath)
+		fullPath, err := safeClaudePath(path)
+		if err != nil {
+			return err
+		}
+		if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("删除文件 %s 失败: %w", path, err)
+		}
 	}
 
 	// 创建恢复快照
-	newSnap := snapshot.CreateSnapshot(snap.ID, cfg.Device.ID, "restore from "+snapID[:12], snap.Files)
-	snapData, _ := newSnap.Serialize()
-	encrypted, _ := crypto.Encrypt(snapData, key)
-	client.EnsureDir("snapshots/")
-	client.PUT("snapshots/"+newSnap.ID+".json.enc", encrypted, "")
+	newSnap := snapshot.CreateSnapshot(localHead, cfg.Device.ID, "restore from "+shortID, snap.Files)
+	if err := uploadSnapshot(client, store, newSnap); err != nil {
+		return fmt.Errorf("上传快照失败: %w", err)
+	}
+	if err := pushUpdateHEAD(client, cfg, newSnap.ID, localHead); err != nil {
+		return err
+	}
+	if err := updateLocalHEAD(newSnap.ID); err != nil {
+		return fmt.Errorf("更新本地 HEAD 失败: %w", err)
+	}
+	if err := saveLocalSnapshot(newSnap); err != nil {
+		return fmt.Errorf("缓存快照失败: %w", err)
+	}
 
-	// 更新本地 HEAD
-	os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(newSnap.ID), 0600)
-	os.WriteFile(config.CCBoxDir()+"/snapshots/"+newSnap.ID+".json", snapData, 0600)
-
-	fmt.Printf("已恢复 %d 个文件（快照 %s）\n", applied, snapID[:12])
+	fmt.Printf("已恢复 %d 个文件（快照 %s）\n", applied, shortID)
 	return nil
 }
 

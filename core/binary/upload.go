@@ -18,40 +18,16 @@ type UploadProgress func(total, uploaded int64, partIndex, totalParts int)
 func Upload(client *webdav.Client, key []byte, name string, data []byte, version string, progress UploadProgress) error {
 	cfg := loadBinaryConfig()
 	platform := config.Platform()
-
-	idx, err := LoadIndex(client)
-	if err != nil {
-		return err
-	}
-
-	info := idx.EnsureBinaryInfo(platform, name)
-
-	// 去重检查
 	manifest, _ := computeManifest(data)
-	if v, exists := info.Versions[version]; exists && v.Hash == manifest.Hash {
-		return fmt.Errorf("版本 %s 已存在云端", version)
-	}
-
 	chunkSize := cfg.ChunkSizeMB * 1024 * 1024
 	thresholdBytes := int64(cfg.ChunkThresholdMB) * 1024 * 1024
 	shouldChunk := ShouldChunk(int64(len(data)), cfg.ChunkMode, thresholdBytes)
-
-	if shouldChunk {
-		err = uploadChunked(client, key, data, manifest, cfg.Encrypt, chunkSize, progress)
-	} else {
-		err = uploadWhole(client, key, name, version, data, platform, cfg.Encrypt)
-	}
-	if err != nil {
-		return err
-	}
 
 	uploadedBy := ""
 	if appCfg, err := config.Load(); err == nil {
 		uploadedBy = appCfg.Device.ID
 	}
-
-	// 更新索引
-	info.Versions[version] = Version{
+	versionInfo := Version{
 		Hash:       manifest.Hash,
 		Size:       int64(len(data)),
 		Refs:       0,
@@ -61,7 +37,55 @@ func Upload(client *webdav.Client, key []byte, name string, data []byte, version
 		Chunked:    shouldChunk,
 	}
 
-	return SaveIndex(client, idx)
+	return withBinaryVersionLock(client, platform, name, version, func() error {
+		if err := ensureUploadVersionAbsent(client, platform, name, version, manifest.Hash); err != nil {
+			return err
+		}
+		commit := func() error {
+			if shouldChunk {
+				if err := uploadChunked(client, key, data, manifest, cfg.Encrypt, chunkSize, progress); err != nil {
+					return err
+				}
+			} else if err := uploadWhole(client, key, name, version, data, platform, cfg.Encrypt); err != nil {
+				return err
+			}
+			return addUploadedVersionToIndex(client, platform, name, version, manifest.Hash, versionInfo)
+		}
+		if shouldChunk {
+			return withBinaryHashLock(client, manifest.Hash, commit)
+		}
+		return commit()
+	})
+}
+
+func ensureUploadVersionAbsent(client *webdav.Client, platform, name, version, hash string) error {
+	idx, err := LoadIndex(client)
+	if err != nil {
+		return err
+	}
+	if info := idx.GetBinaryInfo(platform, name); info != nil {
+		if v, exists := info.Versions[version]; exists {
+			if v.Hash == hash {
+				return fmt.Errorf("版本 %s 已存在云端", version)
+			}
+			return fmt.Errorf("版本 %s 已存在云端且内容不同", version)
+		}
+	}
+	return nil
+}
+
+func addUploadedVersionToIndex(client *webdav.Client, platform, name, version, hash string, versionInfo Version) error {
+	return UpdateIndex(client, func(idx *Index) error {
+		info := idx.EnsureBinaryInfo(platform, name)
+		if v, exists := info.Versions[version]; exists {
+			if v.Hash == hash {
+				return fmt.Errorf("版本 %s 已存在云端", version)
+			}
+			return fmt.Errorf("版本 %s 已存在云端且内容不同", version)
+		}
+		info.Versions[version] = versionInfo
+		return nil
+	})
 }
 
 func uploadChunked(client *webdav.Client, key []byte, data []byte, manifest *Manifest, encrypt bool, chunkSize int, progress UploadProgress) error {

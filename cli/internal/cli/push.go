@@ -11,7 +11,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/user/cc-box/core/config"
 	"github.com/user/cc-box/core/crypto"
-	"github.com/user/cc-box/core/normalize"
 	"github.com/user/cc-box/core/object"
 	"github.com/user/cc-box/core/snapshot"
 	"github.com/user/cc-box/core/webdav"
@@ -129,8 +128,7 @@ func runPush(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("读取文件 %s 失败: %w", c.Path, err)
 		}
 
-		normData := normalize.HashContent(data)
-		hash, err := store.Upload(normData)
+		hash, err := store.Upload(data)
 		if err != nil {
 			return fmt.Errorf("上传文件 %s 失败: %w", c.Path, err)
 		}
@@ -155,7 +153,9 @@ func runPush(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	saveLocalSnapshot(newSnap)
+	if err := saveLocalSnapshot(newSnap); err != nil {
+		return fmt.Errorf("缓存快照失败: %w", err)
+	}
 
 	// 注册/更新设备信息
 	if err := registerDevice(client, cfg); err != nil {
@@ -204,6 +204,9 @@ func pushUpdateHEAD(client *webdav.Client, cfg *config.Config, newID, expectedHe
 
 // loadRemoteSnapshot 从 WebDAV 下载并解密快照
 func loadRemoteSnapshot(client *webdav.Client, key []byte, id string) (*snapshot.Snapshot, error) {
+	if err := validateSnapshotID(id); err != nil {
+		return nil, err
+	}
 	if snap, err := loadLocalSnapshot(id); err == nil {
 		return snap, nil
 	}

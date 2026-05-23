@@ -132,7 +132,9 @@ func pullFirstTime(client *webdav.Client, key []byte, remoteSnap *snapshot.Snaps
 	if err := updateLocalHEAD(remoteHead); err != nil {
 		return err
 	}
-	saveLocalSnapshot(remoteSnap)
+	if err := saveLocalSnapshot(remoteSnap); err != nil {
+		return fmt.Errorf("缓存快照失败: %w", err)
+	}
 	cacheRemoteETag(remoteHead, remoteHeadETag)
 	fmt.Printf("\n已拉取 %d 个文件\n", applied)
 	return nil
@@ -301,14 +303,20 @@ func pullThreeWay(client *webdav.Client, key []byte, localSnap, remoteSnap *snap
 		return err
 	}
 
-	// 更新本地 HEAD
-	if err := updateLocalHEAD(remoteHead); err != nil {
-		return err
+	if len(conflictPaths) == 0 {
+		if err := updateLocalHEAD(remoteHead); err != nil {
+			return err
+		}
+		if err := saveLocalSnapshot(remoteSnap); err != nil {
+			return fmt.Errorf("缓存快照失败: %w", err)
+		}
+		cacheRemoteETag(remoteHead, remoteHeadETag)
 	}
-	saveLocalSnapshot(remoteSnap)
-	cacheRemoteETag(remoteHead, remoteHeadETag)
 
 	fmt.Printf("\n已拉取 %d 个文件，合并 %d 个，删除 %d 个，冲突 %d 个\n", applied, merged, deleted, len(conflictPaths))
+	if len(conflictPaths) > 0 {
+		fmt.Println("存在未解决冲突，本地 HEAD 暂未推进；解决冲突后请重新同步。")
+	}
 	return nil
 }
 
@@ -366,7 +374,9 @@ func pullDegraded(client *webdav.Client, key []byte, remoteSnap *snapshot.Snapsh
 		if err := updateLocalHEAD(remoteHead); err != nil {
 			return err
 		}
-		saveLocalSnapshot(remoteSnap)
+		if err := saveLocalSnapshot(remoteSnap); err != nil {
+			return fmt.Errorf("缓存快照失败: %w", err)
+		}
 		cacheRemoteETag(remoteHead, remoteHeadETag)
 		fmt.Println("已是最新")
 		return nil
@@ -393,13 +403,20 @@ func pullDegraded(client *webdav.Client, key []byte, remoteSnap *snapshot.Snapsh
 		return err
 	}
 
-	if err := updateLocalHEAD(remoteHead); err != nil {
-		return err
+	if len(conflictPaths) == 0 {
+		if err := updateLocalHEAD(remoteHead); err != nil {
+			return err
+		}
+		if err := saveLocalSnapshot(remoteSnap); err != nil {
+			return fmt.Errorf("缓存快照失败: %w", err)
+		}
+		cacheRemoteETag(remoteHead, remoteHeadETag)
 	}
-	saveLocalSnapshot(remoteSnap)
-	cacheRemoteETag(remoteHead, remoteHeadETag)
 
 	fmt.Printf("\n已拉取 %d 个文件，冲突 %d 个已保存\n", applied, len(conflictPaths))
+	if len(conflictPaths) > 0 {
+		fmt.Println("存在未解决冲突，本地 HEAD 暂未推进；解决冲突后请重新同步。")
+	}
 	return nil
 }
 
@@ -452,7 +469,7 @@ func tryThreeWayMerge(merger *sync.Merger, store *object.Store, path string, anc
 
 	input := &sync.ThreeWayInput{
 		Ancestor: ancestorData,
-		Local:    normalizeContent(localData),
+		Local:    localData,
 		Remote:   remoteData,
 	}
 

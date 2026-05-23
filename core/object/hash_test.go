@@ -2,6 +2,8 @@
 package object
 
 import (
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -41,6 +43,17 @@ func TestObjectPath(t *testing.T) {
 	path := ObjectPath(hash)
 	if path != "objects/ab/sha256:abcdef1234567890.enc" {
 		t.Errorf("ObjectPath() = %s, unexpected", path)
+	}
+}
+
+func TestCachePathUsesWindowsSafeFileName(t *testing.T) {
+	store := NewStore(nil, nil, t.TempDir())
+	cachePath := store.cachePath("sha256:abcdef123456")
+	if strings.Contains(filepath.Base(cachePath), ":") {
+		t.Fatalf("cache file name %q should not contain colon", filepath.Base(cachePath))
+	}
+	if filepath.Base(cachePath) != "abcdef123456.enc" {
+		t.Fatalf("cache file name = %q, want abcdef123456.enc", filepath.Base(cachePath))
 	}
 }
 

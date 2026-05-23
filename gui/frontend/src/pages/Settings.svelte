@@ -54,11 +54,13 @@
   let inputEncPreview = null
   let inputEncPreviewLoading = false
   let inputEncPreviewTimer = null
+  let inputEncPreviewRequest = 0
   let saveEncPassLoading = false
   let oldEncPass = ''
   let oldEncPreview = null
   let oldEncPreviewLoading = false
   let oldEncPreviewTimer = null
+  let oldEncPreviewRequest = 0
   let newEncPass = ''
   let confirmEncPass = ''
   let changePassLoading = false
@@ -315,42 +317,50 @@
 
   function scheduleInputEncPreview() {
     clearTimeout(inputEncPreviewTimer)
+    inputEncPreviewRequest += 1
     if (!inputEncPass) {
       inputEncPreview = null
       inputEncPreviewLoading = false
       return
     }
+    const requestId = inputEncPreviewRequest
+    const pass = inputEncPass
     inputEncPreviewLoading = true
-    inputEncPreviewTimer = setTimeout(previewInputEncPass, 600)
+    inputEncPreviewTimer = setTimeout(() => previewInputEncPass(pass, requestId), 600)
   }
 
-  async function previewInputEncPass() {
+  async function previewInputEncPass(pass, requestId) {
     try {
-      inputEncPreview = await PreviewEncryptionPassword(inputEncPass)
+      const result = await PreviewEncryptionPassword(pass)
+      if (requestId === inputEncPreviewRequest && inputEncPass === pass) inputEncPreview = result
     } catch (e) {
-      inputEncPreview = { status: 'error', message: e.message || String(e) }
+      if (requestId === inputEncPreviewRequest && inputEncPass === pass) inputEncPreview = { status: 'error', message: e.message || String(e) }
     }
-    inputEncPreviewLoading = false
+    if (requestId === inputEncPreviewRequest && inputEncPass === pass) inputEncPreviewLoading = false
   }
 
   function scheduleOldEncPreview() {
     clearTimeout(oldEncPreviewTimer)
+    oldEncPreviewRequest += 1
     if (!oldEncPass) {
       oldEncPreview = null
       oldEncPreviewLoading = false
       return
     }
+    const requestId = oldEncPreviewRequest
+    const pass = oldEncPass
     oldEncPreviewLoading = true
-    oldEncPreviewTimer = setTimeout(previewOldEncPass, 600)
+    oldEncPreviewTimer = setTimeout(() => previewOldEncPass(pass, requestId), 600)
   }
 
-  async function previewOldEncPass() {
+  async function previewOldEncPass(pass, requestId) {
     try {
-      oldEncPreview = await PreviewEncryptionPassword(oldEncPass)
+      const result = await PreviewEncryptionPassword(pass)
+      if (requestId === oldEncPreviewRequest && oldEncPass === pass) oldEncPreview = result
     } catch (e) {
-      oldEncPreview = { status: 'error', message: e.message || String(e) }
+      if (requestId === oldEncPreviewRequest && oldEncPass === pass) oldEncPreview = { status: 'error', message: e.message || String(e) }
     }
-    oldEncPreviewLoading = false
+    if (requestId === oldEncPreviewRequest && oldEncPass === pass) oldEncPreviewLoading = false
   }
 
   async function saveEncryptionPassword() {

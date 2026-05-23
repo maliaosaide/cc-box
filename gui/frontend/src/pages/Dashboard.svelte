@@ -6,6 +6,7 @@
   export let syncState = 'idle'
   export let theme = 'dark'
   export let active = false
+  export let refreshToken = 0
   const dispatch = createEventDispatcher()
 
   let dashboard = null
@@ -16,6 +17,12 @@
   let progress = null
   let currentOpId = null
   let dirty = false
+  let lastRefreshToken = 0
+
+  $: if (active && refreshToken !== lastRefreshToken && !remoteChecking) {
+    lastRefreshToken = refreshToken
+    refreshRemote()
+  }
 
   $: if (active && dirty && !remoteChecking) {
     dirty = false
@@ -31,12 +38,13 @@
     EventsOn('op:complete', async (e) => {
       if (!e) return
       if (e.opId === currentOpId) {
-        actionLoading = ''; progress = null; currentOpId = null
+        actionLoading = ''; progress = null; currentOpId = null; dirty = false
         actionError = e.status === 'error' ? (e.error || '同步失败') : ''
         await refreshRemote()
         return
       }
       if (affectsDashboard(e.operation)) {
+        if (actionLoading) { dirty = true; return }
         if (active) await refreshRemote()
         else dirty = true
       }
@@ -61,17 +69,18 @@
   async function refreshRemote() {
     if (remoteChecking) return
     remoteChecking = true
-    if (!actionLoading) syncState = 'checking'
+    const preserveActionState = !!actionLoading
+    if (!preserveActionState) syncState = 'checking'
     try {
       dashboard = await RefreshDashboardRemote()
-      syncState = dashboard?.conflicts ? 'conflict' : (dashboard?.syncStatus || 'idle')
+      if (!preserveActionState) syncState = dashboard?.conflicts ? 'conflict' : (dashboard?.syncStatus || 'idle')
     } catch (e) {
       const message = e?.message || String(e)
-      syncState = 'connection_error'
+      if (!preserveActionState) syncState = 'connection_error'
       if (dashboard) {
         dashboard = {
           ...dashboard,
-          syncStatus: 'connection_error',
+          syncStatus: preserveActionState ? dashboard.syncStatus : 'connection_error',
           syncHealth: { ...(dashboard.syncHealth || {}), status: 'connection_error', code: 'remote_refresh_failed', message, canRepair: false }
         }
       }

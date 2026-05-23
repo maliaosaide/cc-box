@@ -1,15 +1,15 @@
 export namespace main {
-
+	
 	export class BackupInfo {
 	    id: string;
 	    message: string;
 	    device: string;
 	    time: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new BackupInfo(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -23,11 +23,11 @@ export namespace main {
 	    version: string;
 	    latest: boolean;
 	    installed: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new BinaryInfo(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -45,11 +45,11 @@ export namespace main {
 	    isCurrent: boolean;
 	    isLocal: boolean;
 	    isRemote: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new BinaryVersionInfo(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.version = source["version"];
@@ -76,11 +76,11 @@ export namespace main {
 	    binaryError: string;
 	    versionsDir: string;
 	    localExists: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new BinaryPageData(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.currentVersion = source["currentVersion"];
@@ -97,7 +97,7 @@ export namespace main {
 	        this.versionsDir = source["versionsDir"];
 	        this.localExists = source["localExists"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -121,11 +121,11 @@ export namespace main {
 	    cloudTotal: number;
 	    localCount: number;
 	    cloudCount: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new BinaryStorageInfo(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.localTotal = source["localTotal"];
@@ -134,18 +134,18 @@ export namespace main {
 	        this.cloudCount = source["cloudCount"];
 	    }
 	}
-
+	
 	export class BinaryView {
 	    encrypt: boolean;
 	    chunkMode: string;
 	    chunkSizeMB: number;
 	    chunkThresholdMB: number;
 	    autoUpload: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new BinaryView(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.encrypt = source["encrypt"];
@@ -159,11 +159,11 @@ export namespace main {
 	    status: string;
 	    path: string;
 	    time: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ChangeInfo(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.status = source["status"];
@@ -179,11 +179,11 @@ export namespace main {
 	    installed: boolean;
 	    status: string;
 	    statusLabel: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ClaudeBinaryInfo(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.platform = source["platform"];
@@ -204,11 +204,11 @@ export namespace main {
 	    readOnly: boolean;
 	    isShim: boolean;
 	    error?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ClaudeBinaryResolution(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.currentPath = source["currentPath"];
@@ -226,11 +226,11 @@ export namespace main {
 	    path: string;
 	    pattern: string;
 	    excluded: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ClaudeDirectoryInfo(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -244,11 +244,11 @@ export namespace main {
 	    path: string;
 	    pattern: string;
 	    excluded: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ClaudeFileInfo(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -263,11 +263,11 @@ export namespace main {
 	    passwordAvailable: boolean;
 	    claudeDirExists: boolean;
 	    message: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ConfigStatus(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ok = source["ok"];
@@ -282,11 +282,11 @@ export namespace main {
 	    conflictStrategy: string;
 	    mergeRetryMax: number;
 	    autoSyncInterval: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new SyncView(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.snapshotLimit = source["snapshotLimit"];
@@ -297,11 +297,11 @@ export namespace main {
 	}
 	export class EncryptionView {
 	    enabled: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new EncryptionView(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.enabled = source["enabled"];
@@ -310,11 +310,11 @@ export namespace main {
 	export class DeviceView {
 	    id: string;
 	    name: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new DeviceView(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -328,11 +328,11 @@ export namespace main {
 	    baseUrl: string;
 	    headUrl: string;
 	    hasPassword: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new WebDAVView(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.url = source["url"];
@@ -370,11 +370,11 @@ export namespace main {
 	    claudeBinaryReadOnly: boolean;
 	    claudeBinaryShim: boolean;
 	    claudeBinaryError: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ConfigView(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.webdav = this.convertValues(source["webdav"], WebDAVView);
@@ -404,7 +404,7 @@ export namespace main {
 	        this.claudeBinaryShim = source["claudeBinaryShim"];
 	        this.claudeBinaryError = source["claudeBinaryError"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -432,11 +432,11 @@ export namespace main {
 	    recommended: string;
 	    localExists: boolean;
 	    remoteExists: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ConflictDetail(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
@@ -452,11 +452,11 @@ export namespace main {
 	export class ConflictRef {
 	    path: string;
 	    detail: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ConflictRef(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
@@ -467,11 +467,11 @@ export namespace main {
 	    success: boolean;
 	    error?: string;
 	    latency: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ConnectionTest(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.success = source["success"];
@@ -485,11 +485,11 @@ export namespace main {
 	    version: string;
 	    lastActive: string;
 	    isCurrent: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new DeviceInfo(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -506,11 +506,11 @@ export namespace main {
 	    canRepair: boolean;
 	    localHead?: string;
 	    remoteHead?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new SyncHealth(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.status = source["status"];
@@ -535,11 +535,11 @@ export namespace main {
 	    recentChanges: ChangeInfo[];
 	    backups: BackupInfo[];
 	    binaries: BinaryInfo[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new DashboardData(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.syncStatus = source["syncStatus"];
@@ -556,7 +556,7 @@ export namespace main {
 	        this.backups = this.convertValues(source["backups"], BackupInfo);
 	        this.binaries = this.convertValues(source["binaries"], BinaryInfo);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -575,19 +575,19 @@ export namespace main {
 		    return a;
 		}
 	}
-
-
+	
+	
 	export class DiffHunk {
 	    oldStart: number;
 	    oldCount: number;
 	    newStart: number;
 	    newCount: number;
 	    lines: string[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new DiffHunk(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.oldStart = source["oldStart"];
@@ -605,11 +605,11 @@ export namespace main {
 	    status: string;
 	    localNew?: boolean;
 	    remoteNew?: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new DiffResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
@@ -620,7 +620,7 @@ export namespace main {
 	        this.localNew = source["localNew"];
 	        this.remoteNew = source["remoteNew"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -644,11 +644,11 @@ export namespace main {
 	    message: string;
 	    fingerprint: string;
 	    matchesCurrent: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new EncryptionPasswordPreview(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.status = source["status"];
@@ -661,11 +661,11 @@ export namespace main {
 	    enabled: boolean;
 	    fingerprint: string;
 	    hasKey: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new EncryptionStatus(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.enabled = source["enabled"];
@@ -676,18 +676,18 @@ export namespace main {
 	export class EncryptionVerifyResult {
 	    status: string;
 	    message: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new EncryptionVerifyResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.status = source["status"];
 	        this.message = source["message"];
 	    }
 	}
-
+	
 	export class FileDetail {
 	    path: string;
 	    size: number;
@@ -695,11 +695,11 @@ export namespace main {
 	    status: string;
 	    content?: string;
 	    hash?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new FileDetail(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
@@ -714,11 +714,11 @@ export namespace main {
 	    hash: string;
 	    size: number;
 	    modified: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new FileEntry(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.hash = source["hash"];
@@ -730,11 +730,11 @@ export namespace main {
 	    path: string;
 	    fullPath: string;
 	    error: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new FileFailure(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
@@ -753,11 +753,11 @@ export namespace main {
 	    error?: string;
 	    children?: FileNode[];
 	    expanded?: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new FileNode(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -771,7 +771,7 @@ export namespace main {
 	        this.children = this.convertValues(source["children"], FileNode);
 	        this.expanded = source["expanded"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -798,11 +798,11 @@ export namespace main {
 	    failed: number;
 	    failures?: FileFailure[];
 	    checking?: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new FileTreeResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.root = this.convertValues(source["root"], FileNode);
@@ -813,7 +813,7 @@ export namespace main {
 	        this.failures = this.convertValues(source["failures"], FileFailure);
 	        this.checking = source["checking"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -835,11 +835,11 @@ export namespace main {
 	export class OrphanInfo {
 	    remote: string;
 	    discovered: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new OrphanInfo(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.remote = source["remote"];
@@ -856,11 +856,11 @@ export namespace main {
 	    hasLocal: boolean;
 	    hasRemote: boolean;
 	    isOrphan: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ProjectInfo(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -877,17 +877,17 @@ export namespace main {
 	export class ProjectListResult {
 	    projects: ProjectInfo[];
 	    orphans: OrphanInfo[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ProjectListResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.projects = this.convertValues(source["projects"], ProjectInfo);
 	        this.orphans = this.convertValues(source["orphans"], OrphanInfo);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -914,11 +914,11 @@ export namespace main {
 	    parent: string;
 	    files: Record<string, FileEntry>;
 	    binary: Record<string, any>;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new SnapshotDetail(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -929,7 +929,7 @@ export namespace main {
 	        this.files = this.convertValues(source["files"], FileEntry, true);
 	        this.binary = source["binary"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -956,11 +956,11 @@ export namespace main {
 	    device: string;
 	    message: string;
 	    fileCount: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new SnapshotEntry(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -972,8 +972,8 @@ export namespace main {
 	        this.fileCount = source["fileCount"];
 	    }
 	}
-
-
+	
+	
 
 }
 

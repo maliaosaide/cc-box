@@ -294,7 +294,11 @@ func (s *Store) chunkedExists(hash string) (bool, error) {
 // cachePath 返回本地缓存路径
 func (s *Store) cachePath(hash string) string {
 	prefix := HashPrefix(hash)
-	return filepath.Join(s.cache, prefix, hash+".enc")
+	digest, err := ParseHash(hash)
+	if err != nil {
+		digest = "invalid"
+	}
+	return filepath.Join(s.cache, prefix, digest+".enc")
 }
 
 func (s *Store) uploadChunked(hash string, data []byte) error {

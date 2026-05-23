@@ -3,6 +3,9 @@
 package project
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -118,5 +121,25 @@ func TestDecodeProjectDir_Unix(t *testing.T) {
 	result := decodeProjectDir(dir)
 	if result != "/Users/alice/Desktop/myproject" {
 		t.Errorf("Unix 路径解码错误: %s", result)
+	}
+}
+
+func TestDiscoverProjectPathUsesMetadataCWDWithHyphen(t *testing.T) {
+	projectDir := t.TempDir()
+	targetDir := filepath.Join(t.TempDir(), "my-project")
+	if err := os.MkdirAll(targetDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	record, err := json.Marshal(map[string]string{"cwd": targetDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "session.jsonl"), append(record, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := discoverProjectPath(projectDir, "-Users-alice-my-project")
+	if got != filepath.Clean(targetDir) {
+		t.Fatalf("discoverProjectPath() = %q, want %q", got, filepath.Clean(targetDir))
 	}
 }

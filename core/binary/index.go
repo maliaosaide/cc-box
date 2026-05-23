@@ -50,11 +50,32 @@ func NewIndex() *Index {
 	}
 }
 
-// LoadIndex 从 WebDAV 加载索引
+const (
+	indexPath             = "binaries/index.json"
+	maxIndexUpdateRetries = 5
+)
+
+// IndexRevision 是带 ETag 的索引快照。
+type IndexRevision struct {
+	Index  *Index
+	ETag   string
+	Exists bool
+}
+
+// LoadIndex 从 WebDAV 加载索引。
 func LoadIndex(client *webdav.Client) (*Index, error) {
-	data, _, err := client.GET("binaries/index.json")
+	rev, err := LoadIndexRevision(client)
+	if err != nil {
+		return nil, err
+	}
+	return rev.Index, nil
+}
+
+// LoadIndexRevision 从 WebDAV 加载索引和写入前置条件。
+func LoadIndexRevision(client *webdav.Client) (*IndexRevision, error) {
+	data, etag, err := client.GET(indexPath)
 	if err == webdav.ErrNotFound {
-		return NewIndex(), nil
+		return &IndexRevision{Index: NewIndex()}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("下载索引失败: %w", err)
@@ -64,22 +85,55 @@ func LoadIndex(client *webdav.Client) (*Index, error) {
 	if err := json.Unmarshal(data, &idx); err != nil {
 		return nil, fmt.Errorf("解析索引失败: %w", err)
 	}
-	if idx.Platforms == nil {
-		idx.Platforms = make(map[string]PlatformBins)
-	}
-	return &idx, nil
+	normalizeIndex(&idx)
+	return &IndexRevision{Index: &idx, ETag: etag, Exists: true}, nil
 }
 
-// SaveIndex 保存索引到 WebDAV
-func SaveIndex(client *webdav.Client, idx *Index) error {
+// SaveIndex 使用给定的 ETag 前置条件保存索引到 WebDAV。
+func SaveIndex(client *webdav.Client, idx *Index, expectedETag string, exists bool) error {
 	data, err := json.MarshalIndent(idx, "", "  ")
 	if err != nil {
 		return fmt.Errorf("序列化索引失败: %w", err)
 	}
-
-	client.EnsureDir("binaries/index.json")
-	_, err = client.PUT("binaries/index.json", data, "")
+	if err := client.EnsureDir(indexPath); err != nil {
+		return err
+	}
+	if !exists {
+		_, err = client.PUTIfAbsent(indexPath, data)
+		return err
+	}
+	if expectedETag == "" {
+		return fmt.Errorf("远程二进制索引没有 ETag，无法安全更新")
+	}
+	_, err = client.PUT(indexPath, data, expectedETag)
 	return err
+}
+
+// UpdateIndex 对索引执行 CAS 更新；遇到并发冲突会重新加载并重试。
+func UpdateIndex(client *webdav.Client, mutate func(*Index) error) error {
+	for i := 0; i < maxIndexUpdateRetries; i++ {
+		rev, err := LoadIndexRevision(client)
+		if err != nil {
+			return err
+		}
+		if err := mutate(rev.Index); err != nil {
+			return err
+		}
+		if err := SaveIndex(client, rev.Index, rev.ETag, rev.Exists); err != nil {
+			if err == webdav.ErrConflict {
+				continue
+			}
+			return err
+		}
+		return nil
+	}
+	return fmt.Errorf("二进制索引被其他设备持续更新，请重试")
+}
+
+func normalizeIndex(idx *Index) {
+	if idx.Platforms == nil {
+		idx.Platforms = make(map[string]PlatformBins)
+	}
 }
 
 // GetBinaryInfo 获取指定平台和二进制的版本信息

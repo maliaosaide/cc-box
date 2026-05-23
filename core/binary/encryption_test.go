@@ -18,14 +18,16 @@ import (
 )
 
 type binaryTestDAV struct {
-	server *httptest.Server
-	mu     sync.Mutex
-	files  map[string][]byte
+	server  *httptest.Server
+	mu      sync.Mutex
+	files   map[string][]byte
+	etags   map[string]string
+	counter int
 }
 
 func newBinaryTestDAV(t *testing.T) (*webdav.Client, *binaryTestDAV) {
 	t.Helper()
-	dav := &binaryTestDAV{files: make(map[string][]byte)}
+	dav := &binaryTestDAV{files: make(map[string][]byte), etags: make(map[string]string)}
 	dav.server = httptest.NewServer(http.HandlerFunc(dav.serveHTTP))
 	t.Cleanup(dav.server.Close)
 	return webdav.NewClient(dav.server.URL, "", ""), dav
@@ -43,22 +45,48 @@ func (d *binaryTestDAV) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		d.mu.Lock()
+		_, exists := d.files[remotePath]
+		if r.Header.Get("If-None-Match") == "*" && exists {
+			d.mu.Unlock()
+			w.WriteHeader(http.StatusPreconditionFailed)
+			return
+		}
+		if ifMatch := r.Header.Get("If-Match"); ifMatch != "" && (!exists || d.etags[remotePath] != ifMatch) {
+			d.mu.Unlock()
+			w.WriteHeader(http.StatusPreconditionFailed)
+			return
+		}
 		d.files[remotePath] = append([]byte(nil), data...)
+		etag := d.nextETag()
+		d.etags[remotePath] = etag
 		d.mu.Unlock()
+		w.Header().Set("ETag", etag)
 		w.WriteHeader(http.StatusCreated)
 	case "GET", "HEAD":
 		d.mu.Lock()
 		data, ok := d.files[remotePath]
+		etag := d.etags[remotePath]
 		d.mu.Unlock()
 		if !ok {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("ETag", fmt.Sprintf("%q", remotePath))
+		w.Header().Set("ETag", etag)
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
 		if r.Method == "GET" {
 			_, _ = w.Write(data)
 		}
+	case "DELETE":
+		d.mu.Lock()
+		_, ok := d.files[remotePath]
+		delete(d.files, remotePath)
+		delete(d.etags, remotePath)
+		d.mu.Unlock()
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	default:
 		http.Error(w, "unsupported method", http.StatusMethodNotAllowed)
 	}
@@ -69,6 +97,11 @@ func (d *binaryTestDAV) get(remotePath string) ([]byte, bool) {
 	defer d.mu.Unlock()
 	data, ok := d.files[remotePath]
 	return append([]byte(nil), data...), ok
+}
+
+func (d *binaryTestDAV) nextETag() string {
+	d.counter++
+	return fmt.Sprintf("%q", fmt.Sprintf("etag-%d", d.counter))
 }
 
 func configureBinaryTest(t *testing.T, binaryConfig config.BinaryConfig) {

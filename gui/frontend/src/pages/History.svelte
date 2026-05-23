@@ -4,6 +4,7 @@
   import { GetSnapshotList, GetSnapshotDetail, RevertToSnapshot } from '../../wailsjs/go/main/App.js'
 
   export let active = false
+  export let refreshToken = 0
 
   let snapshots = []
   let filtered = []
@@ -17,6 +18,13 @@
   let deviceFilter = ''
   let devices = []
   let dirty = false
+  let detailRequestId = 0
+  let lastRefreshToken = 0
+
+  $: if (active && refreshToken !== lastRefreshToken) {
+    lastRefreshToken = refreshToken
+    refresh()
+  }
 
   $: if (active && dirty) {
     dirty = false
@@ -62,22 +70,28 @@
 
   async function toggleDetail(id) {
     if (expandedId === id) {
-      expandedId = ''; detail = null; return
+      detailRequestId += 1
+      expandedId = ''; detail = null; detailLoading = false; return
     }
+    const requestId = ++detailRequestId
     expandedId = id; detail = null; detailLoading = true
     try {
-      detail = await GetSnapshotDetail(id)
+      const result = await GetSnapshotDetail(id)
+      if (requestId === detailRequestId && expandedId === id) detail = result
     } catch (e) {
-      detail = null
+      if (requestId === detailRequestId && expandedId === id) detail = null
     }
-    detailLoading = false
+    if (requestId === detailRequestId && expandedId === id) detailLoading = false
   }
 
-  async function rollback(id) {
+  async function rollback(snap) {
+    const id = snap.id
+    const label = snap.shortId || id.slice(0, 12)
+    if (!confirm(`确认回滚到快照 ${label}？\n时间：${snap.timestamp || '未知'}\n设备：${snap.device || '未知'}`)) return
     msg = ''; error = ''
     try {
       await RevertToSnapshot(id)
-      msg = '已回滚到快照 ' + id.slice(0, 12)
+      msg = '已回滚到快照 ' + label
       await refresh()
     } catch (e) {
       error = e.message || String(e)
@@ -227,7 +241,7 @@
                   {/if}
 
                   <div class="detail-actions">
-                    <button class="btn-sm" on:click|stopPropagation={() => rollback(snap.id)}>
+                    <button class="btn-sm" disabled={detailLoading} on:click|stopPropagation={() => rollback(snap)}>
                       回滚到此版本
                     </button>
                   </div>
@@ -350,6 +364,7 @@
     transition: all 0.2s;
   }
   .btn-sm:hover { background: rgba(196,112,78,0.15); }
+  .btn-sm:disabled { opacity: 0.4; cursor: not-allowed; }
 
   .binary-tags { display: flex; flex-wrap: wrap; gap: 6px; }
   .binary-tag {

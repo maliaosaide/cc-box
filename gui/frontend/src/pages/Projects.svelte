@@ -1,6 +1,10 @@
 <script>
   import { onMount } from 'svelte'
+  import { EventsOn } from '../../wailsjs/runtime/runtime.js'
   import { GetProjectList, GetProjectDetail, AddProjectPath, BrowseFolder, DeleteOrphan } from '../../wailsjs/go/main/App.js'
+
+  export let active = false
+  export let refreshToken = 0
 
   let data = null
   let loading = true
@@ -9,29 +13,48 @@
   let detailJSON = ''
   let detailLoading = false
   let folderLoading = false
+  let detailRequestId = 0
+  let lastRefreshToken = 0
+
+  $: if (active && refreshToken !== lastRefreshToken) {
+    lastRefreshToken = refreshToken
+    loadProjects()
+  }
+
+  $: projects = data?.projects || []
+  $: orphans = data?.orphans || []
 
   onMount(async () => {
     await loadProjects()
+    EventsOn('projects:updated', (result) => {
+      data = { ...(result || {}), projects: result?.projects || [], orphans: result?.orphans || [] }
+    })
   })
 
   async function loadProjects() {
     loading = true; error = ''
-    try { data = await GetProjectList() }
+    try {
+      const result = await GetProjectList()
+      data = { ...(result || {}), projects: result?.projects || [], orphans: result?.orphans || [] }
+    }
     catch (e) { error = e.message || String(e) }
     loading = false
   }
 
   async function toggleExpand(i, path) {
     if (expandedIdx === i) {
-      expandedIdx = -1; detailJSON = ''; return
+      detailRequestId += 1
+      expandedIdx = -1; detailJSON = ''; detailLoading = false; return
     }
+    const requestId = ++detailRequestId
     expandedIdx = i; detailJSON = ''; detailLoading = true
     try {
-      detailJSON = await GetProjectDetail(path)
+      const result = await GetProjectDetail(path)
+      if (requestId === detailRequestId && expandedIdx === i) detailJSON = result
     } catch (e) {
-      detailJSON = '加载失败: ' + (e.message || String(e))
+      if (requestId === detailRequestId && expandedIdx === i) detailJSON = '加载失败: ' + (e.message || String(e))
     }
-    detailLoading = false
+    if (requestId === detailRequestId && expandedIdx === i) detailLoading = false
   }
 
   async function addFolder() {
@@ -77,7 +100,7 @@
     <div class="flex items-center justify-center h-64">
       <div class="loading-dot animate-gentle-pulse"></div>
     </div>
-  {:else if !data || (data.projects.length === 0 && data.orphans.length === 0)}
+  {:else if !data || (projects.length === 0 && orphans.length === 0)}
     <div class="card animate-fade-in">
       <div class="text-center py-16">
         <div class="empty-icon">
@@ -90,14 +113,14 @@
       </div>
     </div>
   {:else}
-    {#if data.projects && data.projects.length > 0}
+    {#if projects && projects.length > 0}
       <div class="card animate-fade-in">
         <div class="section-label-row">
           <span class="section-label">已追踪项目</span>
-          <span class="text-xs text-txt-muted">{data.projects.length} 个</span>
+          <span class="text-xs text-txt-muted">{projects.length} 个</span>
         </div>
         <div class="project-list">
-          {#each data.projects as proj, i}
+          {#each projects as proj, i}
             <button class="proj-row" type="button" on:click={() => toggleExpand(i, proj.path)}>
               <div class="proj-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16">
@@ -141,14 +164,14 @@
       </div>
     {/if}
 
-    {#if data.orphans && data.orphans.length > 0}
+    {#if orphans && orphans.length > 0}
       <div class="card animate-fade-in stagger-2">
         <div class="section-label-row">
           <span class="section-label">未匹配项目</span>
-          <span class="text-xs text-txt-muted">{data.orphans.length} 个</span>
+          <span class="text-xs text-txt-muted">{orphans.length} 个</span>
         </div>
         <div class="orphan-list">
-          {#each data.orphans as orphan}
+          {#each orphans as orphan}
             <div class="orphan-row">
               <div class="orphan-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14">

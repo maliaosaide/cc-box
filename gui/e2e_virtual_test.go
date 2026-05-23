@@ -680,6 +680,12 @@ func (s *virtualWebDAVServer) handleHEAD(w http.ResponseWriter, key string) {
 }
 
 func (s *virtualWebDAVServer) handlePUT(w http.ResponseWriter, r *http.Request, key string) {
+	if r.Header.Get("If-None-Match") == "*" {
+		if _, ok := s.files[key]; ok {
+			w.WriteHeader(http.StatusPreconditionFailed)
+			return
+		}
+	}
 	ifMatch := r.Header.Get("If-Match")
 	if ifMatch != "" {
 		current, ok := s.files[key]

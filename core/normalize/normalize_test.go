@@ -22,13 +22,19 @@ func TestPathSlash(t *testing.T) {
 	}
 }
 
+func TestPathLowerIsPlatformIndependent(t *testing.T) {
+	if got := PathLower("FOO/Bar.JSON"); got != "foo/bar.json" {
+		t.Fatalf("PathLower() = %q, want foo/bar.json", got)
+	}
+}
+
 func TestNormalizePath(t *testing.T) {
 	tests := []struct {
 		input, want string
 	}{
-		{"foo\\Bar\\Baz", "foo/bar/baz"},
+		{"foo\\Bar\\Baz", "foo/Bar/Baz"},
 		{"/foo/bar", "foo/bar"},
-		{"FOO/BAR.JSON", "foo/bar.json"},
+		{"FOO/BAR.JSON", "FOO/BAR.JSON"},
 	}
 	for _, tt := range tests {
 		got := NormalizePath(tt.input)

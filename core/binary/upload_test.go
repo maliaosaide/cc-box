@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/user/cc-box/core/config"
+	"github.com/user/cc-box/core/webdav"
 )
 
 func TestShouldChunk(t *testing.T) {
@@ -97,6 +98,84 @@ func TestChunkProgressDoesNotExceedTotal(t *testing.T) {
 	}
 	if lastTotal != int64(len(data)) || lastUploaded != int64(len(data)) {
 		t.Fatalf("progress total=%d uploaded=%d, want %d", lastTotal, lastUploaded, len(data))
+	}
+}
+
+func TestBinaryVersionLockRejectsConcurrentHolder(t *testing.T) {
+	client, _ := newBinaryTestDAV(t)
+	platform := config.Platform()
+	lockPath := "binaries/locks/version/" + encodeLockPart(platform) + "/" + encodeLockPart("claude") + "/" + encodeLockPart("1.0.0") + ".lock"
+	if err := client.EnsureDir(lockPath); err != nil {
+		t.Fatalf("EnsureDir: %v", err)
+	}
+	if _, err := client.PUTIfAbsent(lockPath, []byte("locked")); err != nil {
+		t.Fatalf("PUTIfAbsent lock: %v", err)
+	}
+	if err := withBinaryVersionLock(client, platform, "claude", "1.0.0", func() error { return nil }); err == nil {
+		t.Fatalf("second lock acquisition succeeded")
+	}
+	if err := client.DELETE(lockPath); err != nil {
+		t.Fatalf("DELETE lock: %v", err)
+	}
+	if err := withBinaryVersionLock(client, platform, "claude", "1.0.0", func() error { return nil }); err != nil {
+		t.Fatalf("lock after release: %v", err)
+	}
+}
+
+func TestSaveIndexRejectsStaleCreate(t *testing.T) {
+	client, _ := newBinaryTestDAV(t)
+	rev, err := LoadIndexRevision(client)
+	if err != nil {
+		t.Fatalf("LoadIndexRevision: %v", err)
+	}
+
+	first := NewIndex()
+	first.EnsureBinaryInfo(config.Platform(), "claude").Versions["1.0.0"] = Version{Hash: "sha256:first"}
+	if err := SaveIndex(client, first, rev.ETag, rev.Exists); err != nil {
+		t.Fatalf("SaveIndex first: %v", err)
+	}
+
+	stale := NewIndex()
+	stale.EnsureBinaryInfo(config.Platform(), "claude").Versions["2.0.0"] = Version{Hash: "sha256:stale"}
+	if err := SaveIndex(client, stale, rev.ETag, rev.Exists); err != webdav.ErrConflict {
+		t.Fatalf("SaveIndex stale error = %v, want ErrConflict", err)
+	}
+}
+
+func TestUpdateIndexRetriesAndMergesConcurrentChange(t *testing.T) {
+	client, _ := newBinaryTestDAV(t)
+	platform := config.Platform()
+	injected := false
+
+	if err := UpdateIndex(client, func(idx *Index) error {
+		if !injected {
+			injected = true
+			other := NewIndex()
+			other.EnsureBinaryInfo(platform, "claude").Versions["other"] = Version{Hash: "sha256:other"}
+			rev, err := LoadIndexRevision(client)
+			if err != nil {
+				return err
+			}
+			if err := SaveIndex(client, other, rev.ETag, rev.Exists); err != nil {
+				return err
+			}
+		}
+		idx.EnsureBinaryInfo(platform, "claude").Versions["mine"] = Version{Hash: "sha256:mine"}
+		return nil
+	}); err != nil {
+		t.Fatalf("UpdateIndex: %v", err)
+	}
+
+	idx, err := LoadIndex(client)
+	if err != nil {
+		t.Fatalf("LoadIndex: %v", err)
+	}
+	versions := idx.GetBinaryInfo(platform, "claude").Versions
+	if _, ok := versions["other"]; !ok {
+		t.Fatalf("missing concurrently added version")
+	}
+	if _, ok := versions["mine"]; !ok {
+		t.Fatalf("missing retried version")
 	}
 }
 

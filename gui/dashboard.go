@@ -546,9 +546,10 @@ func (a *App) QuickSync() int64 {
 			default:
 			}
 		}
-		opCancelMu.Lock()
-		pullErr := opResults[pullID]
-		opCancelMu.Unlock()
+		pullErr, ok := takeOpResult(pullID)
+		if !ok {
+			return fmt.Errorf("拉取结果丢失")
+		}
 		if pullErr != nil {
 			return fmt.Errorf("拉取失败: %w", pullErr)
 		}
@@ -568,9 +569,10 @@ func (a *App) QuickSync() int64 {
 			default:
 			}
 		}
-		opCancelMu.Lock()
-		pushErr := opResults[pushID]
-		opCancelMu.Unlock()
+		pushErr, ok := takeOpResult(pushID)
+		if !ok {
+			return fmt.Errorf("推送结果丢失")
+		}
 		if pushErr != nil {
 			return fmt.Errorf("推送失败: %w", pushErr)
 		}
@@ -586,6 +588,11 @@ func (a *App) RepairRemoteFromLocal() int64 {
 		if err != nil {
 			return err
 		}
+		releaseInitLock, err := acquireRemoteInitLock(client, cfg.Device.ID)
+		if err != nil {
+			return err
+		}
+		defer releaseInitLock()
 
 		UpdateTrayState(TraySyncing)
 		a.emitProgress(opID, "repair-remote", 0, 4, 0, 4, "检查远程 HEAD...")
@@ -666,7 +673,10 @@ func (a *App) RepairRemoteFromLocal() int64 {
 		if err := ensureRemoteHeadMissing(client); err != nil {
 			return err
 		}
-		if _, err := client.PUT("HEAD", []byte(snap.ID), ""); err != nil {
+		if _, err := client.PUTIfAbsent("HEAD", []byte(snap.ID)); err != nil {
+			if err == webdav.ErrConflict {
+				return fmt.Errorf("远程 HEAD 已存在，已停止修复以避免覆盖远程数据；请先检查 WebDAV 根路径")
+			}
 			return fmt.Errorf("写入远程 HEAD 失败: %w", err)
 		}
 		if err := os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(snap.ID), 0600); err != nil {
@@ -711,7 +721,14 @@ func ensureRemoteSaltFromLocal(client *webdav.Client) error {
 	if err != webdav.ErrNotFound {
 		return fmt.Errorf("读取远程 salt 失败: %w", err)
 	}
-	if _, err := client.PUT("salt.bin", localSalt, ""); err != nil {
+	if _, err := client.PUTIfAbsent("salt.bin", localSalt); err != nil {
+		if err == webdav.ErrConflict {
+			remoteSalt, _, readErr := client.GET("salt.bin")
+			if readErr == nil && bytes.Equal(remoteSalt, localSalt) {
+				return nil
+			}
+			return fmt.Errorf("远程 salt 与本地不一致，请检查 WebDAV 根路径")
+		}
 		return fmt.Errorf("上传 salt 失败: %w", err)
 	}
 	return nil

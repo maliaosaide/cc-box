@@ -51,3 +51,12 @@ func TestHeadDisplay(t *testing.T) {
 		t.Error("非空 HEAD 应原样显示")
 	}
 }
+
+func TestSnapshotShortIDHandlesShortIDs(t *testing.T) {
+	if got := snapshotShortID("short"); got != "short" {
+		t.Fatalf("snapshotShortID(short) = %q", got)
+	}
+	if got := snapshotShortID("snap_123456789abcdef"); got != "snap_1234567" {
+		t.Fatalf("snapshotShortID(long) = %q", got)
+	}
+}

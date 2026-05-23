@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -37,26 +38,45 @@ func conflictDir() string {
 
 func runConflicts(cmd *cobra.Command, args []string) error {
 	dir := conflictDir()
-	entries, err := os.ReadDir(dir)
-	if err != nil || len(entries) == 0 {
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		fmt.Println("没有未解决的冲突")
 		return nil
+	} else if err != nil {
+		return fmt.Errorf("读取冲突目录失败: %w", err)
 	}
 
 	// 用 map 去重，避免 .local/.remote 同一文件显示两次
 	seen := make(map[string]bool)
 	var conflictFiles []string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
+	if err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-		name := entry.Name()
+		if entry.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		name := filepath.ToSlash(rel)
+		if !strings.HasSuffix(name, ".local") && !strings.HasSuffix(name, ".remote") {
+			return nil
+		}
 		base := strings.TrimSuffix(name, ".local")
 		base = strings.TrimSuffix(base, ".remote")
 		if !seen[base] {
 			seen[base] = true
 			conflictFiles = append(conflictFiles, base)
 		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("读取冲突目录失败: %w", err)
+	}
+
+	if len(conflictFiles) == 0 {
+		fmt.Println("没有未解决的冲突")
+		return nil
 	}
 
 	fmt.Printf("未解决的冲突 (%d):\n", len(conflictFiles))
@@ -70,8 +90,14 @@ func runResolve(cmd *cobra.Command, args []string) error {
 	file := args[0]
 	dir := conflictDir()
 
-	localFile := dir + "/" + file + ".local"
-	remoteFile := dir + "/" + file + ".remote"
+	localFile, err := safeJoin(dir, file+".local")
+	if err != nil {
+		return err
+	}
+	remoteFile, err := safeJoin(dir, file+".remote")
+	if err != nil {
+		return err
+	}
 
 	localData, err := os.ReadFile(localFile)
 	if err != nil {
@@ -113,15 +139,24 @@ func runResolve(cmd *cobra.Command, args []string) error {
 	}
 
 	// 写入目标文件
-	targetPath := config.ClaudeDir() + "/" + strings.ReplaceAll(file, "/", string(os.PathSeparator))
-	os.MkdirAll(strings.ReplaceAll(targetPath, "/", string(os.PathSeparator)), 0755)
+	targetPath, err := safeClaudePath(file)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+		return fmt.Errorf("创建目录 %s 失败: %w", filepath.Dir(targetPath), err)
+	}
 	if err := os.WriteFile(targetPath, result, 0600); err != nil {
 		return fmt.Errorf("写入失败: %w", err)
 	}
 
 	// 清理冲突文件
-	os.Remove(localFile)
-	os.Remove(remoteFile)
+	if err := os.Remove(localFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("删除本地冲突文件失败: %w", err)
+	}
+	if err := os.Remove(remoteFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("删除远程冲突文件失败: %w", err)
+	}
 
 	fmt.Printf("已解决冲突: %s\n", file)
 	return nil

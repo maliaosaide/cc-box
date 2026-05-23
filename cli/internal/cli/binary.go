@@ -222,8 +222,19 @@ func runBinarySwitch(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	info.Current = targetVersion
-	binary.SaveIndex(client, idx)
+	if err := binary.UpdateIndex(client, func(idx *binary.Index) error {
+		info := idx.GetBinaryInfo(platform, "claude")
+		if info == nil {
+			return fmt.Errorf("没有可用的 Claude 二进制")
+		}
+		if _, exists := info.Versions[targetVersion]; !exists {
+			return fmt.Errorf("版本 %s 不存在云端", targetVersion)
+		}
+		info.Current = targetVersion
+		return nil
+	}); err != nil {
+		return fmt.Errorf("更新远程二进制索引失败: %w", err)
+	}
 	_ = binary.ClearClaudeResolutionCache()
 
 	fmt.Printf("\n已切换到 claude %s\n", targetVersion)
@@ -248,25 +259,8 @@ func runBinaryPrune(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	var targets []pruneTarget
-
-	for platform, pBins := range idx.Platforms {
-		info := pBins.Claude
-		if info == nil {
-			continue
-		}
-		for ver, v := range info.Versions {
-			if ver == info.Current || v.Refs > 0 {
-				continue
-			}
-			targets = append(targets, pruneTarget{
-				platform: platform,
-				name:     "claude",
-				version:  ver,
-				hash:     v.Hash,
-			})
-		}
-	}
+	platform := config.Platform()
+	targets := collectPruneTargets(idx, platform)
 
 	if len(targets) == 0 {
 		fmt.Println("没有可清理的版本")
@@ -299,6 +293,27 @@ func runBinaryPrune(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("\n已清理 %d 个版本\n", cleaned)
 	return nil
+}
+
+func collectPruneTargets(idx *binary.Index, platform string) []pruneTarget {
+	pBins, ok := idx.Platforms[platform]
+	if !ok || pBins.Claude == nil {
+		return nil
+	}
+
+	var targets []pruneTarget
+	for ver, v := range pBins.Claude.Versions {
+		if ver == pBins.Claude.Current || v.Refs > 0 {
+			continue
+		}
+		targets = append(targets, pruneTarget{
+			platform: platform,
+			name:     "claude",
+			version:  ver,
+			hash:     v.Hash,
+		})
+	}
+	return targets
 }
 
 func totalPruneSize(idx *binary.Index, targets []pruneTarget) int64 {

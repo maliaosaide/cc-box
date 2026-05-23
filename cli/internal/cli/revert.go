@@ -27,10 +27,18 @@ func init() {
 
 func runRevert(cmd *cobra.Command, args []string) error {
 	snapID := args[0]
+	if err := validateSnapshotID(snapID); err != nil {
+		return err
+	}
 
 	cfg, client, key, err := loadClientAndKey()
 	if err != nil {
 		return err
+	}
+
+	localHead, err := loadLocalHEAD()
+	if err != nil {
+		return fmt.Errorf("读取本地 HEAD 失败: %w", err)
 	}
 
 	// 加载目标快照
@@ -48,7 +56,7 @@ func runRevert(cmd *cobra.Command, args []string) error {
 
 	// 对比差异
 	currentSnap := snapshot.CreateSnapshot("", cfg.Device.ID, "", scanResult.Files)
-	changes := targetSnap.Diff(currentSnap)
+	changes := currentSnap.Diff(targetSnap)
 
 	if len(changes) == 0 {
 		fmt.Println("当前状态与目标快照一致，无需回滚")
@@ -79,10 +87,14 @@ func runRevert(cmd *cobra.Command, args []string) error {
 	store := object.NewStore(client, key, "")
 	applied := 0
 	for _, c := range changes {
+		fullPath, err := safeClaudePath(c.Path)
+		if err != nil {
+			return err
+		}
 		if c.Type == snapshot.Deleted {
-			// 删除本地文件
-			fullPath := filepath.Join(config.ClaudeDir(), filepath.FromSlash(c.Path))
-			os.Remove(fullPath)
+			if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("删除文件 %s 失败: %w", c.Path, err)
+			}
 			fmt.Printf("  × 删除 %s\n", c.Path)
 			applied++
 			continue
@@ -91,20 +103,19 @@ func runRevert(cmd *cobra.Command, args []string) error {
 		// 下载目标版本的文件
 		targetEntry, ok := targetSnap.Files[c.Path]
 		if !ok {
-			continue
+			return fmt.Errorf("目标快照缺少文件: %s", c.Path)
 		}
 
 		data, err := store.Download(targetEntry.Hash)
 		if err != nil {
-			fmt.Printf("  下载失败 %s: %v\n", c.Path, err)
-			continue
+			return fmt.Errorf("下载文件 %s 失败: %w", c.Path, err)
 		}
 
-		fullPath := filepath.Join(config.ClaudeDir(), filepath.FromSlash(c.Path))
-		os.MkdirAll(filepath.Dir(fullPath), 0755)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+			return fmt.Errorf("创建目录 %s 失败: %w", filepath.Dir(fullPath), err)
+		}
 		if err := os.WriteFile(fullPath, data, 0600); err != nil {
-			fmt.Printf("  写入失败 %s: %v\n", c.Path, err)
-			continue
+			return fmt.Errorf("写入文件 %s 失败: %w", c.Path, err)
 		}
 
 		fmt.Printf("  ✓ %s\n", c.Path)
@@ -112,7 +123,6 @@ func runRevert(cmd *cobra.Command, args []string) error {
 	}
 
 	// 创建 revert 快照
-	localHead, _ := loadLocalHEAD()
 	newSnap := snapshot.CreateSnapshot(localHead, cfg.Device.ID, "revert to "+snapID, targetSnap.Files)
 
 	// 上传快照
@@ -120,9 +130,15 @@ func runRevert(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("上传快照失败: %w", err)
 	}
 
-	updateRemoteHEAD(client, newSnap.ID, "")
-	updateLocalHEAD(newSnap.ID)
-	saveLocalSnapshot(newSnap)
+	if err := pushUpdateHEAD(client, cfg, newSnap.ID, localHead); err != nil {
+		return err
+	}
+	if err := updateLocalHEAD(newSnap.ID); err != nil {
+		return fmt.Errorf("更新本地 HEAD 失败: %w", err)
+	}
+	if err := saveLocalSnapshot(newSnap); err != nil {
+		return fmt.Errorf("缓存快照失败: %w", err)
+	}
 
 	fmt.Printf("\n已回滚到快照 %s（%d 个文件变更）\n", snapID, applied)
 	return nil

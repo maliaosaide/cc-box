@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/user/cc-box/core/config"
@@ -26,7 +27,7 @@ func init() {
 	rootCmd.AddCommand(initCmd)
 }
 
-func runInit(cmd *cobra.Command, args []string) error {
+func runInit(cmd *cobra.Command, args []string) (err error) {
 	reader := bufio.NewReader(os.Stdin)
 
 	fmt.Println("=== CC-Box 初始化向导 ===")
@@ -61,13 +62,20 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("密码不能为空")
 	}
 
+	cfg := config.DefaultConfig()
+	cfg.WebDAV.URL = url
+	cfg.WebDAV.Username = username
+	cfg.WebDAV.Root = "/cc-box/"
+
 	// 测试连接
 	fmt.Print("测试连接... ")
-	client := webdav.NewClient(url, username, password)
-	client.SetTimeout(15e9) // 15 秒
-	if _, err := client.Exists("/"); err != nil {
+	testClient := webdav.NewClient(url, username, password)
+	testClient.SetTimeout(15e9) // 15 秒
+	if _, err := testClient.Exists("/"); err != nil {
 		return fmt.Errorf("连接失败: %w\n请检查 URL、用户名和密码", err)
 	}
+	client := webdav.NewClient(config.ConfiguredWebDAVURL(cfg), username, password)
+	client.SetTimeout(15e9)
 	fmt.Println("成功")
 
 	// 2. 加密设置
@@ -88,10 +96,6 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// 3. 设备配置
 	fmt.Println()
 	fmt.Println("--- 设备配置 ---")
-	cfg := config.DefaultConfig()
-	cfg.WebDAV.URL = url
-	cfg.WebDAV.Username = username
-	cfg.WebDAV.Root = "/cc-box/"
 	fmt.Printf("设备 ID: %s\n", cfg.Device.ID)
 	fmt.Printf("设备名称 [%s]: ", cfg.Device.Name)
 	name, _ := reader.ReadString('\n')
@@ -114,6 +118,19 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("生成 salt 失败: %w", err)
 	}
 	key := crypto.DeriveKey(encPassword, salt)
+
+	releaseInitLock, err := acquireCLIRemoteInitLock(client, cfg.Device.ID)
+	if err != nil {
+		return err
+	}
+	defer releaseInitLock()
+	createdRemote := []string{}
+	cleanupRemote := false
+	defer func() {
+		if err != nil && cleanupRemote {
+			cleanupCLIRemoteFiles(client, createdRemote)
+		}
+	}()
 
 	// 检查远程是否已有数据
 	saltExists, _ := client.Exists("salt.bin")
@@ -144,16 +161,24 @@ func runInit(cmd *cobra.Command, args []string) error {
 		key = remoteKey
 	} else {
 		// 新初始化，上传 salt
+		cleanupRemote = true
 		if err := client.EnsureDir("salt.bin"); err != nil {
 			return fmt.Errorf("创建远程目录失败: %w", err)
 		}
-		if _, err := client.PUT("salt.bin", salt, ""); err != nil {
+		if _, err := client.PUTIfAbsent("salt.bin", salt); err != nil {
+			if err == webdav.ErrConflict {
+				return fmt.Errorf("远程已存在同步组，请选择加入已有同步组或更换根路径")
+			}
 			return fmt.Errorf("上传 salt 失败: %w", err)
 		}
+		createdRemote = append(createdRemote, "salt.bin")
 		fmt.Println("完成")
 	}
 
 	// 保存密钥
+	if err := os.WriteFile(config.CCBoxDir()+"/salt.bin", salt, 0600); err != nil {
+		return fmt.Errorf("保存 salt 失败: %w", err)
+	}
 	if err := crypto.SaveKey(key, config.KeyPath()); err != nil {
 		return fmt.Errorf("保存密钥失败: %w", err)
 	}
@@ -173,23 +198,25 @@ func runInit(cmd *cobra.Command, args []string) error {
 	uploaded := 0
 	for path, entry := range scanResult.Files {
 		// 读取文件内容
-		fullPath := config.ClaudeDir() + "/" + path
+		fullPath, err := safeClaudePath(path)
+		if err != nil {
+			return err
+		}
 		data, err := os.ReadFile(fullPath)
 		if err != nil {
 			fmt.Printf("  跳过 %s: %v\n", path, err)
 			continue
 		}
 
-		// 规范化后计算哈希
-		normData := normalizeContent(data)
-		hash := object.ComputeHash(normData)
-		entry.Hash = hash
+		hash := object.ComputeHash(data)
+		if hash != entry.Hash {
+			return fmt.Errorf("文件 %s hash 不一致", path)
+		}
 
-		if _, err := store.Upload(normData); err != nil {
+		if _, err := store.Upload(data); err != nil {
 			fmt.Printf("  上传失败 %s: %v\n", path, err)
 			continue
 		}
-		scanResult.Files[path] = entry
 		uploaded++
 		if uploaded%10 == 0 {
 			fmt.Printf("  已上传 %d/%d 个文件\n", uploaded, scanResult.Stats.TotalFiles)
@@ -201,11 +228,14 @@ func runInit(cmd *cobra.Command, args []string) error {
 	if err := uploadSnapshot(client, store, snap); err != nil {
 		return fmt.Errorf("上传快照失败: %w", err)
 	}
+	createdRemote = append(createdRemote, "snapshots/"+snap.ID+".json.enc")
 
 	// 更新远程 HEAD
 	if err := updateRemoteHEAD(client, snap.ID, ""); err != nil {
 		return fmt.Errorf("更新远程 HEAD 失败: %w", err)
 	}
+	createdRemote = append(createdRemote, "HEAD")
+	cleanupRemote = false
 
 	// 更新本地 HEAD
 	if err := updateLocalHEAD(snap.ID); err != nil {
@@ -224,7 +254,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	// 保存快照到本地缓存
-	saveLocalSnapshot(snap)
+	if err := saveLocalSnapshot(snap); err != nil {
+		return fmt.Errorf("缓存快照失败: %w", err)
+	}
 
 	fmt.Println()
 	fmt.Printf("=== 初始化完成 ===\n")
@@ -239,23 +271,23 @@ func runInit(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// normalizeContent 规范化文件内容
-func normalizeContent(data []byte) []byte {
-	// 简单的 CRLF -> LF 转换
-	result := make([]byte, 0, len(data))
-	for i := 0; i < len(data); i++ {
-		if data[i] == '\r' {
-			if i+1 < len(data) && data[i+1] == '\n' {
-				result = append(result, '\n')
-				i++
-			} else {
-				result = append(result, '\n')
-			}
-		} else {
-			result = append(result, data[i])
+func acquireCLIRemoteInitLock(client *webdav.Client, deviceID string) (func(), error) {
+	payload := []byte(fmt.Sprintf("%s\n%s\n", deviceID, time.Now().UTC().Format(time.RFC3339Nano)))
+	if _, err := client.PUTIfAbsent(".init.lock", payload); err != nil {
+		if err == webdav.ErrConflict {
+			return nil, fmt.Errorf("远程同步组正在初始化，请稍后重试")
 		}
+		return nil, fmt.Errorf("创建远程初始化锁失败: %w", err)
 	}
-	return result
+	return func() {
+		_ = client.DELETE(".init.lock")
+	}, nil
+}
+
+func cleanupCLIRemoteFiles(client *webdav.Client, paths []string) {
+	for i := len(paths) - 1; i >= 0; i-- {
+		_ = client.DELETE(paths[i])
+	}
 }
 
 // uploadSnapshot 加密并上传快照到 WebDAV
@@ -284,6 +316,10 @@ func updateRemoteHEAD(client *webdav.Client, newID string, expectedETag string) 
 	if err := client.EnsureDir("HEAD"); err != nil {
 		return err
 	}
+	if expectedETag == "" {
+		_, err := client.PUTIfAbsent("HEAD", []byte(newID))
+		return err
+	}
 	_, err := client.PUT("HEAD", []byte(newID), expectedETag)
 	return err
 }
@@ -295,13 +331,16 @@ func updateLocalHEAD(id string) error {
 }
 
 // saveLocalSnapshot 保存快照到本地缓存
-func saveLocalSnapshot(snap *snapshot.Snapshot) {
+func saveLocalSnapshot(snap *snapshot.Snapshot) error {
 	dir := config.CCBoxDir()
 	data, err := snap.Serialize()
 	if err != nil {
-		return
+		return err
 	}
-	os.WriteFile(dir+"/snapshots/"+snap.ID+".json", data, 0600)
+	if err := os.MkdirAll(dir+"/snapshots", 0700); err != nil {
+		return err
+	}
+	return os.WriteFile(dir+"/snapshots/"+snap.ID+".json", data, 0600)
 }
 
 // loadLocalHEAD 读取本地 HEAD

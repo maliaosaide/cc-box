@@ -132,6 +132,16 @@ func (w *Watcher) watchLoop(ctx context.Context) {
 				w.mu.Unlock()
 				debounce.Reset(debounceDelay)
 			}
+		case err, ok := <-w.fsw.Errors:
+			if !ok {
+				return
+			}
+			if err != nil {
+				w.mu.Lock()
+				w.watchErrors = append(w.watchErrors, err)
+				w.mu.Unlock()
+				w.setTrayState(TrayConflict)
+			}
 		case <-debounce.C:
 			w.mu.Lock()
 			changed := w.changed
@@ -179,9 +189,7 @@ func (w *Watcher) triggerAutoSync(ctx context.Context) {
 			default:
 			}
 		}
-		opCancelMu.Lock()
-		syncErr := opResults[opID]
-		opCancelMu.Unlock()
+		syncErr, _ := takeOpResult(opID)
 
 		w.mu.Lock()
 		w.syncing = false

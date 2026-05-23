@@ -42,7 +42,7 @@ func (a *App) DetectExistingSetup(url, username, password, root string) (bool, e
 }
 
 // InitNewDevice 新建设备初始化：生成密钥 + 创建初始快照 + 上传
-func (a *App) InitNewDevice(url, username, password, root, encPassword, deviceName string) error {
+func (a *App) InitNewDevice(url, username, password, root, encPassword, deviceName string) (err error) {
 	cfg := config.DefaultConfig()
 	cfg.WebDAV = config.WebDAVConfig{
 		URL:      strings.TrimRight(url, "/") + "/",
@@ -68,6 +68,18 @@ func (a *App) InitNewDevice(url, username, password, root, encPassword, deviceNa
 	// 构建 WebDAV 客户端
 	fullURL := buildWebDAVURL(url, root)
 	client := webdav.NewClient(fullURL, username, password)
+	releaseInitLock, err := acquireRemoteInitLock(client, cfg.Device.ID)
+	if err != nil {
+		return err
+	}
+	defer releaseInitLock()
+	createdRemote := []string{}
+	cleanupRemote := true
+	defer func() {
+		if err != nil && cleanupRemote {
+			cleanupRemoteFiles(client, createdRemote)
+		}
+	}()
 	if exists, err := client.Exists("salt.bin"); err != nil {
 		return fmt.Errorf("检查远程初始化状态失败: %w", err)
 	} else if exists {
@@ -80,17 +92,13 @@ func (a *App) InitNewDevice(url, username, password, root, encPassword, deviceNa
 	}
 
 	// 上传 salt
-	if _, err := client.PUT("salt.bin", salt, ""); err != nil {
+	if _, err := client.PUTIfAbsent("salt.bin", salt); err != nil {
+		if err == webdav.ErrConflict {
+			return fmt.Errorf("远程已存在同步组，请选择加入已有同步组或更换根路径")
+		}
 		return fmt.Errorf("上传 salt 失败: %w", err)
 	}
-	if err := os.WriteFile(config.CCBoxDir()+"/salt.bin", salt, 0600); err != nil {
-		return fmt.Errorf("保存 salt 失败: %w", err)
-	}
-
-	// 保存密钥
-	if err := crypto.SaveKey(key, config.KeyPath()); err != nil {
-		return fmt.Errorf("保存密钥失败: %w", err)
-	}
+	createdRemote = append(createdRemote, "salt.bin")
 
 	// 扫描配置文件
 	scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
@@ -136,11 +144,24 @@ func (a *App) InitNewDevice(url, username, password, root, encPassword, deviceNa
 	if err := client.EnsureDir("snapshots/"); err != nil {
 		return fmt.Errorf("create snapshots dir: %w", err)
 	}
-	if _, err := client.PUT("snapshots/"+snap.ID+".json.enc", encrypted, ""); err != nil {
+	snapPath := "snapshots/" + snap.ID + ".json.enc"
+	if _, err := client.PUT(snapPath, encrypted, ""); err != nil {
 		return fmt.Errorf("upload snapshot: %w", err)
 	}
-	if _, err := client.PUT("HEAD", []byte(snap.ID), ""); err != nil {
+	createdRemote = append(createdRemote, snapPath)
+	if _, err := client.PUTIfAbsent("HEAD", []byte(snap.ID)); err != nil {
+		if err == webdav.ErrConflict {
+			return fmt.Errorf("远程已存在同步组，请选择加入已有同步组或更换根路径")
+		}
 		return fmt.Errorf("upload HEAD: %w", err)
+	}
+	createdRemote = append(createdRemote, "HEAD")
+	cleanupRemote = false
+	if err := os.WriteFile(config.CCBoxDir()+"/salt.bin", salt, 0600); err != nil {
+		return fmt.Errorf("保存 salt 失败: %w", err)
+	}
+	if err := crypto.SaveKey(key, config.KeyPath()); err != nil {
+		return fmt.Errorf("保存密钥失败: %w", err)
 	}
 	if err := os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(snap.ID), 0600); err != nil {
 		return fmt.Errorf("保存本地 HEAD 失败: %w", err)
@@ -260,6 +281,29 @@ func (a *App) InitJoinExisting(url, username, password, root, encPassword, devic
 	}
 
 	return nil
+}
+
+const remoteInitLockPath = ".init.lock"
+
+func acquireRemoteInitLock(client *webdav.Client, deviceID string) (func(), error) {
+	payload := []byte(fmt.Sprintf("%s\n%s\n", deviceID, time.Now().UTC().Format(time.RFC3339Nano)))
+	if _, err := client.PUTIfAbsent(remoteInitLockPath, payload); err != nil {
+		if err == webdav.ErrConflict {
+			return nil, fmt.Errorf("远程同步组正在初始化，请稍后重试")
+		}
+		return nil, fmt.Errorf("创建远程初始化锁失败: %w", err)
+	}
+	return func() {
+		if err := client.DELETE(remoteInitLockPath); err != nil && err != webdav.ErrNotFound {
+			return
+		}
+	}, nil
+}
+
+func cleanupRemoteFiles(client *webdav.Client, paths []string) {
+	for i := len(paths) - 1; i >= 0; i-- {
+		_ = client.DELETE(paths[i])
+	}
 }
 
 // registerDeviceInfo 注册/更新设备信息到 WebDAV

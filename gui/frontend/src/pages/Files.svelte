@@ -10,11 +10,13 @@
 
   export let syncState = 'idle'
   export let active = false
+  export let refreshToken = 0
   const dispatch = createEventDispatcher()
 
   let tree = null
   let loading = true
   let error = ''
+  let remoteError = ''
   let filter = 'all'
   let selectedPath = ''
   let selectedStatus = ''
@@ -29,6 +31,14 @@
   let excludeConfirm = ''
   let expandedDirs = new Set([''])
   let dirty = false
+  let detailRequestId = 0
+  let diffRequestId = 0
+  let lastRefreshToken = 0
+
+  $: if (active && refreshToken !== lastRefreshToken) {
+    lastRefreshToken = refreshToken
+    refreshTree()
+  }
 
   $: if (active && dirty) {
     dirty = false
@@ -50,14 +60,22 @@
   })
 
   async function refreshTree() {
-    loading = !tree; error = ''
+    loading = !tree; error = ''; remoteError = ''
     try {
       tree = await GetFileTreeLocal()
       loading = false
+    } catch (e) {
+      if (!tree) error = e.message || String(e)
+      loading = false
+      return
+    }
+    try {
       const remoteTree = await GetFileTree()
       tree = remoteTree
     } catch (e) {
-      if (!tree) error = e.message || String(e)
+      remoteError = e.message || String(e)
+      syncState = 'connection_error'
+      if (!tree) error = remoteError
     }
     loading = false
   }
@@ -68,25 +86,36 @@
 
   async function handleSelect(e) {
     const { path, status, error: failureError, fullPath } = e.detail
+    const requestId = ++detailRequestId
+    diffRequestId += 1
     selectedPath = path
     selectedStatus = status
     view = 'content'
-    diffResult = null; conflictDetail = null; failureDetail = null; conflictChoice = ''
+    fileDetail = null; diffResult = null; conflictDetail = null; failureDetail = null; conflictChoice = ''
 
     if (status === 'failed') {
       view = 'failed'
       failureDetail = { path, fullPath, error: failureError }
-      fileDetail = null
       return
     }
 
     if (status === 'conflict') {
       view = 'conflict'
-      try { conflictDetail = await GetConflictDetail(path) }
-      catch (e) { conflictDetail = { path, local: '加载失败: ' + (e.message || e), remote: '' } }
+      try {
+        const detail = await GetConflictDetail(path)
+        if (requestId === detailRequestId && selectedPath === path) conflictDetail = detail
+      }
+      catch (e) {
+        if (requestId === detailRequestId && selectedPath === path) conflictDetail = { path, local: '加载失败: ' + (e.message || e), remote: '' }
+      }
       return
     }
-    try { fileDetail = await GetFileContent(path) } catch (e) { fileDetail = null }
+    try {
+      const detail = await GetFileContent(path)
+      if (requestId === detailRequestId && selectedPath === path) fileDetail = detail
+    } catch (e) {
+      if (requestId === detailRequestId && selectedPath === path) fileDetail = null
+    }
   }
 
   function handleToggle(e) {
@@ -98,9 +127,17 @@
 
   async function showDiff() {
     if (!selectedPath) return
+    const requestPath = selectedPath
+    const requestId = ++diffRequestId
     view = 'diff'
-    try { diffResult = await GetFileDiff(selectedPath) }
-    catch (e) { diffResult = { path: selectedPath, status: 'error', hunks: [], error: e.message || String(e) } }
+    diffResult = null
+    try {
+      const result = await GetFileDiff(requestPath)
+      if (requestId === diffRequestId && selectedPath === requestPath && view === 'diff') diffResult = result
+    }
+    catch (e) {
+      if (requestId === diffRequestId && selectedPath === requestPath && view === 'diff') diffResult = { path: requestPath, status: 'error', hunks: [], error: e.message || String(e) }
+    }
   }
 
   async function resolveConflict(choice) {
@@ -125,8 +162,11 @@
   }
 
   async function doBulkSync(action) {
-    actionLoading = true; progress = null; syncState = 'syncing'
-    try { await BulkSync(action) } catch (e) { console.error(action, e) }
+    actionLoading = true; progress = null; syncState = 'syncing'; error = ''
+    try { await BulkSync(action) }
+    catch (e) {
+      actionLoading = false; progress = null; syncState = 'error'; error = e.message || String(e)
+    }
   }
 
   function statusIcon(s) {
@@ -185,6 +225,13 @@
     <div class="error-bar animate-fade-in">
       <span>{error}</span>
       <button class="link-btn" on:click={() => { error = '' }}>关闭</button>
+    </div>
+  {/if}
+
+  {#if remoteError}
+    <div class="error-bar animate-fade-in">
+      <span>远程刷新失败：{remoteError}</span>
+      <button class="link-btn" on:click={() => { remoteError = '' }}>关闭</button>
     </div>
   {/if}
 

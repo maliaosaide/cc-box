@@ -5,7 +5,6 @@ package normalize
 import (
 	"bytes"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -14,18 +13,14 @@ func PathSlash(p string) string {
 	return strings.ReplaceAll(p, `\`, "/")
 }
 
-// PathLower 将路径统一为小写（Windows 不区分大小写）
+// PathLower 返回路径的小写形式，用于大小写碰撞检测。
 func PathLower(p string) string {
-	if runtime.GOOS == "windows" {
-		return strings.ToLower(p)
-	}
-	return p
+	return strings.ToLower(p)
 }
 
-// NormalizePath 路径规范化：统一分隔符 + 小写
+// NormalizePath 路径规范化：统一分隔符并保留原始大小写。
 func NormalizePath(p string) string {
 	p = PathSlash(p)
-	p = PathLower(p)
 	p = strings.TrimPrefix(p, "/")
 	return p
 }

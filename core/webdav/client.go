@@ -100,6 +100,15 @@ func (c *Client) GET(remotePath string) ([]byte, string, error) {
 // PUT 上传文件，支持 If-Match 条件请求
 // 返回新的 ETag
 func (c *Client) PUT(remotePath string, data []byte, ifMatch string) (string, error) {
+	return c.put(remotePath, data, ifMatch, false)
+}
+
+// PUTIfAbsent 仅在远程文件不存在时创建文件。
+func (c *Client) PUTIfAbsent(remotePath string, data []byte) (string, error) {
+	return c.put(remotePath, data, "", true)
+}
+
+func (c *Client) put(remotePath string, data []byte, ifMatch string, ifAbsent bool) (string, error) {
 	req, err := c.newRequest("PUT", c.url(remotePath), bytes.NewReader(data))
 	if err != nil {
 		return "", err
@@ -107,6 +116,9 @@ func (c *Client) PUT(remotePath string, data []byte, ifMatch string) (string, er
 
 	if ifMatch != "" {
 		req.Header.Set("If-Match", ifMatch)
+	}
+	if ifAbsent {
+		req.Header.Set("If-None-Match", "*")
 	}
 
 	resp, err := c.http.Do(req)

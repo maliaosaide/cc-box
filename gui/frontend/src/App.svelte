@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte'
+  import { EventsOn } from '../wailsjs/runtime/runtime.js'
   import { IsInitialized, GetAppInfo } from '../wailsjs/go/main/App.js'
   import Sidebar from './lib/components/Sidebar.svelte'
   import Onboarding from './pages/Onboarding.svelte'
@@ -16,6 +17,7 @@
   let mountedPages = { dashboard: true }
   let syncState = 'idle'
   let theme = 'dark'
+  let refreshVersions = { dashboard: 0, files: 0, binaries: 0, projects: 0, history: 0 }
 
   onMount(async () => {
     const saved = localStorage.getItem('cc-box-theme')
@@ -24,8 +26,25 @@
     try {
       initialized = await IsInitialized()
     } catch (e) { console.error('init check failed:', e) }
+    EventsOn('data:changed', (e) => markChanged(e?.domain || 'all'))
     loading = false
   })
+
+  function markChanged(domain) {
+    const pages = pagesForDomain(domain)
+    const next = { ...refreshVersions }
+    pages.forEach(page => next[page] = (next[page] || 0) + 1)
+    refreshVersions = next
+  }
+
+  function pagesForDomain(domain) {
+    if (domain === 'files') return ['dashboard', 'files']
+    if (domain === 'sync') return ['dashboard', 'files', 'history', 'binaries']
+    if (domain === 'config') return ['dashboard', 'files', 'binaries']
+    if (domain === 'binary') return ['dashboard', 'binaries']
+    if (domain === 'projects') return ['projects']
+    return ['dashboard', 'files', 'binaries', 'projects', 'history']
+  }
 
   function toggleTheme() {
     theme = theme === 'dark' ? 'light' : 'dark'
@@ -60,27 +79,27 @@
       <main class="main-content">
         {#if mountedPages.dashboard}
           <div class="page-panel" class:active={currentPage === 'dashboard'}>
-            <Dashboard bind:syncState {theme} active={currentPage === 'dashboard'} on:navigate={navigate} on:toggleTheme={toggleTheme} />
+            <Dashboard bind:syncState {theme} active={currentPage === 'dashboard'} refreshToken={refreshVersions.dashboard} on:navigate={navigate} on:toggleTheme={toggleTheme} />
           </div>
         {/if}
         {#if mountedPages.files}
           <div class="page-panel" class:active={currentPage === 'files'}>
-            <Files bind:syncState active={currentPage === 'files'} on:navigate={navigate} />
+            <Files bind:syncState active={currentPage === 'files'} refreshToken={refreshVersions.files} on:navigate={navigate} />
           </div>
         {/if}
         {#if mountedPages.binaries}
           <div class="page-panel" class:active={currentPage === 'binaries'}>
-            <Binaries active={currentPage === 'binaries'} on:navigate={navigate} />
+            <Binaries active={currentPage === 'binaries'} refreshToken={refreshVersions.binaries} on:navigate={navigate} />
           </div>
         {/if}
         {#if mountedPages.projects}
           <div class="page-panel" class:active={currentPage === 'projects'}>
-            <Projects on:navigate={navigate} />
+            <Projects active={currentPage === 'projects'} refreshToken={refreshVersions.projects} on:navigate={navigate} />
           </div>
         {/if}
         {#if mountedPages.history}
           <div class="page-panel" class:active={currentPage === 'history'}>
-            <History active={currentPage === 'history'} on:navigate={navigate} />
+            <History active={currentPage === 'history'} refreshToken={refreshVersions.history} on:navigate={navigate} />
           </div>
         {/if}
         {#if mountedPages.settings}

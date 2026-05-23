@@ -59,11 +59,12 @@ func runLog(cmd *cobra.Command, args []string) error {
 			break
 		}
 
+		shortID := snapshotShortID(snapID)
 		if oneline {
-			fmt.Printf("%s %s %s\n", snapID[:12], snap.Timestamp.Format("2006-01-02 15:04"), snap.Message)
+			fmt.Printf("%s %s %s\n", shortID, snap.Timestamp.Format("2006-01-02 15:04"), snap.Message)
 		} else {
 			fmt.Printf("%s  %s  %-15s  %s\n",
-				snapID[:12],
+				shortID,
 				snap.Timestamp.Format("2006-01-02 15:04"),
 				truncate(snap.Device, 15),
 				snap.Message,

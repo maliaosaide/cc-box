@@ -3,6 +3,7 @@
 package project
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -67,7 +68,7 @@ func DiscoverProjects() ([]Project, error) {
 		// 格式可能是 -Users-alice-Desktop-myproject 这样的
 
 		// 检查是否有 .claude.json（通过路径映射找到实际项目目录）
-		localPath := decodeProjectDir(entry.Name())
+		localPath := discoverProjectPath(filepath.Join(projectsDir, entry.Name()), entry.Name())
 		if localPath == "" {
 			continue
 		}
@@ -159,6 +160,77 @@ func GetGitRemote(dir string) (url string, name string) {
 	}
 
 	return firstURL, firstRemote
+}
+
+func discoverProjectPath(projectDir, dirName string) string {
+	if path := projectPathFromMetadata(projectDir); path != "" {
+		return path
+	}
+	return decodeProjectDir(dirName)
+}
+
+func projectPathFromMetadata(projectDir string) string {
+	entries, err := os.ReadDir(projectDir)
+	if err != nil {
+		return ""
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
+			continue
+		}
+		path := projectPathFromJSONL(filepath.Join(projectDir, entry.Name()))
+		if path != "" {
+			return path
+		}
+	}
+	return ""
+}
+
+func projectPathFromJSONL(path string) string {
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 1024), 1024*1024)
+	for scanner.Scan() {
+		var record map[string]interface{}
+		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
+			continue
+		}
+		if path := extractProjectPath(record, 0); path != "" {
+			return path
+		}
+	}
+	return ""
+}
+
+func extractProjectPath(value interface{}, depth int) string {
+	if depth > 4 {
+		return ""
+	}
+	switch v := value.(type) {
+	case map[string]interface{}:
+		for _, key := range []string{"cwd", "projectCwd", "project_cwd", "workspaceFolder", "workspace_folder"} {
+			if s, ok := v[key].(string); ok && filepath.IsAbs(s) {
+				return filepath.Clean(s)
+			}
+		}
+		for _, child := range v {
+			if path := extractProjectPath(child, depth+1); path != "" {
+				return path
+			}
+		}
+	case []interface{}:
+		for _, child := range v {
+			if path := extractProjectPath(child, depth+1); path != "" {
+				return path
+			}
+		}
+	}
+	return ""
 }
 
 // decodeProjectDir 将 ~/.claude/projects/ 下的目录名还原为实际路径

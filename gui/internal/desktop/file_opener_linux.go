@@ -3,10 +3,17 @@
 package desktop
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"time"
 )
+
+const linuxOpenTimeout = 5 * time.Second
+
+var runLinuxOpenCommand = runLinuxCommand
 
 type platformFileOpener struct{}
 
@@ -30,13 +37,34 @@ func (platformFileOpener) Reveal(path string) error {
 }
 
 func openLinuxPath(path string) error {
+	var failures []string
 	for _, candidate := range [][]string{{"xdg-open", path}, {"gio", "open", path}} {
 		cmdPath, err := exec.LookPath(candidate[0])
 		if err != nil {
+			failures = append(failures, candidate[0]+": 未找到")
 			continue
 		}
-		cmd := exec.Command(cmdPath, candidate[1:]...)
-		return cmd.Start()
+		output, err := runLinuxOpenCommand(cmdPath, candidate[1:]...)
+		if err == nil {
+			return nil
+		}
+		message := strings.TrimSpace(output)
+		if message == "" {
+			message = err.Error()
+		}
+		failures = append(failures, candidate[0]+": "+message)
 	}
-	return fmt.Errorf("未找到可用的文件管理器命令: xdg-open 或 gio")
+	return fmt.Errorf("打开路径失败: %s", strings.Join(failures, "; "))
+}
+
+func runLinuxCommand(cmdPath string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), linuxOpenTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, cmdPath, args...)
+	output, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return string(output), fmt.Errorf("命令超时")
+	}
+	return string(output), err
 }

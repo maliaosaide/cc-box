@@ -18,6 +18,7 @@
   let passwordPreview = null
   let passwordPreviewLoading = false
   let passwordPreviewTimer = null
+  let passwordPreviewRequest = 0
   let submitting = false
   let errorMsg = ''
 
@@ -58,22 +59,31 @@
 
   function schedulePasswordPreview() {
     clearTimeout(passwordPreviewTimer)
+    passwordPreviewRequest += 1
     if (mode !== 'join' || !password) {
       passwordPreview = null
       passwordPreviewLoading = false
       return
     }
+    const requestId = passwordPreviewRequest
+    const request = { url: webdav.url, username: webdav.username, webdavPassword: webdav.password, root: webdav.root, password }
     passwordPreviewLoading = true
-    passwordPreviewTimer = setTimeout(previewPassword, 600)
+    passwordPreviewTimer = setTimeout(() => previewPassword(request, requestId), 600)
   }
 
-  async function previewPassword() {
+  async function previewPassword(request, requestId) {
     try {
-      passwordPreview = await PreviewSetupEncryptionPassword(webdav.url, webdav.username, webdav.password, webdav.root, password)
+      const result = await PreviewSetupEncryptionPassword(request.url, request.username, request.webdavPassword, request.root, request.password)
+      if (isCurrentPasswordPreview(request, requestId)) passwordPreview = result
     } catch (e) {
-      passwordPreview = { status: 'error', message: e.message || String(e) }
+      if (isCurrentPasswordPreview(request, requestId)) passwordPreview = { status: 'error', message: e.message || String(e) }
     }
-    passwordPreviewLoading = false
+    if (isCurrentPasswordPreview(request, requestId)) passwordPreviewLoading = false
+  }
+
+  function isCurrentPasswordPreview(request, requestId) {
+    return requestId === passwordPreviewRequest && mode === 'join' && password === request.password &&
+      webdav.url === request.url && webdav.username === request.username && webdav.password === request.webdavPassword && webdav.root === request.root
   }
 
   async function submit() {
