@@ -261,6 +261,28 @@ npm --prefix gui/frontend run build
 | --- | --- |
 | `CC_BOX_WEBDAV_PASSWORD` | WebDAV 密码。设置后可减少交互输入，适合 CLI 自动化场景。 |
 
+## GitHub Release 下载代理
+
+如果使用 GitHub Release 安装 Claude，CC-Box 需要访问 GitHub API、Release 资产和下载跳转域名。网络环境受限时，请把这些域名后缀加入代理规则：
+
+```text
+github.com
+githubusercontent.com
+githubassets.com
+amazonaws.com
+```
+
+Clash 规则示例：
+
+```yaml
+- DOMAIN-SUFFIX,github.com,PROXY
+- DOMAIN-SUFFIX,githubusercontent.com,PROXY
+- DOMAIN-SUFFIX,githubassets.com,PROXY
+- DOMAIN-SUFFIX,amazonaws.com,PROXY
+```
+
+如果通过环境变量让 CLI 或 GUI 进程走代理，需要在启动 CC-Box 前设置 `HTTP_PROXY` 和 `HTTPS_PROXY`，并重启终端或 GUI 让新进程继承环境变量。
+
 ## WebDAV 兼容性
 
 理论上支持标准 WebDAV 服务，例如：
