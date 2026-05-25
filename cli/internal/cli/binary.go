@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,6 +49,12 @@ var binaryPruneCmd = &cobra.Command{
 	RunE:  runBinaryPrune,
 }
 
+var binaryInstallCmd = &cobra.Command{
+	Use:   "install",
+	Short: "从官方安装器或 GitHub Release 安装 Claude",
+	RunE:  runBinaryInstall,
+}
+
 func init() {
 	rootCmd.AddCommand(binaryCmd)
 	binaryCmd.AddCommand(binaryListCmd)
@@ -55,6 +62,77 @@ func init() {
 	binaryCmd.AddCommand(binaryPullCmd)
 	binaryCmd.AddCommand(binarySwitchCmd)
 	binaryCmd.AddCommand(binaryPruneCmd)
+	binaryCmd.AddCommand(binaryInstallCmd)
+	binaryInstallCmd.Flags().String("source", "", "安装来源: github 或 official")
+	binaryInstallCmd.Flags().String("version", "", "GitHub Release 版本")
+	binaryInstallCmd.Flags().Bool("latest", false, "安装官方最新版")
+}
+
+func runBinaryInstall(cmd *cobra.Command, args []string) error {
+	source, _ := cmd.Flags().GetString("source")
+	version, _ := cmd.Flags().GetString("version")
+	latest, _ := cmd.Flags().GetBool("latest")
+	switch source {
+	case "official":
+		if !latest || version != "" {
+			return fmt.Errorf("官方安装只支持 --latest")
+		}
+		if !confirmBinaryInstall("官方最新版") {
+			return nil
+		}
+		result, err := binary.InstallOfficialClaude(context.Background(), func(current, total int64, message string) {
+			fmt.Printf("%s\n", message)
+		})
+		if err != nil {
+			return err
+		}
+		printInstallResult(result)
+		return nil
+	case "github":
+		if version == "" {
+			return fmt.Errorf("GitHub 安装需要 --version")
+		}
+		if !confirmBinaryInstall("GitHub Release " + version) {
+			return nil
+		}
+		result, err := binary.InstallGitHubClaude(context.Background(), version, func(current, total int64, message string) {
+			fmt.Printf("[%d/%d] %s\n", current, total, message)
+		})
+		if err != nil {
+			return err
+		}
+		printInstallResult(result)
+		return nil
+	case "":
+		return fmt.Errorf("请指定 --source github 或 --source official")
+	default:
+		return fmt.Errorf("未知安装来源: %s", source)
+	}
+}
+
+func confirmBinaryInstall(source string) bool {
+	fmt.Printf("安装 %s 可能覆盖当前本地 Claude binary，安装前会尽量备份现有真实二进制。确认继续？[y/N] ", source)
+	var answer string
+	fmt.Scanln(&answer)
+	return answer == "y" || answer == "Y"
+}
+
+func printInstallResult(result *binary.ClaudeInstallResult) {
+	fmt.Printf("当前 Claude 版本: %s\n", result.Version)
+	fmt.Printf("当前平台: %s\n", config.Platform())
+	fmt.Printf("安装来源: %s\n", result.Source)
+	fmt.Printf("安装路径: %s\n", result.Path)
+	fmt.Printf("命令状态: %s\n", result.CommandStatus.Status)
+	if result.CommandStatus.CommandPath != "" {
+		fmt.Printf("命令路径: %s\n", result.CommandStatus.CommandPath)
+	}
+	if result.PathConfig != nil && result.PathConfig.Message != "" {
+		if result.PathConfig.Error != "" {
+			fmt.Printf("PATH 警告: %s\n", result.PathConfig.Message)
+		} else {
+			fmt.Printf("PATH: %s\n", result.PathConfig.Message)
+		}
+	}
 }
 
 func runBinaryList(cmd *cobra.Command, args []string) error {
@@ -159,15 +237,27 @@ func runBinaryPull(cmd *cobra.Command, args []string) error {
 	targetPath := binary.GetBinaryPath("claude")
 	fmt.Printf("下载 claude %s → %s ...\n", version, targetPath)
 
-	err = binary.Download(client, key, "claude", version, targetPath, func(total, downloaded int64, part, totalParts int) {
+	data, err := binary.DownloadData(client, key, "claude", version, func(total, downloaded int64, part, totalParts int) {
 		pct := float64(downloaded) / float64(total) * 100
 		fmt.Printf("\r  进度: %.0f%% (%d/%d 分块)", pct, part, totalParts)
 	})
 	if err != nil {
 		return err
 	}
+	installedVersion, err := binary.InstallClaudeBinaryData(targetPath, data, version)
+	if err != nil {
+		return err
+	}
 
 	_ = binary.ClearClaudeResolutionCache()
+	_ = binary.RememberClaudeBinarySource(targetPath, "webdav", installedVersion)
+	if pathResult := binary.ConfigureClaudePathIfEnabledBestEffort(); pathResult != nil && pathResult.Enabled && pathResult.Message != "" {
+		if pathResult.Error != "" {
+			fmt.Printf("\nPATH 警告: %s\n", pathResult.Message)
+		} else {
+			fmt.Printf("\nPATH: %s\n", pathResult.Message)
+		}
+	}
 	fmt.Printf("\n已下载 claude %s\n", version)
 	return nil
 }
@@ -214,10 +304,14 @@ func runBinarySwitch(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("下载 claude %s ...\n", targetVersion)
-	err = binary.Download(client, key, "claude", targetVersion, binPath, func(total, downloaded int64, part, totalParts int) {
+	data, err := binary.DownloadData(client, key, "claude", targetVersion, func(total, downloaded int64, part, totalParts int) {
 		pct := float64(downloaded) / float64(total) * 100
 		fmt.Printf("\r  进度: %.0f%% (%d/%d 分块)", pct, part, totalParts)
 	})
+	if err != nil {
+		return err
+	}
+	installedVersion, err := binary.InstallClaudeBinaryData(binPath, data, targetVersion)
 	if err != nil {
 		return err
 	}
@@ -236,6 +330,14 @@ func runBinarySwitch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("更新远程二进制索引失败: %w", err)
 	}
 	_ = binary.ClearClaudeResolutionCache()
+	_ = binary.RememberClaudeBinarySource(binPath, "webdav", installedVersion)
+	if pathResult := binary.ConfigureClaudePathIfEnabledBestEffort(); pathResult != nil && pathResult.Enabled && pathResult.Message != "" {
+		if pathResult.Error != "" {
+			fmt.Printf("\nPATH 警告: %s\n", pathResult.Message)
+		} else {
+			fmt.Printf("\nPATH: %s\n", pathResult.Message)
+		}
+	}
 
 	fmt.Printf("\n已切换到 claude %s\n", targetVersion)
 	return nil

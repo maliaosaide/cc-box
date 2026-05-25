@@ -1,3 +1,98 @@
+export namespace binary {
+	
+	export class ClaudeCommandStatus {
+	    status: string;
+	    commandPath: string;
+	    targetPath: string;
+	    targetExists: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ClaudeCommandStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.status = source["status"];
+	        this.commandPath = source["commandPath"];
+	        this.targetPath = source["targetPath"];
+	        this.targetExists = source["targetExists"];
+	    }
+	}
+	export class GitHubClaudeRelease {
+	    version: string;
+	    tag: string;
+	    name: string;
+	    publishedAt: string;
+	    assetName: string;
+	    assetSize: number;
+	    assetDownloadUrl: string;
+	    shasumsDownloadUrl: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new GitHubClaudeRelease(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.version = source["version"];
+	        this.tag = source["tag"];
+	        this.name = source["name"];
+	        this.publishedAt = source["publishedAt"];
+	        this.assetName = source["assetName"];
+	        this.assetSize = source["assetSize"];
+	        this.assetDownloadUrl = source["assetDownloadUrl"];
+	        this.shasumsDownloadUrl = source["shasumsDownloadUrl"];
+	    }
+	}
+	export class GitHubClaudeReleaseList {
+	    platform: string;
+	    platformLabel: string;
+	    assetName: string;
+	    supported: boolean;
+	    fetchedAt: string;
+	    fromCache: boolean;
+	    limit: number;
+	    releases: GitHubClaudeRelease[];
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new GitHubClaudeReleaseList(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.platform = source["platform"];
+	        this.platformLabel = source["platformLabel"];
+	        this.assetName = source["assetName"];
+	        this.supported = source["supported"];
+	        this.fetchedAt = source["fetchedAt"];
+	        this.fromCache = source["fromCache"];
+	        this.limit = source["limit"];
+	        this.releases = this.convertValues(source["releases"], GitHubClaudeRelease);
+	        this.error = source["error"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
 export namespace main {
 	
 	export class BackupInfo {
@@ -76,6 +171,7 @@ export namespace main {
 	    binaryError: string;
 	    versionsDir: string;
 	    localExists: boolean;
+	    commandStatus: binary.ClaudeCommandStatus;
 	
 	    static createFrom(source: any = {}) {
 	        return new BinaryPageData(source);
@@ -96,6 +192,7 @@ export namespace main {
 	        this.binaryError = source["binaryError"];
 	        this.versionsDir = source["versionsDir"];
 	        this.localExists = source["localExists"];
+	        this.commandStatus = this.convertValues(source["commandStatus"], binary.ClaudeCommandStatus);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -141,6 +238,8 @@ export namespace main {
 	    chunkSizeMB: number;
 	    chunkThresholdMB: number;
 	    autoUpload: boolean;
+	    syncEnabled: boolean;
+	    autoConfigurePath: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new BinaryView(source);
@@ -153,6 +252,8 @@ export namespace main {
 	        this.chunkSizeMB = source["chunkSizeMB"];
 	        this.chunkThresholdMB = source["chunkThresholdMB"];
 	        this.autoUpload = source["autoUpload"];
+	        this.syncEnabled = source["syncEnabled"];
+	        this.autoConfigurePath = source["autoConfigurePath"];
 	    }
 	}
 	export class ChangeInfo {

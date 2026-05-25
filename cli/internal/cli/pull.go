@@ -55,7 +55,7 @@ func runPull(cmd *cobra.Command, args []string) error {
 	}
 
 	// 坚果云优化：先 HEAD 检查 ETag，没变就跳过
-	if cachedHead, cachedETag := readCachedRemoteHeadETag(); cachedHead != "" && cachedETag != "" && cachedHead == localHead {
+	if cachedHead, cachedETag := readCachedRemoteHeadETag(); !cfg.Binary.SyncEnabled && cachedHead != "" && cachedETag != "" && cachedHead == localHead {
 		info, err := client.HEAD("HEAD")
 		if err == nil && info.ETag == cachedETag {
 			fmt.Println("已是最新（ETag 未变）")
@@ -75,6 +75,26 @@ func runPull(cmd *cobra.Command, args []string) error {
 
 	if localHead == remoteHead {
 		cacheRemoteETag(remoteHead, remoteHeadETag)
+		if cfg.Binary.SyncEnabled {
+			remoteSnap, err := loadRemoteSnapshot(client, key, remoteHead)
+			if err != nil {
+				return fmt.Errorf("加载远程快照失败: %w", err)
+			}
+			if dryRun {
+				if err := printSnapshotClaudeRestoreDryRun(client, key, remoteSnap); err != nil {
+					return err
+				}
+				fmt.Println("\n(dry-run 模式，未实际下载)")
+				return nil
+			}
+			applied, err := applySnapshotClaudeRestore(client, key, remoteSnap)
+			if err != nil {
+				return err
+			}
+			if applied {
+				return nil
+			}
+		}
 		fmt.Println("已是最新")
 		return nil
 	}
@@ -90,7 +110,7 @@ func runPull(cmd *cobra.Command, args []string) error {
 
 	// 无本地基线 → 首次拉取，直接全部下载
 	if localHead == "" {
-		return pullFirstTime(client, key, remoteSnap, remoteHead, remoteHeadETag, dryRun)
+		return pullFirstTime(client, key, remoteSnap, cfg, remoteHead, remoteHeadETag, dryRun)
 	}
 
 	// 加载本地快照
@@ -112,12 +132,17 @@ func runPull(cmd *cobra.Command, args []string) error {
 }
 
 // pullFirstTime 首次拉取（无本地快照基线）
-func pullFirstTime(client *webdav.Client, key []byte, remoteSnap *snapshot.Snapshot, remoteHead, remoteHeadETag string, dryRun bool) error {
+func pullFirstTime(client *webdav.Client, key []byte, remoteSnap *snapshot.Snapshot, cfg *config.Config, remoteHead, remoteHeadETag string, dryRun bool) error {
 	fmt.Printf("\n首次拉取，下载 %d 个文件\n", len(remoteSnap.Files))
 
 	if dryRun {
 		for path := range remoteSnap.Files {
 			fmt.Printf("  ↓ %s\n", path)
+		}
+		if cfg.Binary.SyncEnabled {
+			if err := printSnapshotClaudeRestoreDryRun(client, key, remoteSnap); err != nil {
+				return err
+			}
 		}
 		fmt.Println("\n(dry-run 模式，未实际下载)")
 		return nil
@@ -128,6 +153,13 @@ func pullFirstTime(client *webdav.Client, key []byte, remoteSnap *snapshot.Snaps
 	if err != nil {
 		return err
 	}
+	binaryApplied := false
+	if cfg.Binary.SyncEnabled {
+		binaryApplied, err = applySnapshotClaudeRestore(client, key, remoteSnap)
+		if err != nil {
+			return err
+		}
+	}
 
 	if err := updateLocalHEAD(remoteHead); err != nil {
 		return err
@@ -136,7 +168,11 @@ func pullFirstTime(client *webdav.Client, key []byte, remoteSnap *snapshot.Snaps
 		return fmt.Errorf("缓存快照失败: %w", err)
 	}
 	cacheRemoteETag(remoteHead, remoteHeadETag)
-	fmt.Printf("\n已拉取 %d 个文件\n", applied)
+	if binaryApplied {
+		fmt.Printf("\n已拉取 %d 个文件并恢复 Claude binary\n", applied)
+	} else {
+		fmt.Printf("\n已拉取 %d 个文件\n", applied)
+	}
 	return nil
 }
 
@@ -278,6 +314,11 @@ func pullThreeWay(client *webdav.Client, key []byte, localSnap, remoteSnap *snap
 	}
 
 	if dryRun {
+		if cfg.Binary.SyncEnabled && len(conflictPaths) == 0 {
+			if err := printSnapshotClaudeRestoreDryRun(client, key, remoteSnap); err != nil {
+				return err
+			}
+		}
 		fmt.Println("\n(dry-run 模式，未实际下载)")
 		return nil
 	}
@@ -303,7 +344,14 @@ func pullThreeWay(client *webdav.Client, key []byte, localSnap, remoteSnap *snap
 		return err
 	}
 
+	binaryApplied := false
 	if len(conflictPaths) == 0 {
+		if cfg.Binary.SyncEnabled {
+			binaryApplied, err = applySnapshotClaudeRestore(client, key, remoteSnap)
+			if err != nil {
+				return err
+			}
+		}
 		if err := updateLocalHEAD(remoteHead); err != nil {
 			return err
 		}
@@ -313,7 +361,11 @@ func pullThreeWay(client *webdav.Client, key []byte, localSnap, remoteSnap *snap
 		cacheRemoteETag(remoteHead, remoteHeadETag)
 	}
 
-	fmt.Printf("\n已拉取 %d 个文件，合并 %d 个，删除 %d 个，冲突 %d 个\n", applied, merged, deleted, len(conflictPaths))
+	if binaryApplied {
+		fmt.Printf("\n已拉取 %d 个文件，合并 %d 个，删除 %d 个，冲突 %d 个，并恢复 Claude binary\n", applied, merged, deleted, len(conflictPaths))
+	} else {
+		fmt.Printf("\n已拉取 %d 个文件，合并 %d 个，删除 %d 个，冲突 %d 个\n", applied, merged, deleted, len(conflictPaths))
+	}
 	if len(conflictPaths) > 0 {
 		fmt.Println("存在未解决冲突，本地 HEAD 暂未推进；解决冲突后请重新同步。")
 	}
@@ -368,8 +420,20 @@ func pullDegraded(client *webdav.Client, key []byte, remoteSnap *snapshot.Snapsh
 
 	if len(toDownload) == 0 && len(conflictPaths) == 0 {
 		if dryRun {
+			if cfg.Binary.SyncEnabled {
+				if err := printSnapshotClaudeRestoreDryRun(client, key, remoteSnap); err != nil {
+					return err
+				}
+			}
 			fmt.Println("\n(dry-run 模式，未实际下载)")
 			return nil
+		}
+		binaryApplied := false
+		if cfg.Binary.SyncEnabled {
+			binaryApplied, err = applySnapshotClaudeRestore(client, key, remoteSnap)
+			if err != nil {
+				return err
+			}
 		}
 		if err := updateLocalHEAD(remoteHead); err != nil {
 			return err
@@ -378,11 +442,20 @@ func pullDegraded(client *webdav.Client, key []byte, remoteSnap *snapshot.Snapsh
 			return fmt.Errorf("缓存快照失败: %w", err)
 		}
 		cacheRemoteETag(remoteHead, remoteHeadETag)
-		fmt.Println("已是最新")
+		if binaryApplied {
+			fmt.Println("已恢复 Claude binary")
+		} else {
+			fmt.Println("已是最新")
+		}
 		return nil
 	}
 
 	if dryRun {
+		if cfg.Binary.SyncEnabled && len(conflictPaths) == 0 {
+			if err := printSnapshotClaudeRestoreDryRun(client, key, remoteSnap); err != nil {
+				return err
+			}
+		}
 		fmt.Println("\n(dry-run 模式，未实际下载)")
 		return nil
 	}
@@ -403,7 +476,14 @@ func pullDegraded(client *webdav.Client, key []byte, remoteSnap *snapshot.Snapsh
 		return err
 	}
 
+	binaryApplied := false
 	if len(conflictPaths) == 0 {
+		if cfg.Binary.SyncEnabled {
+			binaryApplied, err = applySnapshotClaudeRestore(client, key, remoteSnap)
+			if err != nil {
+				return err
+			}
+		}
 		if err := updateLocalHEAD(remoteHead); err != nil {
 			return err
 		}
@@ -413,7 +493,11 @@ func pullDegraded(client *webdav.Client, key []byte, remoteSnap *snapshot.Snapsh
 		cacheRemoteETag(remoteHead, remoteHeadETag)
 	}
 
-	fmt.Printf("\n已拉取 %d 个文件，冲突 %d 个已保存\n", applied, len(conflictPaths))
+	if binaryApplied {
+		fmt.Printf("\n已拉取 %d 个文件，冲突 %d 个已保存，并恢复 Claude binary\n", applied, len(conflictPaths))
+	} else {
+		fmt.Printf("\n已拉取 %d 个文件，冲突 %d 个已保存\n", applied, len(conflictPaths))
+	}
 	if len(conflictPaths) > 0 {
 		fmt.Println("存在未解决冲突，本地 HEAD 暂未推进；解决冲突后请重新同步。")
 	}

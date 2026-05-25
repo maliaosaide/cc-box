@@ -30,12 +30,8 @@ export function ChangeEncryptionPassword(arg1, arg2) {
   return window['go']['main']['App']['ChangeEncryptionPassword'](arg1, arg2);
 }
 
-export function DeleteCloudBinaryVersion(arg1) {
-  return window['go']['main']['App']['DeleteCloudBinaryVersion'](arg1);
-}
-
-export function DeleteLocalVersion(arg1) {
-  return window['go']['main']['App']['DeleteLocalVersion'](arg1);
+export function DeleteBinaryVersion(arg1) {
+  return window['go']['main']['App']['DeleteBinaryVersion'](arg1);
 }
 
 export function DeleteOrphan(arg1) {
@@ -110,6 +106,10 @@ export function GetFileTreeLocal() {
   return window['go']['main']['App']['GetFileTreeLocal']();
 }
 
+export function GetGitHubBinaryReleases(arg1) {
+  return window['go']['main']['App']['GetGitHubBinaryReleases'](arg1);
+}
+
 export function GetLocalSnapshotList(arg1) {
   return window['go']['main']['App']['GetLocalSnapshotList'](arg1);
 }
@@ -134,8 +134,20 @@ export function InitJoinExisting(arg1, arg2, arg3, arg4, arg5, arg6) {
   return window['go']['main']['App']['InitJoinExisting'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
+export function InitJoinExistingWithBinary(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
+  return window['go']['main']['App']['InitJoinExistingWithBinary'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+}
+
 export function InitNewDevice(arg1, arg2, arg3, arg4, arg5, arg6) {
   return window['go']['main']['App']['InitNewDevice'](arg1, arg2, arg3, arg4, arg5, arg6);
+}
+
+export function InstallGitHubClaude(arg1) {
+  return window['go']['main']['App']['InstallGitHubClaude'](arg1);
+}
+
+export function InstallOfficialClaude() {
+  return window['go']['main']['App']['InstallOfficialClaude']();
 }
 
 export function IsInitialized() {
@@ -172,6 +184,10 @@ export function RedetectClaudeBinary() {
 
 export function RefreshDashboardRemote() {
   return window['go']['main']['App']['RefreshDashboardRemote']();
+}
+
+export function RefreshGitHubBinaryReleases(arg1) {
+  return window['go']['main']['App']['RefreshGitHubBinaryReleases'](arg1);
 }
 
 export function RefreshProjectList() {

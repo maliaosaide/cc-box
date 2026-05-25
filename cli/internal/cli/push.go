@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/user/cc-box/core/binary"
 	"github.com/user/cc-box/core/config"
 	"github.com/user/cc-box/core/crypto"
 	"github.com/user/cc-box/core/object"
@@ -67,10 +68,24 @@ func runPush(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("扫描失败: %w", err)
 	}
 
+	syncBinary := cfg.Binary.SyncEnabled
+	currentBinaryVersion := ""
+	if syncBinary {
+		currentBinaryVersion, err = binary.CurrentClaudeVersion()
+		if err != nil {
+			return err
+		}
+	}
+
 	var changes []snapshot.Change
+	binaryChanged := false
 	if localSnap != nil {
 		currentSnap := snapshot.CreateSnapshot("", cfg.Device.ID, "", scanResult.Files)
 		changes = localSnap.Diff(currentSnap)
+		if syncBinary {
+			previousVersion, ok := binary.SnapshotClaudeVersion(localSnap)
+			binaryChanged = !ok || previousVersion != currentBinaryVersion
+		}
 	} else {
 		for path, entry := range scanResult.Files {
 			changes = append(changes, snapshot.Change{
@@ -80,14 +95,15 @@ func runPush(cmd *cobra.Command, args []string) error {
 				NewSize: entry.Size,
 			})
 		}
+		binaryChanged = syncBinary
 	}
 
-	if len(changes) == 0 {
+	if len(changes) == 0 && !binaryChanged {
 		fmt.Println("没有变更需要推送")
 		return nil
 	}
 
-	fmt.Printf("发现 %d 个变更:\n", len(changes))
+	fmt.Printf("发现 %d 个文件变更:\n", len(changes))
 	for _, c := range changes {
 		switch c.Type {
 		case snapshot.Added:
@@ -98,10 +114,30 @@ func runPush(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  D  %s\n", c.Path)
 		}
 	}
+	if binaryChanged {
+		fmt.Printf("  B  Claude binary %s\n", currentBinaryVersion)
+	}
 
 	if dryRun {
 		fmt.Println("\n(dry-run 模式，未实际上传)")
 		return nil
+	}
+
+	if syncBinary {
+		version, uploadedBinary, err := binary.EnsureCurrentClaudeUploaded(client, key, func(total, uploaded int64, part, totalParts int) {
+			if total <= 0 {
+				return
+			}
+			pct := float64(uploaded) / float64(total) * 100
+			fmt.Printf("\r  Claude binary 上传: %.0f%% (%d/%d 分块)", pct, part, totalParts)
+		})
+		if err != nil {
+			return err
+		}
+		currentBinaryVersion = version
+		if uploadedBinary {
+			fmt.Printf("\n已上传 Claude binary %s\n", version)
+		}
 	}
 
 	store := object.NewStore(client, key, "")
@@ -140,6 +176,9 @@ func runPush(cmd *cobra.Command, args []string) error {
 	fmt.Printf("已上传 %d 个文件\n", uploaded)
 
 	newSnap := snapshot.CreateSnapshot(localHead, cfg.Device.ID, msg, scanResult.Files)
+	if syncBinary {
+		binary.SetSnapshotClaudeVersion(newSnap, currentBinaryVersion)
+	}
 
 	if err := uploadSnapshot(client, store, newSnap); err != nil {
 		return fmt.Errorf("上传快照失败: %w", err)

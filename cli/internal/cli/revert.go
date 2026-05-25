@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/user/cc-box/core/binary"
 	"github.com/user/cc-box/core/config"
 	"github.com/user/cc-box/core/object"
 	"github.com/user/cc-box/core/snapshot"
@@ -58,7 +59,16 @@ func runRevert(cmd *cobra.Command, args []string) error {
 	currentSnap := snapshot.CreateSnapshot("", cfg.Device.ID, "", scanResult.Files)
 	changes := currentSnap.Diff(targetSnap)
 
-	if len(changes) == 0 {
+	claudePlan, err := binary.PlanClaudeRestore(client, key, targetSnap, binary.ClaudeRestoreExact)
+	if err != nil {
+		return err
+	}
+	if claudePlan.Action == binary.ClaudeActionUnavailable {
+		return fmt.Errorf("快照需要 Claude %s，但云端没有当前平台可用版本", claudePlan.TargetVersion)
+	}
+	binaryWillChange := claudePlan.Action == binary.ClaudeActionDownload
+
+	if len(changes) == 0 && !binaryWillChange {
 		fmt.Println("当前状态与目标快照一致，无需回滚")
 		return nil
 	}
@@ -74,6 +84,9 @@ func runRevert(cmd *cobra.Command, args []string) error {
 		case snapshot.Deleted:
 			fmt.Printf("  × 删除 %s（目标快照中不存在）\n", c.Path)
 		}
+	}
+	if binaryWillChange {
+		fmt.Printf("  ↓ 恢复 Claude binary %s\n", claudePlan.TargetVersion)
 	}
 
 	fmt.Print("\n确认回滚？[y/N] ")
@@ -122,8 +135,13 @@ func runRevert(cmd *cobra.Command, args []string) error {
 		applied++
 	}
 
+	if _, err := applyClaudeRestorePlan(client, key, claudePlan); err != nil {
+		return err
+	}
+
 	// 创建 revert 快照
 	newSnap := snapshot.CreateSnapshot(localHead, cfg.Device.ID, "revert to "+snapID, targetSnap.Files)
+	newSnap.Binary = binary.CloneSnapshotBinary(targetSnap)
 
 	// 上传快照
 	if err := uploadSnapshot(client, store, newSnap); err != nil {

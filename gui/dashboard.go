@@ -383,16 +383,25 @@ func (a *App) QuickPush() int64 {
 			localSnap, _ = a.loadSnapByID(client, key, localHeadStr)
 		}
 
-		currentBins := currentBinaryVersions()
+		var currentBins map[string]map[string]string
 		var changes []snapshot.Change
-		binaryChanged := localSnap == nil || !binaryVersionsEqual(localSnap.Binary, currentBins)
+		binaryChanged := false
+		if cfg.Binary.SyncEnabled {
+			version, err := binary.CurrentClaudeVersion()
+			if err != nil {
+				return err
+			}
+			currentBins = map[string]map[string]string{config.Platform(): {"claude": version}}
+		}
 		if localSnap != nil {
 			currentSnap := snapshot.CreateSnapshot("", cfg.Device.ID, "", scanResult.Files)
 			changes = localSnap.Diff(currentSnap)
+			binaryChanged = cfg.Binary.SyncEnabled && !binaryVersionsEqual(localSnap.Binary, currentBins)
 		} else {
 			for path, entry := range scanResult.Files {
 				changes = append(changes, snapshot.Change{Path: path, Type: snapshot.Added, NewHash: entry.Hash, NewSize: entry.Size})
 			}
+			binaryChanged = cfg.Binary.SyncEnabled
 		}
 
 		if len(changes) == 0 && !binaryChanged {
@@ -433,6 +442,17 @@ func (a *App) QuickPush() int64 {
 			}
 			uploaded++
 			a.emitProgress(opID, "quick-push", int64(i+1), total, int(i+1), int(total), fmt.Sprintf("推送 %s", c.Path))
+		}
+
+		if cfg.Binary.SyncEnabled {
+			version, uploadedBinary, err := binary.EnsureCurrentClaudeUploaded(client, key, a.progressCallback(opID, "quick-push"))
+			if err != nil {
+				return err
+			}
+			currentBins = map[string]map[string]string{config.Platform(): {"claude": version}}
+			if uploadedBinary {
+				a.clearBinaryIndexCache()
+			}
 		}
 
 		// 创建新快照
@@ -494,7 +514,7 @@ func (a *App) QuickPull() int64 {
 		}
 
 		localHead, _ := os.ReadFile(config.CCBoxDir() + "/HEAD")
-		if strings.TrimSpace(string(localHead)) == remoteHead {
+		if strings.TrimSpace(string(localHead)) == remoteHead && !cfg.Binary.SyncEnabled {
 			a.emitProgress(opID, "quick-pull", 1, 1, 1, 1, "已是最新")
 			return nil
 		}
@@ -516,10 +536,18 @@ func (a *App) QuickPull() int64 {
 
 		UpdateTrayState(TraySynced)
 		if result.Applied == 0 {
-			a.emitProgress(opID, "quick-pull", 1, 1, 1, 1, "已是最新")
+			if result.BinaryApplied {
+				a.emitProgress(opID, "quick-pull", 1, 1, 1, 1, "已恢复 Claude binary")
+			} else {
+				a.emitProgress(opID, "quick-pull", 1, 1, 1, 1, "已是最新")
+			}
 			return nil
 		}
-		a.emitProgress(opID, "quick-pull", int64(result.Applied), int64(result.Total), result.Applied, result.Total, fmt.Sprintf("已拉取 %d 个文件", result.Applied))
+		if result.BinaryApplied {
+			a.emitProgress(opID, "quick-pull", int64(result.Applied), int64(result.Total), result.Applied, result.Total, fmt.Sprintf("已拉取 %d 个文件并恢复 Claude binary", result.Applied))
+		} else {
+			a.emitProgress(opID, "quick-pull", int64(result.Applied), int64(result.Total), result.Applied, result.Total, fmt.Sprintf("已拉取 %d 个文件", result.Applied))
+		}
 		return nil
 	})
 }
@@ -653,7 +681,13 @@ func (a *App) RepairRemoteFromLocal() int64 {
 		}
 
 		snap := snapshot.CreateSnapshot(localHead, cfg.Device.ID, "repair remote from local", scanResult.Files)
-		snap.Binary = currentBinaryVersions()
+		if cfg.Binary.SyncEnabled {
+			version, _, err := binary.EnsureCurrentClaudeUploaded(client, key, a.progressCallback(opID, "repair-remote"))
+			if err != nil {
+				return err
+			}
+			binary.SetSnapshotClaudeVersion(snap, version)
+		}
 		snapData, err := snap.Serialize()
 		if err != nil {
 			return fmt.Errorf("序列化快照失败: %w", err)
@@ -865,12 +899,7 @@ func claudeBinaryStatus(localVersion, remoteVersion string, installed bool) (str
 }
 
 func currentBinaryVersions() map[string]map[string]string {
-	resolution := binary.ResolveClaudeBinary()
-	version := strings.TrimSpace(resolution.Version)
-	if !resolution.Valid || resolution.IsShim || version == "" {
-		return nil
-	}
-	return map[string]map[string]string{config.Platform(): {"claude": version}}
+	return binary.CurrentClaudeVersionMap()
 }
 
 func binaryVersionsEqual(a, b map[string]map[string]string) bool {

@@ -51,6 +51,33 @@ versionsdir = "~/versions-old"
 	}
 }
 
+func TestLoadBinaryAutoUploadAsLegacySyncEnabled(t *testing.T) {
+	home := withTempHome(t)
+	cfgDir := filepath.Join(home, ".cc-box")
+	if err := os.MkdirAll(cfgDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	configData := []byte(`
+[webdav]
+url = "https://example.test/dav/"
+username = "u"
+
+[binary]
+auto_upload = true
+`)
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), configData, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Binary.SyncEnabled || !cfg.Binary.AutoUpload {
+		t.Fatalf("binary sync flags = sync:%v auto:%v, want both true", cfg.Binary.SyncEnabled, cfg.Binary.AutoUpload)
+	}
+}
+
 func TestClaudeJSONPathDefaultAndCustom(t *testing.T) {
 	home := withTempHome(t)
 	if got, want := ClaudeJSONPath(), filepath.Join(home, ".claude.json"); got != want {
@@ -99,7 +126,7 @@ func TestSaveWritesSnakeCaseKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	content := string(data)
-	for _, want := range []string{"json_path", "bin_dir", "versions_dir", "claude_path", "auto_sync_interval", "merge_retry_max", "chunk_size_mb"} {
+	for _, want := range []string{"json_path", "bin_dir", "versions_dir", "claude_path", "auto_sync_interval", "merge_retry_max", "chunk_size_mb", "sync_enabled", "auto_configure_path"} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("saved config missing %q:\n%s", want, content)
 		}

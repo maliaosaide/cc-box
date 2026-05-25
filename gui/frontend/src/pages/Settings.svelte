@@ -32,7 +32,8 @@
   let chunkMode = 'auto'
   let chunkSizeMB = 10
   let chunkThresholdMB = 50
-  let autoUpload = false
+  let binarySyncEnabled = false
+  let autoConfigurePath = false
   let snapshotLimit = 50
   let conflictStrategy = 'ask'
   let mergeRetryMax = 3
@@ -92,7 +93,8 @@
         chunkMode = cfg.binary.chunkMode || 'auto'
         chunkSizeMB = cfg.binary.chunkSizeMB || 10
         chunkThresholdMB = cfg.binary.chunkThresholdMB || 50
-        autoUpload = cfg.binary.autoUpload
+        binarySyncEnabled = cfg.binary.syncEnabled ?? cfg.binary.autoUpload
+        autoConfigurePath = cfg.binary.autoConfigurePath || false
         snapshotLimit = cfg.sync.snapshotLimit || 50
         conflictStrategy = cfg.sync.conflictStrategy || 'ask'
         mergeRetryMax = cfg.sync.mergeRetryMax || 3
@@ -163,9 +165,14 @@
     await saveField('binary', 'encrypt', String(binaryEncrypt))
   }
 
-  async function toggleAutoUpload() {
-    autoUpload = !autoUpload
-    await saveField('binary', 'auto_upload', String(autoUpload))
+  async function toggleBinarySync() {
+    binarySyncEnabled = !binarySyncEnabled
+    await saveField('binary', 'sync_enabled', String(binarySyncEnabled))
+  }
+
+  async function toggleAutoConfigurePath() {
+    autoConfigurePath = !autoConfigurePath
+    await saveField('binary', 'auto_configure_path', String(autoConfigurePath))
   }
 
   async function saveChunkMode() { await saveField('binary', 'chunk_mode', chunkMode) }
@@ -642,10 +649,10 @@
         </div>
         <div class="toggle-row">
           <div class="toggle-info">
-            <span class="info-label">自动上传</span>
-            <span class="info-desc">同步时自动上传变更的二进制文件</span>
+            <span class="info-label">自动配置 PATH</span>
+            <span class="info-desc">默认关闭；开启后，后续可由 CC-Box 配置用户级 PATH</span>
           </div>
-          <button class="toggle-btn" class:on={autoUpload} on:click={toggleAutoUpload}>
+          <button class="toggle-btn" class:on={autoConfigurePath} on:click={toggleAutoConfigurePath}>
             <span class="toggle-knob"></span>
           </button>
         </div>
@@ -678,6 +685,15 @@
     <!-- 同步 -->
     {#if activeTab === 'sync'}
       <div class="card animate-fade-in">
+        <div class="toggle-row">
+          <div class="toggle-info">
+            <span class="info-label">同步时包含 Claude binary</span>
+            <span class="info-desc">开启后，普通 push / pull / sync 会同步当前平台 Claude binary 状态</span>
+          </div>
+          <button class="toggle-btn" class:on={binarySyncEnabled} on:click={toggleBinarySync}>
+            <span class="toggle-knob"></span>
+          </button>
+        </div>
         <div class="form-group">
           <label class="label" for="snapshot-limit">快照保留数</label>
           <div class="input-row">

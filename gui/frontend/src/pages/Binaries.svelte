@@ -1,12 +1,13 @@
 <script>
   import { onMount } from 'svelte'
   import { EventsOn } from '../../wailsjs/runtime/runtime.js'
-  import { GetBinaryPage, SwitchBinaryVersion, UploadBinaryVersion, UploadCurrentBinary, GetBinaryStorage, DeleteLocalVersion, DeleteCloudBinaryVersion, RedetectClaudeBinary, BrowseFile, SetConfigField } from '../../wailsjs/go/main/App.js'
+  import { GetBinaryPage, SwitchBinaryVersion, UploadBinaryVersion, UploadCurrentBinary, GetBinaryStorage, DeleteBinaryVersion, RedetectClaudeBinary, BrowseFile, SetConfigField, GetGitHubBinaryReleases, RefreshGitHubBinaryReleases, InstallOfficialClaude, InstallGitHubClaude } from '../../wailsjs/go/main/App.js'
 
   export let active = false
   export let refreshToken = 0
 
   let activeTab = 'claude'
+  let versionTab = 'local'
   let binData = null
   let storage = null
   let loading = true
@@ -19,6 +20,15 @@
   let detecting = false
   let promptHidden = false
   let lastRefreshToken = 0
+  let githubData = null
+  let githubLimit = 30
+  let githubRefreshing = false
+  let githubOpId = null
+  let githubInstallOpId = null
+  let officialInstallOpId = null
+  let externalProgress = null
+  let githubError = ''
+  let githubInitialized = false
 
   $: if (active && refreshToken !== lastRefreshToken && !uploadOpId) {
     lastRefreshToken = refreshToken
@@ -40,23 +50,62 @@
     ? binData.allVersions.find(v => v.version === binData.currentVersion)
     : null
   $: currentUploaded = !!(currentVersionEntry && currentVersionEntry.isRemote)
+  $: localVersions = binData?.allVersions ? binData.allVersions.filter(v => v.isLocal) : []
+  $: cloudVersions = binData?.allVersions ? binData.allVersions.filter(v => v.isRemote) : []
+  $: visibleVersions = versionTab === 'local' ? localVersions : versionTab === 'cloud' ? cloudVersions : []
+  $: githubVersions = githubData?.releases || []
+  $: canLoadMoreGithub = githubVersions.length >= githubLimit
+  $: versionTabs = [
+    { id: 'local', label: '本地', count: localVersions.length },
+    { id: 'cloud', label: '云端', count: cloudVersions.length },
+    { id: 'github', label: 'GitHub', count: githubVersions.length },
+    { id: 'official', label: '官方安装' },
+  ]
 
   onMount(async () => {
     await loadBinary()
     EventsOn('op:progress', (e) => {
       if (e.operation === 'binary-upload' && (!uploadOpId || e.opId === uploadOpId)) uploadProgress = e
+      if (['binary-github-refresh', 'binary-github-install', 'binary-official-install'].includes(e.operation)) externalProgress = e
     })
-    EventsOn('op:complete', (e) => {
-      if (e?.operation !== 'binary-upload' || (uploadOpId && e.opId !== uploadOpId)) return
-      if (e.status === 'error') {
-        error = e.error || '上传失败'
-      } else {
-        msg = '上传完成'
-        if (active) loadBinary()
+    EventsOn('op:complete', async (e) => {
+      if (e?.operation === 'binary-upload' && (!uploadOpId || e.opId === uploadOpId)) {
+        if (e.status === 'error') {
+          error = e.error || '上传失败'
+        } else {
+          msg = '上传完成'
+          if (active) loadBinary()
+        }
+        uploadProgress = null
+        uploadOpId = null
+        uploading = ''
       }
-      uploadProgress = null
-      uploadOpId = null
-      uploading = ''
+      if (e?.operation === 'binary-github-refresh' && (!githubOpId || e.opId === githubOpId)) {
+        githubRefreshing = false
+        githubOpId = null
+        if (e.status === 'error') githubError = e.error || '刷新 GitHub Release 失败'
+        await loadGitHubCache()
+        externalProgress = null
+      }
+      if (e?.operation === 'binary-github-install' && (!githubInstallOpId || e.opId === githubInstallOpId)) {
+        if (e.status === 'error') error = e.error || 'GitHub 安装失败'
+        else msg = 'GitHub Release 安装完成'
+        githubInstallOpId = null
+        externalProgress = null
+        await loadBinary()
+      }
+      if (e?.operation === 'binary-official-install' && (!officialInstallOpId || e.opId === officialInstallOpId)) {
+        if (e.status === 'error') error = e.error || '官方安装失败'
+        else msg = '官方安装完成'
+        officialInstallOpId = null
+        externalProgress = null
+        await loadBinary()
+      }
+    })
+    EventsOn('data:changed', async (e) => {
+      if (e?.domain !== 'binary') return
+      if (e.source === 'github-releases') await loadGitHubCache()
+      else await loadBinary()
     })
   })
 
@@ -71,6 +120,43 @@
     loading = false
   }
 
+  async function loadGitHubCache() {
+    try {
+      githubData = await GetGitHubBinaryReleases(githubLimit)
+    } catch (e) {
+      githubError = e.message || String(e)
+    }
+  }
+
+  async function refreshGitHub() {
+    if (githubOpId) return
+    githubError = ''
+    githubRefreshing = true
+    externalProgress = { operation: 'binary-github-refresh', message: '正在刷新 GitHub Release', percent: 0 }
+    try {
+      githubOpId = await RefreshGitHubBinaryReleases(githubLimit)
+    } catch (e) {
+      githubRefreshing = false
+      githubOpId = null
+      githubError = e.message || String(e)
+      externalProgress = null
+    }
+  }
+
+  async function loadMoreGitHub() {
+    githubLimit += 30
+    await refreshGitHub()
+  }
+
+  async function selectVersionTab(tab) {
+    versionTab = tab
+    if (tab === 'github' && !githubInitialized) {
+      githubInitialized = true
+      await loadGitHubCache()
+      await refreshGitHub()
+    }
+  }
+
   function formatSize(b) {
     if (!b) return '-'
     if (b < 1024) return b + ' B'
@@ -79,7 +165,16 @@
   }
 
   function sourceLabel(source) {
-    return ({ configured: '手动配置', environment: '环境变量', cache: '缓存', bin_dir: '二进制目录', path: 'PATH', common: '常见目录', not_found: '未找到' })[source] || source || '-'
+    return ({ configured: '手动配置', environment: '环境变量', cache: '缓存', bin_dir: '二进制目录', path: 'PATH', common: '常见目录', github: 'GitHub Release', official: '官方安装', webdav: 'WebDAV', local: '本地版本', not_found: '未找到' })[source] || source || '-'
+  }
+
+  function commandStatusLabel(status) {
+    return ({ activated: '已激活', installed_not_activated: '未激活', shadowed_by_other_binary: '被其他路径遮蔽', not_installed: '未安装' })[status] || status || '-'
+  }
+
+  function formatDate(value) {
+    if (!value) return '-'
+    return new Date(value).toLocaleDateString()
   }
 
   async function redetect() {
@@ -153,26 +248,59 @@
     }
   }
 
+  async function installOfficial() {
+    if (officialInstallOpId) return
+    if (!confirm('安装官方最新版可能覆盖当前本地 Claude binary。安装前会尽量备份现有真实二进制，确认继续？')) return
+    msg = ''; error = ''
+    externalProgress = { operation: 'binary-official-install', message: '准备执行官方安装', percent: 0 }
+    try {
+      officialInstallOpId = await InstallOfficialClaude()
+    } catch (e) {
+      officialInstallOpId = null
+      externalProgress = null
+      error = e.message || String(e)
+    }
+  }
+
+  async function installGitHub(version) {
+    if (githubInstallOpId) return
+    if (!confirm(`安装 GitHub Release ${version} 会替换当前受管 Claude binary。安装前会备份现有目标文件，确认继续？`)) return
+    msg = ''; error = ''
+    externalProgress = { operation: 'binary-github-install', message: `准备安装 ${version}`, percent: 0 }
+    try {
+      githubInstallOpId = await InstallGitHubClaude(version)
+    } catch (e) {
+      githubInstallOpId = null
+      externalProgress = null
+      error = e.message || String(e)
+    }
+  }
+
   async function deleteVersion(version) {
+    if (!confirm(`删除 Claude ${version}？本地缓存和云端备份（如存在）都会删除。`)) return
     msg = ''; error = ''
     try {
-      await DeleteLocalVersion(version)
-      msg = `已删除本地版本 ${version}`
+      await DeleteBinaryVersion(version)
+      msg = `已删除版本 ${version}`
       await loadBinary()
     } catch (e) {
       error = e.message || String(e)
     }
   }
 
-  async function deleteCloud(version) {
-    msg = ''; error = ''
-    try {
-      await DeleteCloudBinaryVersion(version)
-      msg = `已删除云端版本 ${version}`
-      await loadBinary()
-    } catch (e) {
-      error = e.message || String(e)
-    }
+  function switchSource(ver) {
+    return ver.isLocal ? 'local' : 'remote'
+  }
+
+  function switchLabel(ver) {
+    if (ver.isLocal) return '使用'
+    return '下载并使用'
+  }
+
+  function sourceEmptyText() {
+    if (versionTab === 'local') return '暂无本地版本'
+    if (versionTab === 'cloud') return '暂无云端版本'
+    return '暂无版本记录'
   }
 </script>
 
@@ -214,6 +342,18 @@
       </div>
       <div class="progress-bar">
         <div class="progress-bar-fill" style="width: {uploadProgress.percent}%"></div>
+      </div>
+    </div>
+  {/if}
+
+  {#if externalProgress}
+    <div class="progress-section animate-fade-in">
+      <div class="progress-header">
+        <span class="progress-msg font-mono">{externalProgress.message}</span>
+        <span class="progress-pct font-mono">{Math.round(externalProgress.percent || 0)}%</span>
+      </div>
+      <div class="progress-bar">
+        <div class="progress-bar-fill" style="width: {externalProgress.percent || 0}%"></div>
       </div>
     </div>
   {/if}
@@ -268,6 +408,7 @@
       {/if}
       <div class="path-meta">
         <span>来源: {sourceLabel(binData.binarySource)}</span>
+        <span>命令状态: {commandStatusLabel(binData.commandStatus?.status)}</span>
       </div>
       {#if binData.binaryShim}
         <div class="path-warn">检测到脚本 shim，仅用于版本显示，不支持上传为二进制版本。</div>
@@ -301,14 +442,76 @@
       </div>
     {/if}
 
-    {#if binData.allVersions && binData.allVersions.length > 0}
-      <div class="card animate-fade-in stagger-2">
-        <div class="section-label-row">
-          <span class="section-label">所有版本</span>
-          <span class="text-xs text-txt-muted">{binData.allVersions.length} 个</span>
+    <div class="card animate-fade-in stagger-2">
+      <div class="section-label-row">
+        <span class="section-label">版本来源</span>
+        <span class="text-xs text-txt-muted">{binData.allVersions?.length || 0} 个已记录版本</span>
+      </div>
+
+      <div class="source-tabs">
+        {#each versionTabs as tab}
+          <button class="source-tab" class:active={versionTab === tab.id} on:click={() => selectVersionTab(tab.id)}>
+            <span>{tab.label}</span>
+            {#if tab.count !== undefined}
+              <span class="source-count">{tab.count}</span>
+            {/if}
+          </button>
+        {/each}
+      </div>
+
+      {#if versionTab === 'github'}
+        <div class="source-head">
+          <div>
+            <p class="text-txt-primary text-sm font-medium">GitHub Release</p>
+            <p class="source-desc left">只显示当前平台可安装版本；优先展示缓存，后台刷新最新列表。</p>
+          </div>
+          <button class="btn-sm" disabled={githubRefreshing} on:click={refreshGitHub}>{githubRefreshing ? '刷新中...' : '刷新'}</button>
         </div>
+        {#if githubError}
+          <div class="path-warn">{githubError}</div>
+        {/if}
+        {#if githubData && !githubData.supported}
+          <div class="empty-compact">当前平台暂不支持 GitHub Release 安装：{githubData.platform}</div>
+        {:else if githubVersions.length > 0}
+          <div class="item-list">
+            {#each githubVersions as rel (rel.version)}
+              <div class="item-row">
+                <div class="ver-dot"></div>
+                <div class="item-main">
+                  <span class="item-name font-mono">{rel.version}</span>
+                  <span class="item-detail">{formatSize(rel.assetSize)} · {formatDate(rel.publishedAt)} · {rel.assetName}</span>
+                </div>
+                <div class="item-tags"><span class="cloud-tag">GitHub</span></div>
+                <div class="item-actions">
+                  <button class="btn-sm" disabled={!!githubInstallOpId} on:click={() => installGitHub(rel.version)}>
+                    {githubInstallOpId ? '安装中...' : '安装'}
+                  </button>
+                </div>
+              </div>
+            {/each}
+          </div>
+          <div class="source-footer">
+            <span class="text-xs text-txt-muted">{githubData?.fromCache ? '已显示缓存' : '已刷新'}{githubData?.fetchedAt ? ` · ${formatDate(githubData.fetchedAt)}` : ''}</span>
+            <button class="btn-sm" disabled={githubRefreshing} on:click={loadMoreGitHub}>{githubRefreshing ? '加载中...' : '继续加载'}</button>
+          </div>
+        {:else}
+          <div class="empty-compact">暂无当前平台可安装的 GitHub Release 版本</div>
+        {/if}
+      {:else if versionTab === 'official'}
+        <div class="source-placeholder">
+          <div class="empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M12 3l7 4v5c0 4.2-2.7 7.5-7 9-4.3-1.5-7-4.8-7-9V7l7-4z"/>
+              <path d="M9 12l2 2 4-5"/>
+            </svg>
+          </div>
+          <p class="text-txt-primary text-sm font-medium">官方最新版</p>
+          <p class="source-desc">一键执行 Claude 官方安装流程，可能覆盖当前本地 Claude；安装前会尽量备份现有真实二进制。</p>
+          <button class="btn-sm btn-upload mt-4" disabled={!!officialInstallOpId} on:click={installOfficial}>{officialInstallOpId ? '安装中...' : '一键安装官方最新版'}</button>
+        </div>
+      {:else if visibleVersions.length > 0}
         <div class="item-list">
-          {#each binData.allVersions as ver}
+          {#each visibleVersions as ver (ver.version)}
             <div class="item-row">
               <div class="ver-dot" class:current={ver.isCurrent}></div>
               <div class="item-main">
@@ -323,92 +526,44 @@
                 {#if ver.isRemote}<span class="cloud-tag">云端</span>{/if}
               </div>
               <div class="item-actions">
-                {#if !ver.isCurrent}
-                  {#if ver.isLocal}
-                    <button class="btn-sm"
-                            disabled={switching === ver.version + '-local'}
-                            on:click={() => switchTo(ver.version, 'local')}>
-                      {switching === ver.version + '-local' ? '切换中...' : '切换'}
-                    </button>
-                  {/if}
-                  {#if ver.isRemote && !ver.isLocal}
-                    <button class="btn-sm"
-                            disabled={switching === ver.version + '-remote'}
-                            on:click={() => switchTo(ver.version, 'remote')}>
-                      {switching === ver.version + '-remote' ? '下载中...' : '下载切换'}
-                    </button>
-                  {/if}
+                {#if ver.isCurrent}
+                  <span class="current-pill">正在使用</span>
+                {:else}
+                  <button class="btn-sm"
+                          disabled={switching === ver.version + '-' + switchSource(ver)}
+                          on:click={() => switchTo(ver.version, switchSource(ver))}>
+                    {switching === ver.version + '-' + switchSource(ver) ? (switchSource(ver) === 'remote' ? '下载中...' : '切换中...') : switchLabel(ver)}
+                  </button>
                 {/if}
                 {#if ver.isLocal && !ver.isRemote}
                   <button class="btn-sm btn-upload"
                           disabled={!!uploadOpId}
                           on:click={() => upload(ver.version)}>
-                    {uploadProgress && uploading === ver.version ? '上传中...' : '上传'}
+                    {uploadProgress && uploading === ver.version ? '上传中...' : '上传备份'}
                   </button>
-                {:else if ver.isLocal && ver.isRemote}
+                {:else if ver.isLocal && ver.isRemote && versionTab === 'local'}
                   <button class="btn-sm btn-upload" disabled>
-                    已上传
+                    已备份
                   </button>
                 {/if}
                 {#if !ver.isCurrent}
-                  {#if ver.isLocal}
-                    <button class="btn-del-sm" on:click|stopPropagation={() => deleteVersion(ver.version)} title="删除本地">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="12" height="12">
-                        <path d="M18 6L6 18M6 6l12 12"/>
-                      </svg>
-                    </button>
-                  {/if}
-                  {#if ver.isRemote}
-                    <button class="btn-del-sm" on:click|stopPropagation={() => deleteCloud(ver.version)} title="删除云端">
-                      <svg viewBox="0 0 20 20" fill="currentColor" width="12" height="12">
-                        <path d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z"/>
-                      </svg>
-                    </button>
-                  {/if}
+                  <button class="btn-del-sm" on:click|stopPropagation={() => deleteVersion(ver.version)} title="删除">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="12" height="12">
+                      <path d="M3 6h18"/>
+                      <path d="M8 6V4h8v2"/>
+                      <path d="M6 6l1 15h10l1-15"/>
+                      <path d="M10 10v7M14 10v7"/>
+                    </svg>
+                  </button>
                 {/if}
               </div>
             </div>
           {/each}
         </div>
-      </div>
-    {:else if binData.localVersions && binData.localVersions.length > 0}
-      <!-- fallback: allVersions 为空但 localVersions 有数据 -->
-      <div class="card animate-fade-in stagger-2">
-        <div class="section-label-row">
-          <span class="section-label">本地版本</span>
-          <span class="text-xs text-txt-muted">{binData.localVersions.length} 个</span>
-        </div>
-        <div class="item-list">
-          {#each binData.localVersions as ver}
-            <div class="item-row">
-              <div class="ver-dot" class:current={ver.isCurrent}></div>
-              <div class="item-main">
-                <span class="item-name font-mono">{ver.version}</span>
-                <span class="item-detail">{formatSize(ver.size)}</span>
-              </div>
-              <div class="item-actions">
-                {#if !ver.isCurrent}
-                  <button class="btn-sm"
-                          disabled={switching === ver.version + '-local'}
-                          on:click={() => switchTo(ver.version, 'local')}>
-                    {switching === ver.version + '-local' ? '切换中...' : '切换'}
-                  </button>
-                {/if}
-                <button class="btn-sm btn-upload"
-                        disabled={!!uploadOpId}
-                        on:click={() => upload(ver.version)}>
-                  上传
-                </button>
-              </div>
-            </div>
-          {/each}
-        </div>
-      </div>
-    {:else}
-      <div class="card animate-fade-in stagger-2">
-        <div class="empty-compact">暂无版本记录</div>
-      </div>
-    {/if}
+      {:else}
+        <div class="empty-compact">{sourceEmptyText()}</div>
+      {/if}
+    </div>
   {/if}
 </div>
 
@@ -441,6 +596,31 @@
     background: rgba(196,112,78,0.06); color: rgb(var(--accent));
     border: 1px solid rgba(196,112,78,0.15);
   }
+
+  .source-tabs {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px; margin-bottom: 10px;
+  }
+  .source-tab {
+    display: flex; align-items: center; justify-content: center; gap: 5px;
+    padding: 6px 8px; border-radius: 6px;
+    font-size: 11px; color: rgb(var(--text-muted));
+    background: rgb(var(--surface-1)); border: 1px solid rgb(var(--border));
+    cursor: pointer; transition: all 0.2s;
+  }
+  .source-tab:hover { color: rgb(var(--text-secondary)); border-color: rgba(196,112,78,0.2); }
+  .source-tab.active { color: rgb(var(--accent)); background: rgba(196,112,78,0.08); border-color: rgba(196,112,78,0.2); }
+  .source-count {
+    min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 9px; font-family: 'DM Mono', monospace;
+    color: rgb(var(--text-muted)); background: rgb(var(--surface-2));
+  }
+  .source-placeholder { text-align: center; padding: 28px 18px 24px; }
+  .source-desc { margin: 6px auto 0; max-width: 360px; font-size: 11px; line-height: 1.6; color: rgb(var(--text-muted)); opacity: 0.7; }
+  .source-desc.left { margin-left: 0; margin-right: 0; max-width: 520px; }
+  .source-head, .source-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+  .source-footer { margin-top: 10px; margin-bottom: 0; }
 
   .msg-bar {
     display: flex; align-items: center; justify-content: space-between;
@@ -512,6 +692,11 @@
     color: rgb(var(--text-muted)); background: rgb(var(--surface-2));
   }
   .version-tag.latest { background: rgba(107,144,128,0.1); color: rgb(var(--state-ok)); }
+  .current-pill {
+    font-size: 10px; font-family: 'DM Mono', monospace;
+    color: rgb(var(--state-ok)); padding: 3px 6px;
+    border-radius: 4px; background: rgba(107,144,128,0.08);
+  }
 
   .path-row {
     font-size: 11px; color: rgb(var(--text-muted)); opacity: 0.5;

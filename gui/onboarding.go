@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/user/cc-box/core/binary"
 	"github.com/user/cc-box/core/config"
 	"github.com/user/cc-box/core/crypto"
 	"github.com/user/cc-box/core/object"
@@ -132,7 +133,13 @@ func (a *App) InitNewDevice(url, username, password, root, encPassword, deviceNa
 
 	// 创建初始快照
 	snap := snapshot.CreateSnapshot("", cfg.Device.ID, "initial sync", scanResult.Files)
-	snap.Binary = currentBinaryVersions()
+	if cfg.Binary.SyncEnabled {
+		version, _, err := binary.EnsureCurrentClaudeUploaded(client, key, nil)
+		if err != nil {
+			return err
+		}
+		binary.SetSnapshotClaudeVersion(snap, version)
+	}
 	snapData, err := snap.Serialize()
 	if err != nil {
 		return fmt.Errorf("serialize snapshot: %w", err)
@@ -182,6 +189,14 @@ func (a *App) InitNewDevice(url, username, password, root, encPassword, deviceNa
 
 // InitJoinExisting 加入已有同步组：验证密码 + 拉取最新快照
 func (a *App) InitJoinExisting(url, username, password, root, encPassword, deviceName string) error {
+	return a.initJoinExisting(url, username, password, root, encPassword, deviceName, false)
+}
+
+func (a *App) InitJoinExistingWithBinary(url, username, password, root, encPassword, deviceName string, syncBinary bool) error {
+	return a.initJoinExisting(url, username, password, root, encPassword, deviceName, syncBinary)
+}
+
+func (a *App) initJoinExisting(url, username, password, root, encPassword, deviceName string, syncBinary bool) error {
 	cfg := config.DefaultConfig()
 	cfg.WebDAV = config.WebDAVConfig{
 		URL:      strings.TrimRight(url, "/") + "/",
@@ -191,6 +206,8 @@ func (a *App) InitJoinExisting(url, username, password, root, encPassword, devic
 	if deviceName != "" {
 		cfg.Device.Name = deviceName
 	}
+	cfg.Binary.SyncEnabled = syncBinary
+	cfg.Binary.AutoUpload = syncBinary
 
 	// 创建本地目录
 	if err := config.InitCCBoxDir(); err != nil {
@@ -258,6 +275,19 @@ func (a *App) InitJoinExisting(url, username, password, root, encPassword, devic
 		}
 		if err := os.WriteFile(fullPath, data, 0600); err != nil {
 			return fmt.Errorf("写入文件 %s 失败: %w", path, err)
+		}
+	}
+
+	if syncBinary {
+		plan, err := binary.PlanClaudeRestore(client, key, remoteSnap, binary.ClaudeRestoreExact)
+		if err != nil {
+			return err
+		}
+		if plan.Action == binary.ClaudeActionUnavailable {
+			return fmt.Errorf("快照需要 Claude %s，但云端没有当前平台可用版本", plan.TargetVersion)
+		}
+		if err := binary.ApplyClaudeRestore(client, key, plan, nil); err != nil {
+			return err
 		}
 	}
 

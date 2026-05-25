@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/user/cc-box/core/binary"
 	"github.com/user/cc-box/core/config"
 	"github.com/user/cc-box/core/object"
 	"github.com/user/cc-box/core/snapshot"
@@ -189,7 +190,16 @@ func restoreFromSnapshot(snapID string) error {
 		}
 	}
 
-	if len(toRestore) == 0 && len(toDelete) == 0 {
+	claudePlan, err := binary.PlanClaudeRestore(client, key, snap, binary.ClaudeRestoreExact)
+	if err != nil {
+		return err
+	}
+	if claudePlan.Action == binary.ClaudeActionUnavailable {
+		return fmt.Errorf("快照需要 Claude %s，但云端没有当前平台可用版本", claudePlan.TargetVersion)
+	}
+	binaryWillChange := claudePlan.Action == binary.ClaudeActionDownload
+
+	if len(toRestore) == 0 && len(toDelete) == 0 && !binaryWillChange {
 		fmt.Println("当前状态与快照一致，无需恢复")
 		return nil
 	}
@@ -199,6 +209,9 @@ func restoreFromSnapshot(snapID string) error {
 	fmt.Printf("  恢复 %d 个文件\n", len(toRestore))
 	if len(toDelete) > 0 {
 		fmt.Printf("  删除 %d 个快照中不存在的文件\n", len(toDelete))
+	}
+	if binaryWillChange {
+		fmt.Printf("  恢复 Claude binary %s\n", claudePlan.TargetVersion)
 	}
 
 	fmt.Print("确认恢复？[y/N] ")
@@ -244,8 +257,13 @@ func restoreFromSnapshot(snapID string) error {
 		}
 	}
 
+	if _, err := applyClaudeRestorePlan(client, key, claudePlan); err != nil {
+		return err
+	}
+
 	// 创建恢复快照
 	newSnap := snapshot.CreateSnapshot(localHead, cfg.Device.ID, "restore from "+shortID, snap.Files)
+	newSnap.Binary = binary.CloneSnapshotBinary(snap)
 	if err := uploadSnapshot(client, store, newSnap); err != nil {
 		return fmt.Errorf("上传快照失败: %w", err)
 	}

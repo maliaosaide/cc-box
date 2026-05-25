@@ -292,11 +292,13 @@ func (a *App) GetConfig() (*ConfigView, error) {
 			Enabled: cfg.Encryption.Enabled,
 		},
 		Binary: BinaryView{
-			Encrypt:          cfg.Binary.Encrypt,
-			ChunkMode:        cfg.Binary.ChunkMode,
-			ChunkSizeMB:      cfg.Binary.ChunkSizeMB,
-			ChunkThresholdMB: cfg.Binary.ChunkThresholdMB,
-			AutoUpload:       cfg.Binary.AutoUpload,
+			Encrypt:           cfg.Binary.Encrypt,
+			ChunkMode:         cfg.Binary.ChunkMode,
+			ChunkSizeMB:       cfg.Binary.ChunkSizeMB,
+			ChunkThresholdMB:  cfg.Binary.ChunkThresholdMB,
+			AutoUpload:        cfg.Binary.SyncEnabled,
+			SyncEnabled:       cfg.Binary.SyncEnabled,
+			AutoConfigurePath: cfg.Binary.AutoConfigurePath,
 		},
 		Sync: SyncView{
 			SnapshotLimit:    cfg.Sync.SnapshotLimit,
@@ -378,8 +380,11 @@ func (a *App) SetConfigField(section, key, value string) error {
 			if v, e := parseInt(value); e == nil {
 				cfg.Binary.ChunkThresholdMB = v
 			}
-		case "auto_upload":
-			cfg.Binary.AutoUpload = value == "true"
+		case "auto_upload", "sync_enabled":
+			cfg.Binary.SyncEnabled = value == "true"
+			cfg.Binary.AutoUpload = cfg.Binary.SyncEnabled
+		case "auto_configure_path":
+			cfg.Binary.AutoConfigurePath = value == "true"
 		case "bin_dir":
 			cfg.Binary.BinDir = value
 			clearClaudeCache = true
@@ -858,11 +863,13 @@ type EncryptionView struct {
 }
 
 type BinaryView struct {
-	Encrypt          bool   `json:"encrypt"`
-	ChunkMode        string `json:"chunkMode"`
-	ChunkSizeMB      int    `json:"chunkSizeMB"`
-	ChunkThresholdMB int    `json:"chunkThresholdMB"`
-	AutoUpload       bool   `json:"autoUpload"`
+	Encrypt           bool   `json:"encrypt"`
+	ChunkMode         string `json:"chunkMode"`
+	ChunkSizeMB       int    `json:"chunkSizeMB"`
+	ChunkThresholdMB  int    `json:"chunkThresholdMB"`
+	AutoUpload        bool   `json:"autoUpload"`
+	SyncEnabled       bool   `json:"syncEnabled"`
+	AutoConfigurePath bool   `json:"autoConfigurePath"`
 }
 
 type SyncView struct {
@@ -909,19 +916,20 @@ type BinaryVersionInfo struct {
 
 // BinaryPageData 二进制页面数据
 type BinaryPageData struct {
-	CurrentVersion string              `json:"currentVersion"`
-	AllVersions    []BinaryVersionInfo `json:"allVersions"`
-	Versions       []BinaryVersionInfo `json:"versions"`
-	LocalVersions  []BinaryVersionInfo `json:"localVersions"`
-	Platform       string              `json:"platform"`
-	BinaryPath     string              `json:"binaryPath"`
-	ManagedPath    string              `json:"managedPath"`
-	BinarySource   string              `json:"binarySource"`
-	BinaryReadOnly bool                `json:"binaryReadOnly"`
-	BinaryShim     bool                `json:"binaryShim"`
-	BinaryError    string              `json:"binaryError"`
-	VersionsDir    string              `json:"versionsDir"`
-	LocalExists    bool                `json:"localExists"`
+	CurrentVersion string                     `json:"currentVersion"`
+	AllVersions    []BinaryVersionInfo        `json:"allVersions"`
+	Versions       []BinaryVersionInfo        `json:"versions"`
+	LocalVersions  []BinaryVersionInfo        `json:"localVersions"`
+	Platform       string                     `json:"platform"`
+	BinaryPath     string                     `json:"binaryPath"`
+	ManagedPath    string                     `json:"managedPath"`
+	BinarySource   string                     `json:"binarySource"`
+	BinaryReadOnly bool                       `json:"binaryReadOnly"`
+	BinaryShim     bool                       `json:"binaryShim"`
+	BinaryError    string                     `json:"binaryError"`
+	VersionsDir    string                     `json:"versionsDir"`
+	LocalExists    bool                       `json:"localExists"`
+	CommandStatus  binary.ClaudeCommandStatus `json:"commandStatus"`
 }
 
 // GetBinaryPage 返回二进制管理页面数据
@@ -941,6 +949,7 @@ func (a *App) GetBinaryPage() (*BinaryPageData, error) {
 		VersionsDir:    verDir,
 		LocalExists:    resolution.Valid,
 		CurrentVersion: resolution.Version,
+		CommandStatus:  binary.ClaudeCommandState(resolution.CurrentPath),
 	}
 
 	data.LocalVersions = scanLocalVersions(verDir, data.CurrentVersion)
@@ -978,6 +987,53 @@ func (a *App) GetBinaryPage() (*BinaryPageData, error) {
 	data.AllVersions = mergeBinaryVersions(data.LocalVersions, data.Versions, data.CurrentVersion)
 
 	return data, nil
+}
+
+func (a *App) GetGitHubBinaryReleases(limit int) (*binary.GitHubClaudeReleaseList, error) {
+	return binary.CachedGitHubClaudeReleases(limit)
+}
+
+func (a *App) RefreshGitHubBinaryReleases(limit int) int64 {
+	return a.StartAsync("binary-github-refresh", func(ctx context.Context, opID int64) error {
+		a.emitProgress(opID, "binary-github-refresh", 0, 1, 0, 1, "正在刷新 GitHub Release")
+		if _, err := binary.RefreshGitHubClaudeReleases(ctx, limit); err != nil {
+			return err
+		}
+		a.emitProgress(opID, "binary-github-refresh", 1, 1, 1, 1, "GitHub Release 已刷新")
+		a.emitDataChanged("binary", "github-releases")
+		return nil
+	})
+}
+
+func (a *App) InstallOfficialClaude() int64 {
+	return a.StartAsync("binary-official-install", func(ctx context.Context, opID int64) error {
+		_, err := binary.InstallOfficialClaude(ctx, func(current, total int64, message string) {
+			a.emitProgress(opID, "binary-official-install", current, total, int(current), int(total), message)
+		})
+		if err != nil {
+			return err
+		}
+		a.clearBinaryIndexCache()
+		a.emitDataChanged("binary", "official-install")
+		return nil
+	})
+}
+
+func (a *App) InstallGitHubClaude(version string) int64 {
+	return a.StartAsync("binary-github-install", func(ctx context.Context, opID int64) error {
+		result, err := binary.InstallGitHubClaude(ctx, version, func(current, total int64, message string) {
+			a.emitProgress(opID, "binary-github-install", current, total, int(current), int(total), message)
+		})
+		if err != nil {
+			return err
+		}
+		if result != nil && result.PathConfig != nil && result.PathConfig.Error != "" {
+			a.emitProgress(opID, "binary-github-install", 5, 5, 5, 5, result.PathConfig.Message)
+		}
+		a.clearBinaryIndexCache()
+		a.emitDataChanged("binary", "github-install")
+		return nil
+	})
 }
 
 // scanLocalVersions 扫描本地版本目录
@@ -1062,17 +1118,19 @@ func (a *App) SwitchBinaryVersion(version string, source string) error {
 		srcData, err := os.ReadFile(srcPath)
 		if err != nil {
 			switchErr = fmt.Errorf("读取本地版本 %s 失败: %w", version, err)
-		} else if err := binary.WriteFileAtomic(binPath, srcData, 0755); err != nil {
-			switchErr = fmt.Errorf("写入失败: %w", err)
+		} else if _, err := binary.InstallClaudeBinaryData(binPath, srcData, version); err != nil {
+			switchErr = fmt.Errorf("切换本地版本 %s 失败: %w", version, err)
 		}
 	} else {
 		_, client, key, err := a.loadClients()
 		if err != nil {
 			switchErr = err
 		} else {
-			err = binary.Download(client, key, "claude", version, binPath, nil)
+			data, err := binary.DownloadData(client, key, "claude", version, nil)
 			if err != nil {
 				switchErr = fmt.Errorf("下载版本 %s 失败: %w", version, err)
+			} else if _, err := binary.InstallClaudeBinaryData(binPath, data, version); err != nil {
+				switchErr = fmt.Errorf("切换云端版本 %s 失败: %w", version, err)
 			}
 		}
 	}
@@ -1103,6 +1161,16 @@ func (a *App) SwitchBinaryVersion(version string, source string) error {
 	}
 
 	_ = binary.ClearClaudeResolutionCache()
+	installedVersion := detectBinVersion(binPath)
+	if installedVersion == "" {
+		installedVersion = version
+	}
+	installSource := "local"
+	if source == "remote" {
+		installSource = "webdav"
+	}
+	_ = binary.RememberClaudeBinarySource(binPath, installSource, installedVersion)
+	_ = binary.ConfigureClaudePathIfEnabledBestEffort()
 	a.clearBinaryIndexCache()
 	a.emitDataChanged("binary", "switch-binary")
 	return nil
@@ -1213,28 +1281,49 @@ func (a *App) GetBinaryStorage() (*BinaryStorageInfo, error) {
 	return info, nil
 }
 
-// DeleteLocalVersion 删除本地版本文件
-func (a *App) DeleteLocalVersion(version string) error {
-	verDir := config.VersionsDir()
-	if err := os.Remove(filepath.Join(verDir, version)); err != nil {
-		return err
-	}
-	a.emitDataChanged("binary", "delete-local-version")
-	return nil
-}
-
-// DeleteCloudBinaryVersion 删除云端二进制版本
-func (a *App) DeleteCloudBinaryVersion(version string) error {
-	_, client, key, err := a.loadClients()
+// DeleteBinaryVersion 删除指定 Claude 版本的本地缓存和云端备份
+func (a *App) DeleteBinaryVersion(version string) error {
+	version, err := validateBinaryVersionName(version)
 	if err != nil {
 		return err
 	}
-	if err := binary.DeleteRemoteVersion(client, key, "claude", version, config.Platform()); err != nil {
-		return err
+	if resolution := binary.ResolveClaudeBinaryCached(); resolution.Valid && resolution.Version == version {
+		return fmt.Errorf("当前正在使用 Claude %s，请先切换到其他版本再删除", version)
+	}
+
+	_, client, key, err := a.loadClients()
+	if err != nil {
+		return fmt.Errorf("无法连接云端确认并删除版本 %s: %w", version, err)
+	}
+	idx, err := binary.LoadIndex(client)
+	if err != nil {
+		return fmt.Errorf("读取云端二进制索引失败: %w", err)
+	}
+	if info := idx.GetBinaryInfo(config.Platform(), "claude"); info != nil {
+		if _, ok := info.Versions[version]; ok {
+			if err := binary.DeleteRemoteVersion(client, key, "claude", version, config.Platform()); err != nil {
+				return fmt.Errorf("删除云端版本失败: %w", err)
+			}
+		}
+	}
+
+	if err := os.Remove(filepath.Join(config.VersionsDir(), version)); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("删除本地版本失败: %w", err)
 	}
 	a.clearBinaryIndexCache()
-	a.emitDataChanged("binary", "delete-cloud-version")
+	a.emitDataChanged("binary", "delete-binary-version")
 	return nil
+}
+
+func validateBinaryVersionName(version string) (string, error) {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return "", fmt.Errorf("版本号不能为空")
+	}
+	if filepath.Base(version) != version || strings.ContainsAny(version, `/\\`) {
+		return "", fmt.Errorf("版本号无效")
+	}
+	return version, nil
 }
 
 // RevertToSnapshot 回滚到指定快照版本
@@ -1352,17 +1441,16 @@ func (a *App) RevertToSnapshot(snapID string) error {
 			return fmt.Errorf("备份文件 %s 失败: %w", path, err)
 		}
 	}
-	if snap.Binary != nil {
-		platform := config.Platform()
-		if tools, ok := snap.Binary[platform]; ok {
-			for name, ver := range tools {
-				if ver == "" {
-					continue
-				}
-				if err := backupPath(binary.GetBinaryPath(name)); err != nil {
-					return fmt.Errorf("备份 %s 失败: %w", name, err)
-				}
-			}
+	claudePlan, err := binary.PlanClaudeRestore(client, key, snap, binary.ClaudeRestoreExact)
+	if err != nil {
+		return err
+	}
+	if claudePlan.Action == binary.ClaudeActionUnavailable {
+		return fmt.Errorf("快照需要 Claude %s，但云端没有当前平台可用版本", claudePlan.TargetVersion)
+	}
+	if claudePlan.Action == binary.ClaudeActionDownload {
+		if err := backupPath(claudePlan.TargetPath); err != nil {
+			return fmt.Errorf("备份 Claude binary 失败: %w", err)
 		}
 	}
 
@@ -1388,21 +1476,12 @@ func (a *App) RevertToSnapshot(snapID string) error {
 		}
 	}
 
-	if snap.Binary != nil {
-		platform := config.Platform()
-		if tools, ok := snap.Binary[platform]; ok {
-			for name, ver := range tools {
-				if ver != "" {
-					if err := a.revertBinary(name, ver, client, key); err != nil {
-						return fail(err)
-					}
-				}
-			}
-		}
+	if err := binary.ApplyClaudeRestore(client, key, claudePlan, nil); err != nil {
+		return fail(err)
 	}
 
 	newSnap := snapshot.CreateSnapshot(parentHead, cfg.Device.ID, "revert to "+shortSnapshotID(snapID), snap.Files)
-	newSnap.Binary = currentBinaryVersions()
+	newSnap.Binary = binary.CloneSnapshotBinary(snap)
 	snapData, err := newSnap.Serialize()
 	if err != nil {
 		return fail(fmt.Errorf("序列化恢复快照失败: %w", err))
@@ -1433,37 +1512,6 @@ func (a *App) RevertToSnapshot(snapID string) error {
 	}
 
 	a.emitDataChanged("sync", "revert-snapshot")
-	return nil
-}
-
-// revertBinary 恢复二进制到指定版本
-func (a *App) revertBinary(name, targetVer string, client *webdav.Client, key []byte) error {
-	binPath := binary.GetBinaryPath(name)
-	currentVer := detectBinVersion(binPath)
-	if currentVer == targetVer {
-		return nil
-	}
-
-	// 先尝试本地版本目录
-	verDir := config.VersionsDir()
-	localPath := filepath.Join(verDir, targetVer)
-	if data, err := os.ReadFile(localPath); err == nil {
-		if err := binary.WriteFileAtomic(binPath, data, 0755); err != nil {
-			return fmt.Errorf("恢复 %s %s 失败: %w", name, targetVer, err)
-		}
-		if name == "claude" {
-			_ = binary.ClearClaudeResolutionCache()
-		}
-		return nil
-	}
-
-	// 再尝试从云端下载
-	if err := binary.Download(client, key, name, targetVer, binPath, nil); err != nil {
-		return fmt.Errorf("下载 %s %s 失败: %w", name, targetVer, err)
-	}
-	if name == "claude" {
-		_ = binary.ClearClaudeResolutionCache()
-	}
 	return nil
 }
 

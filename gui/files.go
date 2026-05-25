@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/user/cc-box/core/binary"
 	"github.com/user/cc-box/core/config"
 	"github.com/user/cc-box/core/crypto"
 	"github.com/user/cc-box/core/normalize"
@@ -909,16 +910,25 @@ func (a *App) doBulkPush(ctx context.Context, opID int64, cfg *config.Config, cl
 	}
 
 	// 计算变更
-	currentBins := currentBinaryVersions()
+	var currentBins map[string]map[string]string
 	var changes []snapshot.Change
-	binaryChanged := localSnap == nil || !binaryVersionsEqual(localSnap.Binary, currentBins)
+	binaryChanged := false
+	if cfg.Binary.SyncEnabled {
+		version, err := binary.CurrentClaudeVersion()
+		if err != nil {
+			return err
+		}
+		currentBins = map[string]map[string]string{config.Platform(): {"claude": version}}
+	}
 	if localSnap != nil {
 		currentSnap := snapshot.CreateSnapshot("", cfg.Device.ID, "", scanResult.Files)
 		changes = localSnap.Diff(currentSnap)
+		binaryChanged = cfg.Binary.SyncEnabled && !binaryVersionsEqual(localSnap.Binary, currentBins)
 	} else {
 		for path, entry := range scanResult.Files {
 			changes = append(changes, snapshot.Change{Path: path, Type: snapshot.Added, NewHash: entry.Hash, NewSize: entry.Size})
 		}
+		binaryChanged = cfg.Binary.SyncEnabled
 	}
 
 	if len(changes) == 0 && !binaryChanged {
@@ -960,6 +970,17 @@ func (a *App) doBulkPush(ctx context.Context, opID int64, cfg *config.Config, cl
 			return fmt.Errorf("文件 %s hash 不一致", c.Path)
 		}
 		a.emitProgress(opID, "bulk-push", int64(i+1), total, int(i+1), int(total), fmt.Sprintf("推送 %s", c.Path))
+	}
+
+	if cfg.Binary.SyncEnabled {
+		version, uploadedBinary, err := binary.EnsureCurrentClaudeUploaded(client, key, a.progressCallback(opID, "bulk-push"))
+		if err != nil {
+			return err
+		}
+		currentBins = map[string]map[string]string{config.Platform(): {"claude": version}}
+		if uploadedBinary {
+			a.clearBinaryIndexCache()
+		}
 	}
 
 	newSnap := snapshot.CreateSnapshot(localHeadStr, cfg.Device.ID, "gui push", scanResult.Files)
@@ -1017,16 +1038,24 @@ func (a *App) doBulkPull(ctx context.Context, opID int64, cfg *config.Config, cl
 		return fmt.Errorf("发现 %d 个冲突，请在文件页选择以本地或远程为准", result.Conflicts)
 	}
 	if result.Applied == 0 {
-		a.emitProgress(opID, "bulk-pull", 1, 1, 1, 1, "已是最新")
+		if result.BinaryApplied {
+			a.emitProgress(opID, "bulk-pull", 1, 1, 1, 1, "已恢复 Claude binary")
+		} else {
+			a.emitProgress(opID, "bulk-pull", 1, 1, 1, 1, "已是最新")
+		}
 		return nil
+	}
+	if result.BinaryApplied {
+		a.emitProgress(opID, "bulk-pull", int64(result.Applied), int64(result.Total), result.Applied, result.Total, fmt.Sprintf("已拉取 %d 个文件并恢复 Claude binary", result.Applied))
 	}
 	return nil
 }
 
 type pullMergeResult struct {
-	Applied   int
-	Conflicts int
-	Total     int
+	Applied       int
+	Conflicts     int
+	Total         int
+	BinaryApplied bool
 }
 
 func (a *App) applyRemoteSnapshot(ctx context.Context, opID int64, operation string, cfg *config.Config, client *webdav.Client, key []byte, remoteHead string, remoteSnap *snapshot.Snapshot) (*pullMergeResult, error) {
@@ -1049,6 +1078,12 @@ func (a *App) applyRemoteSnapshot(ctx context.Context, opID int64, operation str
 	paths := mergePathSet(baseSnap, scanResult.Files, remoteSnap)
 	result := &pullMergeResult{Total: len(paths)}
 	if len(paths) == 0 {
+		if cfg.Binary.SyncEnabled {
+			result.BinaryApplied, err = a.applyRemoteClaudeRestore(ctx, opID, operation, client, key, remoteSnap)
+			if err != nil {
+				return nil, err
+			}
+		}
 		if err := cachePulledSnapshot(remoteHead, remoteSnap); err != nil {
 			return nil, err
 		}
@@ -1095,6 +1130,12 @@ func (a *App) applyRemoteSnapshot(ctx context.Context, opID int64, operation str
 		}
 	}
 
+	if cfg.Binary.SyncEnabled && result.Conflicts == 0 {
+		result.BinaryApplied, err = a.applyRemoteClaudeRestore(ctx, opID, operation, client, key, remoteSnap)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if err := cachePulledSnapshot(remoteHead, remoteSnap); err != nil {
 		return nil, err
 	}
@@ -1104,6 +1145,37 @@ func (a *App) applyRemoteSnapshot(ctx context.Context, opID int64, operation str
 		}
 	}
 	return result, nil
+}
+
+func (a *App) applyRemoteClaudeRestore(ctx context.Context, opID int64, operation string, client *webdav.Client, key []byte, snap *snapshot.Snapshot) (bool, error) {
+	select {
+	case <-ctx.Done():
+		return false, ctx.Err()
+	default:
+	}
+	plan, err := binary.PlanClaudeRestore(client, key, snap, binary.ClaudeRestoreExact)
+	if err != nil {
+		return false, err
+	}
+	switch plan.Action {
+	case binary.ClaudeActionSkipAlreadyInstalled, binary.ClaudeActionSkipNoSnapshot, binary.ClaudeActionNeedUserChoice:
+		return false, nil
+	case binary.ClaudeActionUnavailable:
+		return false, fmt.Errorf("快照需要 Claude %s，但云端没有当前平台可用版本", plan.TargetVersion)
+	case binary.ClaudeActionDownload:
+		a.emitProgress(opID, operation, 0, 1, 0, 1, "恢复 Claude binary "+plan.TargetVersion)
+		if err := binary.ApplyClaudeRestore(client, key, plan, a.progressCallback(opID, operation)); err != nil {
+			return false, err
+		}
+		if plan.PathConfig != nil && plan.PathConfig.Error != "" {
+			a.emitProgress(opID, operation, 1, 1, 1, 1, plan.PathConfig.Message)
+		} else {
+			a.emitProgress(opID, operation, 1, 1, 1, 1, "已恢复 Claude binary "+plan.TargetVersion)
+		}
+		return true, nil
+	default:
+		return false, fmt.Errorf("未知 Claude binary 恢复动作: %s", plan.Action)
+	}
 }
 
 func mergePathSet(baseSnap *snapshot.Snapshot, current map[string]snapshot.FileEntry, remoteSnap *snapshot.Snapshot) []string {

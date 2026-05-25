@@ -20,41 +20,46 @@ type DownloadProgress func(total, downloaded int64, partIndex, totalParts int)
 
 // Download 从 WebDAV 下载二进制文件
 func Download(client *webdav.Client, key []byte, name string, version string, targetPath string, progress DownloadProgress) error {
+	data, err := DownloadData(client, key, name, version, progress)
+	if err != nil {
+		return err
+	}
+	if err := WriteFileAtomic(targetPath, data, 0755); err != nil {
+		return fmt.Errorf("写入文件失败: %w", err)
+	}
+	return nil
+}
+
+func DownloadData(client *webdav.Client, key []byte, name string, version string, progress DownloadProgress) ([]byte, error) {
 	platform := config.Platform()
 	idx, err := LoadIndex(client)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	info := idx.GetBinaryInfo(platform, name)
 	if info == nil {
-		return fmt.Errorf("平台 %s 上没有 %s 的记录", platform, name)
+		return nil, fmt.Errorf("平台 %s 上没有 %s 的记录", platform, name)
 	}
 
 	v, exists := info.Versions[version]
 	if !exists {
-		return fmt.Errorf("版本 %s 不存在", version)
+		return nil, fmt.Errorf("版本 %s 不存在", version)
 	}
 
 	var data []byte
-
 	if v.Chunked {
 		data, err = downloadChunked(client, key, v.Hash, v.Size, v.Encrypted, progress)
 	} else {
 		data, err = downloadWhole(client, key, name, version, platform, v.Encrypted)
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !object.ValidateHash(data, v.Hash) {
-		return fmt.Errorf("二进制 hash 校验失败: %s", v.Hash)
+		return nil, fmt.Errorf("二进制 hash 校验失败: %s", v.Hash)
 	}
-
-	if err := WriteFileAtomic(targetPath, data, 0755); err != nil {
-		return fmt.Errorf("写入文件失败: %w", err)
-	}
-
-	return nil
+	return data, nil
 }
 
 func WriteFileAtomic(targetPath string, data []byte, perm os.FileMode) error {

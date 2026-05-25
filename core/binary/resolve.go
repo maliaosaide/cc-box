@@ -195,9 +195,13 @@ func resolveClaudeBinaryFast(maxAge time.Duration) ClaudeResolution {
 	}
 
 	if hasCache {
-		res, err := resolveCandidateFast(claudeCandidate{path: cached.Path, source: "cache", readOnly: cached.ReadOnly}, managedPath, cached, hasCache, maxAge)
+		cacheSource := cached.Source
+		if cacheSource == "" {
+			cacheSource = "cache"
+		}
+		res, err := resolveCandidateFast(claudeCandidate{path: cached.Path, source: cacheSource, readOnly: cached.ReadOnly}, managedPath, cached, hasCache, maxAge)
 		if err == nil {
-			res.Source = "cache"
+			res.Source = cacheSource
 			return res
 		}
 	}
@@ -321,12 +325,16 @@ func resolveCachedClaude(managedPath string) (ClaudeResolution, bool) {
 	if !ok {
 		return ClaudeResolution{}, false
 	}
-	res, err := resolveCandidate(claudeCandidate{path: cached.Path, source: "cache", readOnly: cached.ReadOnly}, managedPath)
+	cacheSource := cached.Source
+	if cacheSource == "" {
+		cacheSource = "cache"
+	}
+	res, err := resolveCandidate(claudeCandidate{path: cached.Path, source: cacheSource, readOnly: cached.ReadOnly}, managedPath)
 	if err != nil {
 		_ = ClearClaudeResolutionCache()
 		return ClaudeResolution{}, false
 	}
-	res.Source = "cache"
+	res.Source = cacheSource
 	res.ReadOnly = cached.ReadOnly || res.ReadOnly
 	res.IsShim = cached.IsShim || res.IsShim
 	return res, true

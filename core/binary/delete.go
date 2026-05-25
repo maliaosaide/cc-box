@@ -61,11 +61,30 @@ func removeVersionFromIndex(client *webdav.Client, platform, name, version strin
 		removed = current
 		deletePhysical = !removed.Chunked || countBinaryHashRefs(idx, removed.Hash) == 1
 		delete(info.Versions, version)
+		if info.Current == version {
+			info.Current = nextBinaryCurrent(info)
+		}
 		return nil
 	}); err != nil {
 		return Version{}, false, err
 	}
 	return removed, deletePhysical, nil
+}
+
+func nextBinaryCurrent(info *BinaryInfo) string {
+	if info == nil || len(info.Versions) == 0 {
+		return ""
+	}
+	selected := ""
+	var selectedUploaded int64
+	for version, item := range info.Versions {
+		uploaded := item.Uploaded.UnixNano()
+		if selected == "" || uploaded > selectedUploaded || (uploaded == selectedUploaded && version > selected) {
+			selected = version
+			selectedUploaded = uploaded
+		}
+	}
+	return selected
 }
 
 func deleteBinaryPayload(client *webdav.Client, platform, name, version string, v Version) error {

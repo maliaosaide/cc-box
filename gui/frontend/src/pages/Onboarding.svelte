@@ -21,6 +21,7 @@
   let passwordPreviewRequest = 0
   let submitting = false
   let errorMsg = ''
+  let joinBinarySync = false
 
   const presets = {
     jianguoyun: { label: '坚果云', url: 'https://dav.jianguoyun.com/dav/', root: 'cc-box' },
@@ -94,7 +95,12 @@
       if (mode === 'new') {
         await InitNewDevice(webdav.url, webdav.username, webdav.password, webdav.root, password, deviceName)
       } else {
-        await InitJoinExisting(webdav.url, webdav.username, webdav.password, webdav.root, password, deviceName)
+        const joinWithBinary = window?.go?.main?.App?.InitJoinExistingWithBinary
+        if (joinWithBinary) {
+          await joinWithBinary(webdav.url, webdav.username, webdav.password, webdav.root, password, deviceName, joinBinarySync)
+        } else {
+          await InitJoinExisting(webdav.url, webdav.username, webdav.password, webdav.root, password, deviceName)
+        }
       }
       dispatch('complete')
     } catch (e) { errorMsg = e.message || '初始化失败' }
@@ -278,6 +284,16 @@
             <input id="devicename" class="input" type="text" bind:value={deviceName} />
           </div>
 
+          {#if step === 3}
+            <label class="check-card">
+              <input type="checkbox" bind:checked={joinBinarySync} />
+              <span>
+                <strong>同时恢复 Claude binary</strong>
+                <em>开启后会按最新快照记录恢复当前平台 Claude binary；云端缺失时会停止初始化。</em>
+              </span>
+            </label>
+          {/if}
+
           {#if errorMsg}
             <div class="error-msg">{errorMsg}</div>
           {/if}
@@ -287,7 +303,7 @@
               <svg class="w-4 h-4 flex-shrink-0 mt-0.5" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 14a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm1-5.5h-2V7h2v3.5z"/>
               </svg>
-              <span>加密密码验证通过后将自动拉取最新配置</span>
+              <span>{joinBinarySync ? '加密密码验证通过后将自动拉取最新配置，并恢复快照记录的当前平台 Claude binary' : '加密密码验证通过后将自动拉取最新配置；Claude binary 可稍后在二进制页面恢复'}</span>
             </div>
           {/if}
 
@@ -423,6 +439,22 @@
   .test-err { background: rgba(184,92,92,0.08); color: rgb(var(--state-err)); }
 
   .hint { margin-top: 6px; font-size: 12px; color: rgb(var(--text-muted)); opacity: 0.7; }
+  .check-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: 1px solid rgb(var(--border));
+    background: rgb(var(--surface-1));
+    color: rgb(var(--text-secondary));
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .check-card input { margin-top: 2px; accent-color: rgb(var(--accent)); }
+  .check-card span { display: flex; flex-direction: column; gap: 3px; }
+  .check-card strong { color: rgb(var(--text-primary)); font-weight: 500; }
+  .check-card em { color: rgb(var(--text-muted)); font-size: 11px; font-style: normal; line-height: 1.5; }
   .fingerprint-preview {
     margin-top: 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
     font-size: 12px; color: rgb(var(--text-muted));

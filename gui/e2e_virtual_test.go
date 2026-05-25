@@ -72,24 +72,24 @@ func TestVirtualGUIWorkflowWithBinaryLifecycle(t *testing.T) {
 	if err := deviceA.app.SetConfigField("binary", "encrypt", "true"); err != nil {
 		t.Fatalf("enable binary encryption: %v", err)
 	}
+	if err := deviceA.app.SetConfigField("binary", "sync_enabled", "true"); err != nil {
+		t.Fatalf("enable binary sync: %v", err)
+	}
 	if err := deviceA.app.SetConfigField("encryption", "enabled", "false"); err == nil {
 		t.Fatalf("expected encryption mode switch to be rejected")
 	}
 	if got := runFakeClaude(t, filepath.Join(deviceA.binDir, binaryName())); got != "fake-claude-v1" {
 		t.Fatalf("device A fake binary output = %q", got)
 	}
-	waitAsyncSuccess(t, deviceA.app.UploadCurrentBinary())
+	waitAsyncSuccess(t, deviceA.app.QuickPush())
 	initialHead := readHead(t)
 
 	writeFakeClaude(t, filepath.Join(deviceB.binDir, binaryName()), "0.9.0-test", "fake-claude-v0")
 	activateDevice(t, deviceB)
-	if err := deviceB.app.InitJoinExisting(baseURL, "user", virtualWebDAVPassword, root, "old-secret", "device-b"); err != nil {
-		t.Fatalf("InitJoinExisting: %v", err)
+	if err := deviceB.app.InitJoinExistingWithBinary(baseURL, "user", virtualWebDAVPassword, root, "old-secret", "device-b", true); err != nil {
+		t.Fatalf("InitJoinExistingWithBinary: %v", err)
 	}
 	assertFileContent(t, filepath.Join(deviceB.claudeDir, "settings.json"), `{"theme":"light"}`)
-	if err := deviceB.app.SwitchBinaryVersion("1.0.0-test", "remote"); err != nil {
-		t.Fatalf("SwitchBinaryVersion remote v1: %v", err)
-	}
 	if got := runFakeClaude(t, filepath.Join(deviceB.binDir, binaryName())); got != "fake-claude-v1" {
 		t.Fatalf("device B remote binary output = %q", got)
 	}
@@ -112,9 +112,6 @@ func TestVirtualGUIWorkflowWithBinaryLifecycle(t *testing.T) {
 		t.Fatalf("GetBinaryPage: %v", err)
 	}
 	assertBinaryPageHasVersion(t, page, "2.0.0-test")
-	if err := deviceB.app.SwitchBinaryVersion("2.0.0-test", "remote"); err != nil {
-		t.Fatalf("SwitchBinaryVersion remote v2: %v", err)
-	}
 	if got := runFakeClaude(t, filepath.Join(deviceB.binDir, binaryName())); got != "fake-claude-v2" {
 		t.Fatalf("device B synced binary output = %q", got)
 	}

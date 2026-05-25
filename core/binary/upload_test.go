@@ -5,6 +5,7 @@ package binary
 import (
 	"bytes"
 	"testing"
+	"time"
 
 	"github.com/user/cc-box/core/config"
 	"github.com/user/cc-box/core/webdav"
@@ -176,6 +177,34 @@ func TestUpdateIndexRetriesAndMergesConcurrentChange(t *testing.T) {
 	}
 	if _, ok := versions["mine"]; !ok {
 		t.Fatalf("missing retried version")
+	}
+}
+
+func TestDeleteRemoteVersionMovesCurrentToRemainingVersion(t *testing.T) {
+	client, _ := newBinaryTestDAV(t)
+	platform := config.Platform()
+	idx := NewIndex()
+	info := idx.EnsureBinaryInfo(platform, "claude")
+	info.Current = "1.0.0"
+	info.Versions["1.0.0"] = Version{Hash: "hash-old", Uploaded: time.Date(2026, 5, 24, 10, 0, 0, 0, time.UTC)}
+	info.Versions["2.0.0"] = Version{Hash: "hash-new", Uploaded: time.Date(2026, 5, 24, 11, 0, 0, 0, time.UTC)}
+	if err := SaveIndex(client, idx, "", false); err != nil {
+		t.Fatalf("SaveIndex: %v", err)
+	}
+
+	if err := DeleteRemoteVersion(client, nil, "claude", "1.0.0", platform); err != nil {
+		t.Fatalf("DeleteRemoteVersion: %v", err)
+	}
+	updated, err := LoadIndex(client)
+	if err != nil {
+		t.Fatalf("LoadIndex: %v", err)
+	}
+	updatedInfo := updated.GetBinaryInfo(platform, "claude")
+	if updatedInfo.Current != "2.0.0" {
+		t.Fatalf("Current = %q, want 2.0.0", updatedInfo.Current)
+	}
+	if _, exists := updatedInfo.Versions["1.0.0"]; exists {
+		t.Fatalf("deleted version still exists: %+v", updatedInfo.Versions)
 	}
 }
 

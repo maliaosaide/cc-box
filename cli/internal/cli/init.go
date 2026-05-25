@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/user/cc-box/core/binary"
 	"github.com/user/cc-box/core/config"
 	"github.com/user/cc-box/core/crypto"
 	"github.com/user/cc-box/core/object"
@@ -225,6 +226,16 @@ func runInit(cmd *cobra.Command, args []string) (err error) {
 
 	// 创建首次快照
 	snap := snapshot.CreateSnapshot("", cfg.Device.ID, "initial sync", scanResult.Files)
+	if cfg.Binary.SyncEnabled {
+		version, uploadedBinary, err := binary.EnsureCurrentClaudeUploaded(client, key, nil)
+		if err != nil {
+			return err
+		}
+		binary.SetSnapshotClaudeVersion(snap, version)
+		if uploadedBinary {
+			fmt.Printf("已上传 Claude binary %s\n", version)
+		}
+	}
 	if err := uploadSnapshot(client, store, snap); err != nil {
 		return fmt.Errorf("上传快照失败: %w", err)
 	}

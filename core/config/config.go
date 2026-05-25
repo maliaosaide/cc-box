@@ -52,14 +52,16 @@ type ClaudeConfig struct {
 }
 
 type BinaryConfig struct {
-	Encrypt          bool   `mapstructure:"encrypt"`
-	ChunkMode        string `mapstructure:"chunk_mode"`
-	ChunkSizeMB      int    `mapstructure:"chunk_size_mb"`
-	ChunkThresholdMB int    `mapstructure:"chunk_threshold_mb"`
-	AutoUpload       bool   `mapstructure:"auto_upload"`
-	BinDir           string `mapstructure:"bin_dir"`
-	VersionsDir      string `mapstructure:"versions_dir"`
-	ClaudePath       string `mapstructure:"claude_path"`
+	Encrypt           bool   `mapstructure:"encrypt"`
+	ChunkMode         string `mapstructure:"chunk_mode"`
+	ChunkSizeMB       int    `mapstructure:"chunk_size_mb"`
+	ChunkThresholdMB  int    `mapstructure:"chunk_threshold_mb"`
+	AutoUpload        bool   `mapstructure:"auto_upload"`
+	SyncEnabled       bool   `mapstructure:"sync_enabled"`
+	AutoConfigurePath bool   `mapstructure:"auto_configure_path"`
+	BinDir            string `mapstructure:"bin_dir"`
+	VersionsDir       string `mapstructure:"versions_dir"`
+	ClaudePath        string `mapstructure:"claude_path"`
 }
 
 type ExcludeConfig struct {
@@ -269,6 +271,10 @@ func Load() (*Config, error) {
 	if cfg.Binary.VersionsDir == "" {
 		cfg.Binary.VersionsDir = v.GetString("binary.versionsdir")
 	}
+	if !v.IsSet("binary.sync_enabled") && v.IsSet("binary.auto_upload") {
+		cfg.Binary.SyncEnabled = cfg.Binary.AutoUpload
+	}
+	cfg.Binary.AutoUpload = cfg.Binary.SyncEnabled
 	return cfg, nil
 }
 
@@ -308,14 +314,15 @@ func Save(cfg *Config) error {
 		"json_path": cfg.Claude.JSONPath,
 	})
 	v.Set("binary", map[string]interface{}{
-		"encrypt":            cfg.Binary.Encrypt,
-		"chunk_mode":         cfg.Binary.ChunkMode,
-		"chunk_size_mb":      cfg.Binary.ChunkSizeMB,
-		"chunk_threshold_mb": cfg.Binary.ChunkThresholdMB,
-		"auto_upload":        cfg.Binary.AutoUpload,
-		"bin_dir":            cfg.Binary.BinDir,
-		"versions_dir":       cfg.Binary.VersionsDir,
-		"claude_path":        cfg.Binary.ClaudePath,
+		"encrypt":             cfg.Binary.Encrypt,
+		"chunk_mode":          cfg.Binary.ChunkMode,
+		"chunk_size_mb":       cfg.Binary.ChunkSizeMB,
+		"chunk_threshold_mb":  cfg.Binary.ChunkThresholdMB,
+		"sync_enabled":        cfg.Binary.SyncEnabled,
+		"auto_configure_path": cfg.Binary.AutoConfigurePath,
+		"bin_dir":             cfg.Binary.BinDir,
+		"versions_dir":        cfg.Binary.VersionsDir,
+		"claude_path":         cfg.Binary.ClaudePath,
 	})
 	v.Set("exclude", map[string]interface{}{
 		"patterns": cfg.Exclude.Patterns,
