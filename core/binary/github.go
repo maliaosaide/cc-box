@@ -30,14 +30,17 @@ var (
 )
 
 type GitHubClaudeRelease struct {
-	Version            string `json:"version"`
-	Tag                string `json:"tag"`
-	Name               string `json:"name"`
-	PublishedAt        string `json:"publishedAt"`
-	AssetName          string `json:"assetName"`
-	AssetSize          int64  `json:"assetSize"`
-	AssetDownloadURL   string `json:"assetDownloadUrl"`
-	ShasumsDownloadURL string `json:"shasumsDownloadUrl"`
+	Version                   string `json:"version"`
+	Tag                       string `json:"tag"`
+	Name                      string `json:"name"`
+	PublishedAt               string `json:"publishedAt"`
+	AssetName                 string `json:"assetName"`
+	AssetSize                 int64  `json:"assetSize"`
+	AssetDownloadURL          string `json:"assetDownloadUrl"`
+	ShasumsDownloadURL        string `json:"shasumsDownloadUrl"`
+	ShasumsSignatureURL       string `json:"shasumsSignatureUrl,omitempty"`
+	SignatureVerification     string `json:"signatureVerification"`
+	SignatureVerificationText string `json:"signatureVerificationText"`
 }
 
 type GitHubClaudeReleaseList struct {
@@ -172,19 +175,29 @@ func fetchGitHubClaudeReleases(ctx context.Context, limit int) ([]GitHubClaudeRe
 			if asset == nil || shasums == nil {
 				continue
 			}
+			signature := findGitHubAsset(rel.Assets, "SHASUMS256.txt.sig")
+			signatureURL := ""
+			signatureVerification := "unavailable"
+			if signature != nil {
+				signatureURL = signature.BrowserDownloadURL
+				signatureVerification = "not_verified"
+			}
 			version := cleanVersionToken(rel.TagName)
 			if version == "" {
 				continue
 			}
 			out = append(out, GitHubClaudeRelease{
-				Version:            version,
-				Tag:                rel.TagName,
-				Name:               rel.Name,
-				PublishedAt:        rel.PublishedAt.UTC().Format(time.RFC3339),
-				AssetName:          asset.Name,
-				AssetSize:          asset.Size,
-				AssetDownloadURL:   asset.BrowserDownloadURL,
-				ShasumsDownloadURL: shasums.BrowserDownloadURL,
+				Version:                   version,
+				Tag:                       rel.TagName,
+				Name:                      rel.Name,
+				PublishedAt:               rel.PublishedAt.UTC().Format(time.RFC3339),
+				AssetName:                 asset.Name,
+				AssetSize:                 asset.Size,
+				AssetDownloadURL:          asset.BrowserDownloadURL,
+				ShasumsDownloadURL:        shasums.BrowserDownloadURL,
+				ShasumsSignatureURL:       signatureURL,
+				SignatureVerification:     signatureVerification,
+				SignatureVerificationText: githubSignatureVerificationText(signatureVerification),
 			})
 			if len(out) >= limit {
 				break
@@ -214,6 +227,24 @@ func findGitHubAsset(assets []githubAPIAsset, name string) *githubAPIAsset {
 		}
 	}
 	return nil
+}
+
+func githubSignatureVerificationText(status string) string {
+	switch status {
+	case "not_verified":
+		return "未执行签名校验"
+	case "unavailable":
+		return "未找到签名文件"
+	default:
+		return status
+	}
+}
+
+func githubSignatureWarning(release *GitHubClaudeRelease) string {
+	if release != nil && release.ShasumsSignatureURL == "" {
+		return "GitHub Release 已完成 SHA256 校验；未找到 SHASUMS256.txt.sig，未执行签名校验"
+	}
+	return "GitHub Release 已完成 SHA256 校验；未执行 SHASUMS256.txt.sig 签名校验"
 }
 
 func downloadJSON(ctx context.Context, url string) ([]byte, error) {

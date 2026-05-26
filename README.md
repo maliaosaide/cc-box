@@ -8,7 +8,7 @@
 
 CC-Box 面向经常在多台电脑上使用 Claude Code 的用户：你不再需要手动复制 `~/.claude/`，不需要反复配置 MCP、skills、commands，也不需要担心某次同步把本地配置覆盖坏。它用类似 Git 的快照方式管理 Claude Code 配置，并通过 WebDAV 在多设备之间同步。
 
-当前版本：`v0.2.2`。这一版重点加固了同步安全、跨平台路径处理、二进制版本并发更新、GUI 单实例启动、托盘状态联动和配置文件页面筛选体验。
+当前版本：`v0.3.1`。这一版重点补齐 Claude binary 管理：支持官方最新版安装、GitHub Releases 指定版本安装、WebDAV 备份恢复，并把最终命令入口对齐到 Claude 官方 native install 布局。
 
 ## 为什么需要 CC-Box
 
@@ -33,7 +33,7 @@ CC-Box 要解决的就是这个问题：**让 Claude Code 的配置像代码一�
 | 端到端加密 | 上传前加密，远程只保存加密后的内容。 |
 | 冲突可处理 | 本地和远程同时修改时，不是简单覆盖，而是保留冲突并支持选择。 |
 | 安全同步语义 | HEAD 更新、二进制索引和初始化流程使用条件写入/锁，降低多设备并发覆盖风险。 |
-| 二进制版本管理 | Claude 可执行文件也能备份、下载、切换和清理。 |
+| Claude binary 管理 | 支持官方安装、GitHub 指定版本安装、WebDAV 备份恢复和本地切换。 |
 | 项目配置同步 | 支持项目级 `.claude.json`，多设备共享项目 MCP 配置。 |
 | CLI + GUI 双入口 | 自动化用 CLI，日常桌面管理用 GUI。 |
 
@@ -82,30 +82,70 @@ CC-Box 不是简单地把文件上传覆盖。每次 push 都会生成快照，�
 
 这意味着远程 WebDAV 存储里保存的是加密数据，而不是直接暴露的 Claude Code 配置内容。
 
-### 管理 Claude 二进制版本
+### 安装、备份和切换 Claude binary
 
-除了配置文件，CC-Box 也能管理 Claude 二进制文件：
+除了配置文件，CC-Box 也能管理 Claude binary：
 
-- 备份当前 Claude 可执行文件。
-- 上传到 WebDAV。
-- 下载指定历史版本。
-- 在本地切换版本。
-- 清理旧版本。
+- 一键执行官方安装器安装最新版。
+- 从 GitHub Releases 安装指定历史版本。
+- 备份当前本地 `claude(.exe)` 到 WebDAV。
+- 从 WebDAV 恢复已备份版本。
+- 在本地切换版本，必要时回滚到旧版本。
+- 清理不再需要的版本。
 
-这适合需要保留可用版本、回滚版本或在多台设备间统一二进制版本的用户。
+这适合需要保留可用版本、回滚版本，或在多台设备间统一 Claude binary 版本的用户。
 
 ### 同步项目级 `.claude.json`
 
 很多项目会有自己的 `.claude.json`，里面包含项目级 MCP、工具权限等配置。CC-Box 支持把这些项目配置也纳入同步范围，避免每台设备都重新配置一遍。
+
+## Claude binary 安装与版本控制
+
+CC-Box 的 binary 管理不是另起一套私有安装器，而是服务 Claude 官方 native install 布局。GitHub Releases 和 WebDAV 备份版本最终都会安装到官方命令入口：
+
+```text
+Windows: ~/.local/bin/claude.exe
+macOS/Linux: ~/.local/bin/claude
+```
+
+这意味着终端里通过 `PATH` 执行的 `claude`，应该就是 CC-Box 帮你安装或切换后的版本。
+
+### 三种安装来源
+
+| 来源 | 用途 | 说明 |
+| --- | --- | --- |
+| 官方安装 | 安装最新版 | 直接执行 Claude 官方安装命令；只安装最新版，不提供历史版本选择。 |
+| GitHub Releases | 安装指定版本 | 从 Claude 官方 GitHub Release 选择当前平台可用版本，适合回退、测试和固定版本。 |
+| WebDAV 备份 | 恢复已备份版本 | 恢复你之前通过 CC-Box 上传过的 binary，不依赖 GitHub 或官方安装源可用性。 |
+
+指定版本安装会先校验 binary 版本，再写入官方命令入口，并执行所选版本的 `claude(.exe) install` 初始化官方本地目录。初始化后 CC-Box 会再次覆盖回用户选择的 binary，并最终校验 `~/.local/bin/claude(.exe)` 仍是这个版本；失败时不会把半成品标记为已安装。
+
+### 当前支持的 GitHub Release 平台
+
+| 当前平台 | GitHub asset |
+| --- | --- |
+| Windows x64 | `claude-win32-x64.zip` |
+| macOS Apple Silicon | `claude-darwin-arm64.tar.gz` |
+| Linux x64 | `claude-linux-x64.tar.gz` |
+
+当前不支持 Windows ARM64、macOS Intel、Linux ARM64 和 Linux musl。CC-Box 只安装当前平台的 `claude` / `claude.exe`，不会跨平台安装 binary。
+
+### 安全和边界
+
+- GitHub Release 安装会校验 `SHASUMS256.txt` 中的 SHA256。
+- 如果没有可信验签链，界面会明确显示 `SHASUMS256.txt.sig` 未执行签名校验，不会把“下载了签名文件”当作已验签。
+- PATH 配置是 best-effort：配置失败只提示 warning，不回滚已安装 binary。
+- 如果当前 `claude` 看起来是 npm shim、脚本 shim 或其他包装文件，CC-Box 不会静默回退到私有目录；继续安装会替换官方目标路径下的入口。
+- binary 管理只处理 `claude(.exe)` 本体，不负责恢复 `~/.claude/`、`~/.claude.json`，也不安装 `uv`、`uvx`、Codex、Gemini 或其他工具。
 
 ## CLI 和 GUI 怎么选
 
 | 版本 | 适合谁 | 典型用途 |
 | --- | --- | --- |
 | CLI | 喜欢终端、脚本和自动化的用户 | 初始化、push/pull、查看状态、回滚、CI/脚本调用 |
-| GUI | 喜欢可视化操作的桌面用户 | 查看状态、处理冲突、浏览 diff、管理二进制、托盘常驻 |
+| GUI | 喜欢可视化操作的桌面用户 | 查看状态、处理冲突、浏览 diff、管理 binary、托盘常驻 |
 
-两个入口可以独立使用，但共享 `core/` 中的同步、加密、快照、WebDAV 和 Claude 二进制管理能力。你只想要命令行，就用 `cli/`；你只想用桌面界面，就用 `gui/`。
+两个入口可以独立使用，但共享 `core/` 中的同步、加密、快照、WebDAV 和 Claude binary 管理能力。你只想要命令行，就用 `cli/`；你只想用桌面界面，就用 `gui/`。
 
 ## 快速开始
 
@@ -123,16 +163,21 @@ go -C cli build -o build/bin/cc-box.exe ./cmd/cc-box/
 常用命令：
 
 ```bash
-cc-box init                 # 初始化 WebDAV、设备和加密密码
-cc-box status               # 查看同步状态
-cc-box push                 # 推送本地配置到远程
-cc-box pull                 # 拉取远程配置到本地
-cc-box sync                 # 拉取后推送
-cc-box log                  # 查看快照历史
-cc-box diff [FILE]          # 查看文件差异
-cc-box conflicts            # 查看冲突
-cc-box binary list          # 查看二进制版本
-cc-box project list         # 查看项目配置
+cc-box init                                      # 初始化 WebDAV、设备和加密密码
+cc-box status                                    # 查看同步状态
+cc-box push                                      # 推送本地配置到远程
+cc-box pull                                      # 拉取远程配置到本地
+cc-box sync                                      # 拉取后推送
+cc-box log                                       # 查看快照历史
+cc-box diff [FILE]                               # 查看文件差异
+cc-box conflicts                                 # 查看冲突
+cc-box binary list                               # 查看二进制版本
+cc-box binary push                               # 上传当前 Claude binary 到 WebDAV
+cc-box binary pull [VERSION]                     # 从 WebDAV 下载并安装指定版本
+cc-box binary switch <VERSION>                   # 切换到 WebDAV 中的指定版本
+cc-box binary install --source official --latest # 安装官方最新版
+cc-box binary install --source github --version 1.2.3 # 安装 GitHub 指定版本
+cc-box project list                              # 查看项目配置
 ```
 
 CLI 详细说明见：[cli/README.md](./cli/README.md)
@@ -141,7 +186,7 @@ CLI 详细说明见：[cli/README.md](./cli/README.md)
 
 ```bash
 cd gui
-wails build -clean -nopackage -m -nosyncgomod
+wails build
 ```
 
 构建后运行：
@@ -150,7 +195,7 @@ wails build -clean -nopackage -m -nosyncgomod
 gui/build/bin/cc-box-gui.exe
 ```
 
-GUI 版提供初始化向导、同步概览、文件 diff、冲突处理、二进制版本管理、项目配置管理、历史快照、设置页和系统托盘。桌面端支持单实例启动：重复打开时会唤起已有窗口；同步状态会同步反映到页面和托盘。
+GUI 版提供初始化向导、同步概览、文件 diff、冲突处理、binary 版本管理、项目配置管理、历史快照、设置页和系统托盘。binary 管理页区分 WebDAV 备份、GitHub Releases 和官方安装三个来源；桌面端支持单实例启动，重复打开时会唤起已有窗口，同步状态会同步反映到页面和托盘。
 
 GUI 详细说明见：[gui/README.md](./gui/README.md)
 
@@ -164,7 +209,7 @@ GUI 详细说明见：[gui/README.md](./gui/README.md)
 | 文件 diff | 支持 | 支持 |
 | 冲突处理 | 支持 | 支持 |
 | 加密密码管理 | 支持 | 支持 |
-| Claude 二进制管理 | 支持 | 支持 |
+| Claude binary 安装、备份和切换 | 支持 | 支持 |
 | 项目级 `.claude.json` 同步 | 支持 | 支持 |
 | 系统托盘 | 不适用 | 支持，状态与同步任务联动 |
 | 单实例桌面应用 | 不适用 | 支持，重复启动会唤起已有窗口 |
@@ -176,7 +221,7 @@ GUI 详细说明见：[gui/README.md](./gui/README.md)
 ```text
 cc-box/
 ├── core/                        # CLI 和 GUI 共享的核心能力
-│   ├── binary/                  # Claude 二进制上传、下载、索引和平台识别
+│   ├── binary/                  # Claude binary 安装、上传、下载、索引和平台识别
 │   ├── config/                  # 本地配置、路径和 keyring 适配
 │   ├── crypto/                  # 加密密码派生和数据加密
 │   ├── normalize/               # 跨平台路径和换行辅助处理
@@ -220,11 +265,11 @@ cc-box/
 
 ## 构建
 
-当前根目录没有统一构建脚本，CLI 和 GUI 分别在各自 module 中构建：
+当前根目录没有统一构建脚本，CLI 和 GUI 分别在各自 module 中构建。下面以 Windows 构建为例，macOS/Linux 可去掉 `.exe` 后缀并按目标平台运行 Wails 构建：
 
 ```bash
 go -C cli build -o build/bin/cc-box.exe ./cmd/cc-box/
-cd gui && wails build -clean -nopackage -m -nosyncgomod
+cd gui && wails build
 ```
 
 构建产物：
@@ -299,11 +344,11 @@ Clash 规则示例：
 
 当前仓库拆成三个 Go module：
 
-- `core/`：CLI 和 GUI 共享的数据能力，包括配置、加密、对象、快照、同步、WebDAV 和 Claude 二进制管理。
+- `core/`：CLI 和 GUI 共享的数据能力，包括配置、加密、对象、快照、同步、WebDAV 和 Claude binary 管理。
 - `cli/`：命令行应用，保留 Cobra 命令层和 CLI 专属逻辑。
 - `gui/`：Wails 桌面应用，保留窗口、托盘、前端绑定和 GUI 专属逻辑。
 
-根目录没有 Go module。只改命令行入口时进入 `cli/`，只改桌面体验时进入 `gui/`；改共享同步、加密、快照、WebDAV 或二进制能力时优先改 `core/`，并同时验证 CLI 和 GUI。
+根目录没有 Go module。只改命令行入口时进入 `cli/`，只改桌面体验时进入 `gui/`；改共享同步、加密、快照、WebDAV 或 binary 能力时优先改 `core/`，并同时验证 CLI 和 GUI。
 
 ## License
 

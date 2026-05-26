@@ -69,22 +69,22 @@ func TestResolveClaudeManagedPathUsesConfiguredBinary(t *testing.T) {
 	}
 }
 
-func TestResolveClaudeManagedPathDoesNotUseScriptShim(t *testing.T) {
+func TestResolveClaudeManagedPathUsesConfiguredPathEvenWhenMissing(t *testing.T) {
 	home := withResolveTempHome(t)
+	configured := filepath.Join(home, "npm", "claude.cmd")
 	cfg := config.DefaultConfig()
 	cfg.Binary.BinDir = filepath.Join(home, "managed")
-	cfg.Binary.ClaudePath = filepath.Join(home, "npm", "claude.cmd")
+	cfg.Binary.ClaudePath = configured
 	if err := config.Save(cfg); err != nil {
 		t.Fatal(err)
 	}
 
-	want := filepath.Join(config.LocalBinDir(), managedBinaryName("claude"))
-	if got := ResolveClaudeManagedPath(); got != want {
-		t.Fatalf("ResolveClaudeManagedPath() = %q, want %q", got, want)
+	if got := ResolveClaudeManagedPath(); got != configured {
+		t.Fatalf("ResolveClaudeManagedPath() = %q, want %q", got, configured)
 	}
 }
 
-func TestDefaultClaudeManagedPathAvoidsExistingShim(t *testing.T) {
+func TestDefaultClaudeManagedPathUsesLocalBinEvenWhenExistingFileIsShim(t *testing.T) {
 	home := withResolveTempHome(t)
 	cfg := config.DefaultConfig()
 	cfg.Binary.BinDir = filepath.Join(home, "managed")
@@ -99,7 +99,7 @@ func TestDefaultClaudeManagedPathAvoidsExistingShim(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := filepath.Join(config.CCBoxDir(), "bin", managedBinaryName("claude"))
+	want := filepath.Join(config.LocalBinDir(), managedBinaryName("claude"))
 	if got := ResolveClaudeManagedPath(); got != want {
 		t.Fatalf("ResolveClaudeManagedPath() = %q, want %q", got, want)
 	}

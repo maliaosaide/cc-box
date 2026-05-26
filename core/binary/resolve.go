@@ -73,19 +73,14 @@ func ResolveClaudeManagedPath() string {
 
 func configuredManagedPath(path string) (string, bool) {
 	path = expandBinaryPath(path)
-	info, err := os.Stat(path)
-	if err != nil || info.IsDir() || !info.Mode().IsRegular() || isScriptShim(path) {
+	if path == "" {
 		return "", false
 	}
 	return path, true
 }
 
 func defaultClaudeManagedPath() string {
-	path := filepath.Join(config.LocalBinDir(), managedBinaryName("claude"))
-	if isScriptShim(path) {
-		return filepath.Join(config.CCBoxDir(), "bin", managedBinaryName("claude"))
-	}
-	return path
+	return filepath.Join(config.LocalBinDir(), managedBinaryName("claude"))
 }
 
 func ClearClaudeResolutionCache() error {

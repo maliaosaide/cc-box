@@ -27,6 +27,9 @@ export namespace binary {
 	    assetSize: number;
 	    assetDownloadUrl: string;
 	    shasumsDownloadUrl: string;
+	    shasumsSignatureUrl?: string;
+	    signatureVerification: string;
+	    signatureVerificationText: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new GitHubClaudeRelease(source);
@@ -42,6 +45,9 @@ export namespace binary {
 	        this.assetSize = source["assetSize"];
 	        this.assetDownloadUrl = source["assetDownloadUrl"];
 	        this.shasumsDownloadUrl = source["shasumsDownloadUrl"];
+	        this.shasumsSignatureUrl = source["shasumsSignatureUrl"];
+	        this.signatureVerification = source["signatureVerification"];
+	        this.signatureVerificationText = source["signatureVerificationText"];
 	    }
 	}
 	export class GitHubClaudeReleaseList {

@@ -126,6 +126,11 @@ func printInstallResult(result *binary.ClaudeInstallResult) {
 	if result.CommandStatus.CommandPath != "" {
 		fmt.Printf("命令路径: %s\n", result.CommandStatus.CommandPath)
 	}
+	for _, warning := range result.Warnings {
+		if warning != "" {
+			fmt.Printf("警告: %s\n", warning)
+		}
+	}
 	if result.PathConfig != nil && result.PathConfig.Message != "" {
 		if result.PathConfig.Error != "" {
 			fmt.Printf("PATH 警告: %s\n", result.PathConfig.Message)

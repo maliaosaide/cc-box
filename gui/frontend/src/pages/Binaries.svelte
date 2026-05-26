@@ -57,7 +57,7 @@
   $: canLoadMoreGithub = githubVersions.length >= githubLimit
   $: versionTabs = [
     { id: 'local', label: '本地', count: localVersions.length },
-    { id: 'cloud', label: '云端', count: cloudVersions.length },
+    { id: 'cloud', label: 'WebDAV', count: cloudVersions.length },
     { id: 'github', label: 'GitHub', count: githubVersions.length },
     { id: 'official', label: '官方安装' },
   ]
@@ -293,13 +293,13 @@
   }
 
   function switchLabel(ver) {
-    if (ver.isLocal) return '使用'
-    return '下载并使用'
+    if (ver.isLocal) return '切换到此版本'
+    return '安装此版本'
   }
 
   function sourceEmptyText() {
     if (versionTab === 'local') return '暂无本地版本'
-    if (versionTab === 'cloud') return '暂无云端版本'
+    if (versionTab === 'cloud') return '暂无 WebDAV 备份版本'
     return '暂无版本记录'
   }
 </script>
@@ -399,19 +399,22 @@
                   on:click={uploadCurrent}>
             {#if currentUploaded}已上传
             {:else if uploadProgress && uploading === 'current'}上传中...
-            {:else}上传到云端{/if}
+            {:else}上传当前本地版本{/if}
           </button>
         </div>
       </div>
       {#if binData.binaryPath}
-        <div class="path-row font-mono">{binData.binaryPath}</div>
+        <div class="path-row font-mono">当前路径: {binData.binaryPath}</div>
+      {/if}
+      {#if binData.managedPath && binData.managedPath !== binData.binaryPath}
+        <div class="path-row font-mono">安装目标: {binData.managedPath}</div>
       {/if}
       <div class="path-meta">
         <span>来源: {sourceLabel(binData.binarySource)}</span>
         <span>命令状态: {commandStatusLabel(binData.commandStatus?.status)}</span>
       </div>
       {#if binData.binaryShim}
-        <div class="path-warn">检测到脚本 shim，仅用于版本显示，不支持上传为二进制版本。</div>
+        <div class="path-warn">当前 claude 命令入口看起来是脚本或 shim；继续安装会将安装目标替换为官方 native binary，不支持上传该 shim。</div>
       {/if}
       {#if !binData.localExists && !promptHidden}
         <div class="detect-panel">
@@ -436,7 +439,7 @@
         </div>
         <div class="storage-divider"></div>
         <div class="storage-item">
-          <span class="storage-label">云端</span>
+          <span class="storage-label">WebDAV</span>
           <span class="storage-value">{formatSize(storage.cloudTotal)} ({storage.cloudCount} 个)</span>
         </div>
       </div>
@@ -462,10 +465,10 @@
       {#if versionTab === 'github'}
         <div class="source-head">
           <div>
-            <p class="text-txt-primary text-sm font-medium">GitHub Release</p>
-            <p class="source-desc left">只显示当前平台可安装版本；优先展示缓存，后台刷新最新列表。</p>
+            <p class="text-txt-primary text-sm font-medium">GitHub Releases</p>
+            <p class="source-desc left">只显示当前平台可安装版本；安装时校验 SHASUMS256.txt 中的 SHA256，签名校验状态逐项显示。</p>
           </div>
-          <button class="btn-sm" disabled={githubRefreshing} on:click={refreshGitHub}>{githubRefreshing ? '刷新中...' : '刷新'}</button>
+          <button class="btn-sm" disabled={githubRefreshing} on:click={refreshGitHub}>{githubRefreshing ? '刷新中...' : '刷新版本列表'}</button>
         </div>
         {#if githubError}
           <div class="path-warn">{githubError}</div>
@@ -479,12 +482,12 @@
                 <div class="ver-dot"></div>
                 <div class="item-main">
                   <span class="item-name font-mono">{rel.version}</span>
-                  <span class="item-detail">{formatSize(rel.assetSize)} · {formatDate(rel.publishedAt)} · {rel.assetName}</span>
+                  <span class="item-detail">{formatSize(rel.assetSize)} · {formatDate(rel.publishedAt)} · {rel.assetName} · {rel.signatureVerificationText || '未执行签名校验'}</span>
                 </div>
                 <div class="item-tags"><span class="cloud-tag">GitHub</span></div>
                 <div class="item-actions">
                   <button class="btn-sm" disabled={!!githubInstallOpId} on:click={() => installGitHub(rel.version)}>
-                    {githubInstallOpId ? '安装中...' : '安装'}
+                    {githubInstallOpId ? '安装中...' : '安装此版本'}
                   </button>
                 </div>
               </div>
@@ -506,7 +509,7 @@
             </svg>
           </div>
           <p class="text-txt-primary text-sm font-medium">官方最新版</p>
-          <p class="source-desc">一键执行 Claude 官方安装流程，可能覆盖当前本地 Claude；安装前会尽量备份现有真实二进制。</p>
+          <p class="source-desc">官方安装只安装最新版；如需指定版本，请使用 GitHub Releases 或 WebDAV 备份版本。安装前会尽量备份现有真实二进制。</p>
           <button class="btn-sm btn-upload mt-4" disabled={!!officialInstallOpId} on:click={installOfficial}>{officialInstallOpId ? '安装中...' : '一键安装官方最新版'}</button>
         </div>
       {:else if visibleVersions.length > 0}
@@ -523,7 +526,7 @@
               </div>
               <div class="item-tags">
                 {#if ver.isLocal}<span class="loc-tag">本地</span>{/if}
-                {#if ver.isRemote}<span class="cloud-tag">云端</span>{/if}
+                {#if ver.isRemote}<span class="cloud-tag">WebDAV</span>{/if}
               </div>
               <div class="item-actions">
                 {#if ver.isCurrent}

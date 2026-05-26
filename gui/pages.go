@@ -949,7 +949,7 @@ func (a *App) GetBinaryPage() (*BinaryPageData, error) {
 		VersionsDir:    verDir,
 		LocalExists:    resolution.Valid,
 		CurrentVersion: resolution.Version,
-		CommandStatus:  binary.ClaudeCommandState(resolution.CurrentPath),
+		CommandStatus:  binary.ClaudeCommandState(resolution.ManagedPath),
 	}
 
 	data.LocalVersions = scanLocalVersions(verDir, data.CurrentVersion)

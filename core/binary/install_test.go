@@ -38,6 +38,7 @@ func resetInstallHooks(t *testing.T) {
 	oldConfigurePath := configureClaudePathForInstall
 	oldCommandState := commandStateForInstall
 	oldConfigureUserPath := configureUserPathDirForInstall
+	oldRunInstallSubcommand := runClaudeInstallSubcommandForInstall
 	oldGitHubAPIURL := githubClaudeReleasesAPIURL
 	oldGitHubDownload := githubDownloadURL
 	oldGitHubNow := githubNowUTC
@@ -51,6 +52,7 @@ func resetInstallHooks(t *testing.T) {
 		configureClaudePathForInstall = oldConfigurePath
 		commandStateForInstall = oldCommandState
 		configureUserPathDirForInstall = oldConfigureUserPath
+		runClaudeInstallSubcommandForInstall = oldRunInstallSubcommand
 		githubClaudeReleasesAPIURL = oldGitHubAPIURL
 		githubDownloadURL = oldGitHubDownload
 		githubNowUTC = oldGitHubNow
@@ -174,10 +176,16 @@ func TestInstallGitHubClaudeUsesInjectedDownloadsAndTempTarget(t *testing.T) {
 		backupPath = path
 		return nil
 	}
-	var detectedPath string
+	var detectedPaths []string
 	detectVersionForInstall = func(path string) (string, error) {
-		detectedPath = path
+		detectedPaths = append(detectedPaths, path)
 		return "2.0.0", nil
+	}
+	runClaudeInstallSubcommandForInstall = func(ctx context.Context, path string) ([]byte, error) {
+		if path != targetPath {
+			t.Fatalf("install subcommand path = %q, want %q", path, targetPath)
+		}
+		return []byte("initialized"), nil
 	}
 	var configuredPath bool
 	configureClaudePathForInstall = func() (*PathConfigureResult, error) {
@@ -214,10 +222,15 @@ func TestInstallGitHubClaudeUsesInjectedDownloadsAndTempTarget(t *testing.T) {
 	if strings.Join(downloaded, ",") != "fake://asset,fake://shasums" {
 		t.Fatalf("downloaded URLs = %v", downloaded)
 	}
-	if backupPath != targetPath || detectedPath == "" || detectedPath == targetPath || !strings.HasPrefix(detectedPath, filepath.Dir(targetPath)) || !configuredPath {
-		t.Fatalf("backup=%q detect=%q configured=%v, want backup target and temp validation", backupPath, detectedPath, configuredPath)
+	if len(detectedPaths) < 2 {
+		t.Fatalf("detected paths = %v, want temp and final target", detectedPaths)
 	}
-	if _, err := os.Stat(detectedPath); !os.IsNotExist(err) {
+	validationPath := detectedPaths[0]
+	finalPath := detectedPaths[len(detectedPaths)-1]
+	if backupPath != targetPath || validationPath == targetPath || !strings.HasPrefix(validationPath, filepath.Dir(targetPath)) || finalPath != targetPath || !configuredPath {
+		t.Fatalf("backup=%q detect=%v configured=%v, want backup target, temp validation, and final target", backupPath, detectedPaths, configuredPath)
+	}
+	if _, err := os.Stat(validationPath); !os.IsNotExist(err) {
 		t.Fatalf("validation temp path still exists: %v", err)
 	}
 }
@@ -262,6 +275,9 @@ func TestInstallGitHubClaudeReportsPathConfigureWarningWithoutFailing(t *testing
 		}
 	}
 	detectVersionForInstall = func(path string) (string, error) { return "2.0.0", nil }
+	runClaudeInstallSubcommandForInstall = func(ctx context.Context, path string) ([]byte, error) {
+		return []byte("initialized"), nil
+	}
 	configureClaudePathForInstall = func() (*PathConfigureResult, error) {
 		return nil, fmt.Errorf("profile locked")
 	}
@@ -318,6 +334,74 @@ func TestInstallClaudeBinaryDataDoesNotReplaceOnVersionMismatch(t *testing.T) {
 	}
 	if !bytes.Equal(got, oldData) {
 		t.Fatalf("target was replaced on mismatch: got %q want %q", got, oldData)
+	}
+}
+
+func TestInstallClaudeBinaryDataRunsInstallThenRestoresSelectedBinary(t *testing.T) {
+	resetInstallHooks(t)
+	home := withInstallTempHome(t)
+	targetPath := filepath.Join(home, "bin", managedBinaryName("claude"))
+	binaryData := []byte("selected claude binary")
+	installRan := false
+
+	backupExistingClaudeForInstall = func(path string) error { return nil }
+	detectVersionForInstall = func(path string) (string, error) { return "2.0.0", nil }
+	runClaudeInstallSubcommandForInstall = func(ctx context.Context, path string) ([]byte, error) {
+		installRan = true
+		if path != targetPath {
+			t.Fatalf("install subcommand path = %q, want %q", path, targetPath)
+		}
+		return []byte("initialized"), os.WriteFile(path, []byte("official launcher"), 0755)
+	}
+
+	version, err := InstallClaudeBinaryData(targetPath, binaryData, "2.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version != "2.0.0" || !installRan {
+		t.Fatalf("version=%q installRan=%v, want 2.0.0 and true", version, installRan)
+	}
+	installed, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(installed, binaryData) {
+		t.Fatalf("installed data = %q, want selected binary", installed)
+	}
+	for _, dir := range []string{config.LocalBinDir(), filepath.Dir(config.VersionsDir()), config.VersionsDir()} {
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			t.Fatalf("install dir %q not created: %v", dir, err)
+		}
+	}
+}
+
+func TestInstallClaudeBinaryDataRestoresOldFileWhenInstallFails(t *testing.T) {
+	resetInstallHooks(t)
+	home := withInstallTempHome(t)
+	targetPath := filepath.Join(home, "bin", managedBinaryName("claude"))
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	oldData := []byte("old claude binary")
+	if err := os.WriteFile(targetPath, oldData, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	backupExistingClaudeForInstall = func(path string) error { return nil }
+	detectVersionForInstall = func(path string) (string, error) { return "2.0.0", nil }
+	runClaudeInstallSubcommandForInstall = func(ctx context.Context, path string) ([]byte, error) {
+		return []byte("busy"), fmt.Errorf("file is busy")
+	}
+
+	if _, err := InstallClaudeBinaryData(targetPath, []byte("new claude binary"), "2.0.0"); err == nil {
+		t.Fatal("InstallClaudeBinaryData succeeded when install subcommand failed")
+	}
+	installed, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(installed, oldData) {
+		t.Fatalf("target was not restored: got %q want %q", installed, oldData)
 	}
 }
 
