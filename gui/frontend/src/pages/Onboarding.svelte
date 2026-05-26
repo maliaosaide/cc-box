@@ -21,7 +21,7 @@
   let passwordPreviewRequest = 0
   let submitting = false
   let errorMsg = ''
-  let joinBinarySync = false
+  $: progressStep = step === 3 ? 2 : step
 
   const presets = {
     jianguoyun: { label: '坚果云', url: 'https://dav.jianguoyun.com/dav/', root: 'cc-box' },
@@ -37,7 +37,39 @@
     } catch (e) { /* ignore */ }
   })
 
-  function selectMode(m) { mode = m; step = 1; errorMsg = ''; passwordPreview = null }
+  function selectMode(m) {
+    mode = m
+    step = 1
+    errorMsg = ''
+    password = ''
+    confirmPassword = ''
+    passwordPreview = null
+    passwordPreviewLoading = false
+    clearTimeout(passwordPreviewTimer)
+  }
+
+  function backToModeSelect() {
+    step = 0
+    mode = ''
+    errorMsg = ''
+    testResult = null
+    passwordPreview = null
+    passwordPreviewLoading = false
+    clearTimeout(passwordPreviewTimer)
+  }
+
+  function backToConnection() {
+    step = 1
+    errorMsg = ''
+    passwordPreview = null
+    passwordPreviewLoading = false
+    clearTimeout(passwordPreviewTimer)
+  }
+
+  function formatError(e, fallback) {
+    if (typeof e === 'string') return e
+    return e?.message || e?.error || String(e || fallback)
+  }
 
   function applyPreset(key) {
     preset = key
@@ -95,15 +127,10 @@
       if (mode === 'new') {
         await InitNewDevice(webdav.url, webdav.username, webdav.password, webdav.root, password, deviceName)
       } else {
-        const joinWithBinary = window?.go?.main?.App?.InitJoinExistingWithBinary
-        if (joinWithBinary) {
-          await joinWithBinary(webdav.url, webdav.username, webdav.password, webdav.root, password, deviceName, joinBinarySync)
-        } else {
-          await InitJoinExisting(webdav.url, webdav.username, webdav.password, webdav.root, password, deviceName)
-        }
+        await InitJoinExisting(webdav.url, webdav.username, webdav.password, webdav.root, password, deviceName)
       }
       dispatch('complete')
-    } catch (e) { errorMsg = e.message || '初始化失败' }
+    } catch (e) { errorMsg = formatError(e, '初始化失败') }
     submitting = false
   }
 </script>
@@ -146,7 +173,7 @@
             </div>
             <div class="text-left">
               <div class="text-txt-primary font-medium text-sm">加入已有同步组</div>
-              <div class="text-txt-muted text-xs mt-0.5">从其他设备恢复，需要输入已有加密密码</div>
+              <div class="text-txt-muted text-xs mt-0.5">连接已有同步组，加入后再选择恢复方式</div>
             </div>
           </button>
         </div>
@@ -154,7 +181,7 @@
 
     {:else if step === 1}
       <div class="animate-fade-in">
-        <button class="back-btn" on:click={() => { step = 0; testResult = null }}>
+        <button class="back-btn" on:click={backToModeSelect}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M15 18l-6-6 6-6"/>
           </svg>
@@ -232,12 +259,15 @@
 
     {:else if step === 2 || step === 3}
       <div class="animate-fade-in">
-        <button class="back-btn" on:click={() => { step = 1; errorMsg = '' }}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M15 18l-6-6 6-6"/>
-          </svg>
-          返回
-        </button>
+        <div class="nav-row">
+          <button class="back-btn" on:click={backToConnection}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M15 18l-6-6 6-6"/>
+            </svg>
+            返回
+          </button>
+          <button class="switch-mode-btn" on:click={backToModeSelect}>更换初始化方式</button>
+        </div>
 
         <h2 class="section-title mb-1">
           {step === 2 ? '设置加密密码' : '输入已有加密密码'}
@@ -245,7 +275,7 @@
         <p class="text-txt-muted text-sm mb-8">
           {step === 2
             ? '加密密码将用于端到端加密，所有设备需使用相同加密密码。'
-            : '加密密码将用于解密云端已有数据。'}
+            : '加密密码将用于验证云端数据。加入后可在主页面选择恢复方式。'}
         </p>
 
         <div class="space-y-5">
@@ -284,16 +314,6 @@
             <input id="devicename" class="input" type="text" bind:value={deviceName} />
           </div>
 
-          {#if step === 3}
-            <label class="check-card">
-              <input type="checkbox" bind:checked={joinBinarySync} />
-              <span>
-                <strong>同时恢复 Claude binary</strong>
-                <em>开启后会按最新快照记录恢复当前平台 Claude binary；云端缺失时会停止初始化。</em>
-              </span>
-            </label>
-          {/if}
-
           {#if errorMsg}
             <div class="error-msg">{errorMsg}</div>
           {/if}
@@ -303,14 +323,14 @@
               <svg class="w-4 h-4 flex-shrink-0 mt-0.5" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 14a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm1-5.5h-2V7h2v3.5z"/>
               </svg>
-              <span>{joinBinarySync ? '加密密码验证通过后将自动拉取最新配置，并恢复快照记录的当前平台 Claude binary' : '加密密码验证通过后将自动拉取最新配置；Claude binary 可稍后在二进制页面恢复'}</span>
+              <span>完成后不会立即覆盖本机配置。你可以在主页面选择拉取最新配置、恢复历史快照，或到二进制页面恢复 Claude binary。</span>
             </div>
           {/if}
 
           <div class="flex justify-end gap-3 pt-1">
             <button class="btn-primary" on:click={submit}
                     disabled={!password || (step === 2 && password !== confirmPassword) || submitting}>
-              {submitting ? '初始化中...' : '完成'}
+              {submitting ? '处理中...' : (step === 3 ? '加入同步组' : '完成')}
               {#if !submitting}
                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M5 12h14M12 5l7 7-7 7"/>
@@ -324,7 +344,7 @@
 
     <div class="flex items-center justify-center gap-2 mt-10">
       {#each [0, 1, 2] as i}
-        <div class="step-dot" class:done={step >= i} class:current={step === i}></div>
+        <div class="step-dot" class:done={progressStep >= i} class:current={progressStep === i}></div>
       {/each}
     </div>
   </div>
@@ -334,10 +354,11 @@
   .onboard-wrap {
     height: 100%;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
     position: relative;
-    overflow: hidden;
+    overflow-y: auto;
+    padding: 32px 0;
     background: rgb(var(--surface-0));
   }
 
@@ -355,6 +376,7 @@
     width: 100%;
     max-width: 440px;
     padding: 0 32px;
+    margin: auto 0;
   }
 
   .onboard-logo {
@@ -411,6 +433,13 @@
     color: rgb(var(--state-sync));
   }
 
+  .nav-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+
   .back-btn {
     display: flex;
     align-items: center;
@@ -424,8 +453,20 @@
     transition: color 0.2s;
     font-family: 'Plus Jakarta Sans', sans-serif;
   }
+  .nav-row .back-btn { margin-bottom: 0; }
   .back-btn:hover { color: rgb(var(--text-secondary)); }
   .back-btn svg { width: 16px; height: 16px; }
+  .switch-mode-btn {
+    font-size: 12px;
+    color: rgb(var(--text-muted));
+    background: rgb(var(--surface-1));
+    border: 1px solid rgb(var(--border));
+    border-radius: 999px;
+    padding: 5px 10px;
+    cursor: pointer;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+  }
+  .switch-mode-btn:hover { color: rgb(var(--text-secondary)); background: rgb(var(--surface-2)); }
 
   .test-result {
     display: flex;
@@ -439,22 +480,6 @@
   .test-err { background: rgba(184,92,92,0.08); color: rgb(var(--state-err)); }
 
   .hint { margin-top: 6px; font-size: 12px; color: rgb(var(--text-muted)); opacity: 0.7; }
-  .check-card {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    padding: 12px 14px;
-    border-radius: 10px;
-    border: 1px solid rgb(var(--border));
-    background: rgb(var(--surface-1));
-    color: rgb(var(--text-secondary));
-    font-size: 13px;
-    cursor: pointer;
-  }
-  .check-card input { margin-top: 2px; accent-color: rgb(var(--accent)); }
-  .check-card span { display: flex; flex-direction: column; gap: 3px; }
-  .check-card strong { color: rgb(var(--text-primary)); font-weight: 500; }
-  .check-card em { color: rgb(var(--text-muted)); font-size: 11px; font-style: normal; line-height: 1.5; }
   .fingerprint-preview {
     margin-top: 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
     font-size: 12px; color: rgb(var(--text-muted));

@@ -121,6 +121,12 @@ func (s *Store) Upload(data []byte) (string, error) {
 		}
 	}
 
+	if exists, err := s.Exists(hash); err != nil {
+		return "", fmt.Errorf("验证 object 上传结果失败: %w", err)
+	} else if !exists {
+		return "", fmt.Errorf("上传 object 后远程不可用: %s", hash)
+	}
+
 	// 标记为已知，后续同 hash 跳过
 	if s.knownHashes != nil {
 		s.knownHashes["_uploaded_"+hash] = true

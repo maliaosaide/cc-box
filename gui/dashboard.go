@@ -405,6 +405,14 @@ func (a *App) QuickPush() int64 {
 		}
 
 		if len(changes) == 0 && !binaryChanged {
+			repaired, err := a.ensureRemoteSnapshotObjects(ctx, opID, "quick-push", client, key, scanResult.Files)
+			if err != nil {
+				return err
+			}
+			if repaired > 0 {
+				a.emitProgress(opID, "quick-push", 1, 1, 1, 1, fmt.Sprintf("已补传 %d 个缺失文件", repaired))
+				return nil
+			}
 			a.emitProgress(opID, "quick-push", 1, 1, 1, 1, "没有变更需要推送")
 			return nil
 		}

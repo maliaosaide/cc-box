@@ -348,6 +348,55 @@ func requireCompleteScan(scanResult *snapshot.ScanResult) error {
 	return nil
 }
 
+func (a *App) ensureRemoteSnapshotObjects(ctx context.Context, opID int64, operation string, client *webdav.Client, key []byte, files map[string]snapshot.FileEntry) (int, error) {
+	paths := make([]string, 0, len(files))
+	for path := range files {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+
+	store := object.NewStore(client, key, config.CCBoxDir()+"/cache/objects")
+	uploaded := 0
+	for i, path := range paths {
+		select {
+		case <-ctx.Done():
+			return uploaded, ctx.Err()
+		default:
+		}
+
+		entry := files[path]
+		exists, err := store.Exists(entry.Hash)
+		if err != nil {
+			return uploaded, fmt.Errorf("检查远程 object %s 失败: %w", path, err)
+		}
+		if exists {
+			continue
+		}
+
+		fullPath, err := safeClaudePath(path)
+		if err != nil {
+			return uploaded, err
+		}
+		data, err := readObjectData(fullPath)
+		if err != nil {
+			return uploaded, fmt.Errorf("读取文件 %s 失败: %w", path, err)
+		}
+		if hash := object.ComputeHash(data); hash != entry.Hash {
+			return uploaded, fmt.Errorf("文件 %s hash 不一致", path)
+		}
+		if hash, err := store.Upload(data); err != nil {
+			return uploaded, fmt.Errorf("补传文件 %s 失败: %w", path, err)
+		} else if hash != entry.Hash {
+			return uploaded, fmt.Errorf("文件 %s hash 不一致", path)
+		}
+		uploaded++
+		if opID != 0 {
+			a.emitProgress(opID, operation, int64(i+1), int64(len(paths)), i+1, len(paths), fmt.Sprintf("补传 %s", path))
+		}
+	}
+	return uploaded, nil
+}
+
 func isFileTreeExcluded(relPath string, isDir bool, patterns []string) bool {
 	for _, pattern := range patterns {
 		if matchFileTreeExclude(relPath, pattern, isDir) {
@@ -932,6 +981,14 @@ func (a *App) doBulkPush(ctx context.Context, opID int64, cfg *config.Config, cl
 	}
 
 	if len(changes) == 0 && !binaryChanged {
+		repaired, err := a.ensureRemoteSnapshotObjects(ctx, opID, "bulk-push", client, key, scanResult.Files)
+		if err != nil {
+			return err
+		}
+		if repaired > 0 {
+			a.emitProgress(opID, "bulk-push", 1, 1, 1, 1, fmt.Sprintf("已补传 %d 个缺失文件", repaired))
+			return nil
+		}
 		a.emitProgress(opID, "bulk-push", 1, 1, 1, 1, "没有变更需要推送")
 		return nil
 	}

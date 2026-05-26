@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -187,7 +186,7 @@ func (a *App) InitNewDevice(url, username, password, root, encPassword, deviceNa
 	return nil
 }
 
-// InitJoinExisting 加入已有同步组：验证密码 + 拉取最新快照
+// InitJoinExisting 加入已有同步组：验证密码并保存连接状态
 func (a *App) InitJoinExisting(url, username, password, root, encPassword, deviceName string) error {
 	return a.initJoinExisting(url, username, password, root, encPassword, deviceName, false)
 }
@@ -206,8 +205,6 @@ func (a *App) initJoinExisting(url, username, password, root, encPassword, devic
 	if deviceName != "" {
 		cfg.Device.Name = deviceName
 	}
-	cfg.Binary.SyncEnabled = syncBinary
-	cfg.Binary.AutoUpload = syncBinary
 
 	// 创建本地目录
 	if err := config.InitCCBoxDir(); err != nil {
@@ -243,57 +240,17 @@ func (a *App) initJoinExisting(url, username, password, root, encPassword, devic
 	if err != nil {
 		return fmt.Errorf("下载快照失败: %w", err)
 	}
-	_, err = decryptRemoteData(encData, key)
+	decrypted, err := decryptRemoteData(encData, key)
 	if err != nil {
 		return fmt.Errorf("密码验证失败：与远程数据不匹配")
+	}
+	if _, err := snapshot.Deserialize(decrypted); err != nil {
+		return fmt.Errorf("解析快照失败: %w", err)
 	}
 
 	// 保存密钥
 	if err := crypto.SaveKey(key, config.KeyPath()); err != nil {
 		return fmt.Errorf("保存密钥失败: %w", err)
-	}
-
-	// 拉取最新快照的文件到本地
-	decrypted, _ := decryptRemoteData(encData, key)
-	remoteSnap, err := snapshot.Deserialize(decrypted)
-	if err != nil {
-		return fmt.Errorf("解析快照失败: %w", err)
-	}
-
-	store := object.NewStore(client, key, config.CCBoxDir()+"/cache/objects")
-	for path, entry := range remoteSnap.Files {
-		data, err := store.Download(entry.Hash)
-		if err != nil {
-			return fmt.Errorf("下载文件 %s 失败: %w", path, err)
-		}
-		fullPath, err := safeClaudePath(path)
-		if err != nil {
-			return err
-		}
-		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-			return fmt.Errorf("创建目录失败: %w", err)
-		}
-		if err := os.WriteFile(fullPath, data, 0600); err != nil {
-			return fmt.Errorf("写入文件 %s 失败: %w", path, err)
-		}
-	}
-
-	if syncBinary {
-		plan, err := binary.PlanClaudeRestore(client, key, remoteSnap, binary.ClaudeRestoreExact)
-		if err != nil {
-			return err
-		}
-		if plan.Action == binary.ClaudeActionUnavailable {
-			return fmt.Errorf("快照需要 Claude %s，但云端没有当前平台可用版本", plan.TargetVersion)
-		}
-		if err := binary.ApplyClaudeRestore(client, key, plan, nil); err != nil {
-			return err
-		}
-	}
-
-	// 更新本地 HEAD
-	if err := os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(remoteHead), 0600); err != nil {
-		return fmt.Errorf("写入本地 HEAD 失败: %w", err)
 	}
 	if err := os.WriteFile(config.CCBoxDir()+"/snapshots/"+remoteHead+".json", decrypted, 0600); err != nil {
 		return fmt.Errorf("缓存快照失败: %w", err)

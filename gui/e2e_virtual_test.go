@@ -19,6 +19,7 @@ import (
 
 	"github.com/user/cc-box/core/config"
 	"github.com/user/cc-box/core/crypto"
+	"github.com/user/cc-box/core/object"
 )
 
 const virtualWebDAVPassword = "webdav-pass"
@@ -86,9 +87,14 @@ func TestVirtualGUIWorkflowWithBinaryLifecycle(t *testing.T) {
 
 	writeFakeClaude(t, filepath.Join(deviceB.binDir, binaryName()), "0.9.0-test", "fake-claude-v0")
 	activateDevice(t, deviceB)
-	if err := deviceB.app.InitJoinExistingWithBinary(baseURL, "user", virtualWebDAVPassword, root, "old-secret", "device-b", true); err != nil {
-		t.Fatalf("InitJoinExistingWithBinary: %v", err)
+	if err := deviceB.app.InitJoinExisting(baseURL, "user", virtualWebDAVPassword, root, "old-secret", "device-b"); err != nil {
+		t.Fatalf("InitJoinExisting: %v", err)
 	}
+	assertFileMissing(t, filepath.Join(deviceB.claudeDir, "settings.json"))
+	if err := deviceB.app.SetConfigField("binary", "sync_enabled", "true"); err != nil {
+		t.Fatalf("enable device B binary sync: %v", err)
+	}
+	waitAsyncSuccess(t, deviceB.app.QuickPull())
 	assertFileContent(t, filepath.Join(deviceB.claudeDir, "settings.json"), `{"theme":"light"}`)
 	if got := runFakeClaude(t, filepath.Join(deviceB.binDir, binaryName())); got != "fake-claude-v1" {
 		t.Fatalf("device B remote binary output = %q", got)
@@ -184,6 +190,101 @@ func TestVirtualGUIWorkflowWithBinaryLifecycle(t *testing.T) {
 	if got := runFakeClaude(t, filepath.Join(deviceB.binDir, binaryName())); got != "fake-claude-v1" {
 		t.Fatalf("remote binary after saving password = %q", got)
 	}
+}
+
+func TestInitJoinExistingWithoutBinary(t *testing.T) {
+	preserveEnv(t, "HOME", "USERPROFILE", "CC_BOX_WEBDAV_PASSWORD")
+	webdavServer := newVirtualWebDAVServer(t)
+	baseURL := webdavServer.server.URL + "/dav"
+	root := "/cc-box-join-no-binary/"
+	content := `{"theme":"light"}`
+
+	deviceA := newVirtualDevice(t)
+	deviceB := newVirtualDevice(t)
+	writeTextFile(t, filepath.Join(deviceA.claudeDir, "settings.json"), content)
+
+	activateDevice(t, deviceA)
+	if err := deviceA.app.InitNewDevice(baseURL, "user", virtualWebDAVPassword, root, "secret", "device-a"); err != nil {
+		t.Fatalf("InitNewDevice: %v", err)
+	}
+
+	activateDevice(t, deviceB)
+	preview, err := deviceB.app.PreviewSetupEncryptionPassword(baseURL, "user", virtualWebDAVPassword, root, "secret")
+	if err != nil || preview.Status != "success" {
+		t.Fatalf("PreviewSetupEncryptionPassword = %+v, %v", preview, err)
+	}
+	if err := deviceB.app.InitJoinExistingWithBinary(baseURL, "user", virtualWebDAVPassword, root, "secret", "device-b", false); err != nil {
+		t.Fatalf("InitJoinExistingWithBinary without binary: %v", err)
+	}
+	assertFileMissing(t, filepath.Join(deviceB.claudeDir, "settings.json"))
+	dashboard, err := deviceB.app.GetDashboard()
+	if err != nil {
+		t.Fatalf("GetDashboard: %v", err)
+	}
+	if dashboard.SyncStatus != "pending" || dashboard.SyncHealth.Code != "head_mismatch" {
+		t.Fatalf("SyncHealth = %+v, want pending head_mismatch", dashboard.SyncHealth)
+	}
+	waitAsyncSuccess(t, deviceB.app.QuickPull())
+	assertFileContent(t, filepath.Join(deviceB.claudeDir, "settings.json"), content)
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load config: %v", err)
+	}
+	if cfg.Binary.SyncEnabled {
+		t.Fatalf("Binary.SyncEnabled = true, want false")
+	}
+}
+
+func TestQuickPushRepairsMissingRemoteObjectReferencedBySnapshot(t *testing.T) {
+	preserveEnv(t, "HOME", "USERPROFILE", "CC_BOX_WEBDAV_PASSWORD")
+	webdavServer := newVirtualWebDAVServer(t)
+	baseURL := webdavServer.server.URL + "/dav"
+	root := "/cc-box-repair-missing-object/"
+	content := `{"theme":"light"}`
+
+	deviceA := newVirtualDevice(t)
+	deviceB := newVirtualDevice(t)
+	deviceC := newVirtualDevice(t)
+	writeTextFile(t, filepath.Join(deviceA.claudeDir, "settings.json"), content)
+
+	activateDevice(t, deviceA)
+	if err := deviceA.app.InitNewDevice(baseURL, "user", virtualWebDAVPassword, root, "secret", "device-a"); err != nil {
+		t.Fatalf("InitNewDevice: %v", err)
+	}
+	initialHead := readHead(t)
+	hash := object.ComputeHash([]byte(content))
+	deleteRemoteObject(t, webdavServer, hash)
+
+	activateDevice(t, deviceB)
+	preview, err := deviceB.app.PreviewSetupEncryptionPassword(baseURL, "user", virtualWebDAVPassword, root, "secret")
+	if err != nil || preview.Status != "success" {
+		t.Fatalf("PreviewSetupEncryptionPassword = %+v, %v", preview, err)
+	}
+	if err := deviceB.app.InitJoinExistingWithBinary(baseURL, "user", virtualWebDAVPassword, root, "secret", "device-b", false); err != nil {
+		t.Fatalf("InitJoinExistingWithBinary with missing object: %v", err)
+	}
+	assertFileMissing(t, filepath.Join(deviceB.claudeDir, "settings.json"))
+	pullErr := waitAsyncError(t, deviceB.app.QuickPull())
+	if pullErr == nil || !strings.Contains(pullErr.Error(), "下载文件 settings.json 失败") {
+		t.Fatalf("QuickPull error = %v, want missing object failure", pullErr)
+	}
+
+	activateDevice(t, deviceA)
+	waitAsyncSuccess(t, deviceA.app.QuickPush())
+	if head := readHead(t); head != initialHead {
+		t.Fatalf("QuickPush HEAD = %q, want %q", head, initialHead)
+	}
+	if !remoteObjectExists(t, webdavServer, hash) {
+		t.Fatalf("remote object %s was not repaired", hash)
+	}
+
+	activateDevice(t, deviceC)
+	if err := deviceC.app.InitJoinExistingWithBinary(baseURL, "user", virtualWebDAVPassword, root, "secret", "device-c", false); err != nil {
+		t.Fatalf("InitJoinExistingWithBinary after repair: %v", err)
+	}
+	assertFileMissing(t, filepath.Join(deviceC.claudeDir, "settings.json"))
+	waitAsyncSuccess(t, deviceC.app.QuickPull())
+	assertFileContent(t, filepath.Join(deviceC.claudeDir, "settings.json"), content)
 }
 
 func TestDashboardMarksMissingRemoteHeadUninitialized(t *testing.T) {
@@ -510,6 +611,40 @@ func assertFileContent(t *testing.T, filePath, want string) {
 	if got := string(data); got != want {
 		t.Fatalf("%s = %q, want %q", filePath, got, want)
 	}
+}
+
+func assertFileMissing(t *testing.T, filePath string) {
+	t.Helper()
+	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
+		t.Fatalf("%s exists or stat failed with unexpected error: %v", filePath, err)
+	}
+}
+
+func deleteRemoteObject(t *testing.T, server *virtualWebDAVServer, hash string) {
+	t.Helper()
+	suffix := object.ObjectPath(hash)
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	for key := range server.files {
+		if strings.HasSuffix(key, suffix) {
+			delete(server.files, key)
+			return
+		}
+	}
+	t.Fatalf("remote object %s not found", suffix)
+}
+
+func remoteObjectExists(t *testing.T, server *virtualWebDAVServer, hash string) bool {
+	t.Helper()
+	suffix := object.ObjectPath(hash)
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	for key := range server.files {
+		if strings.HasSuffix(key, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 func binaryName() string {
