@@ -14,6 +14,7 @@
   let error = ''
   let msg = ''
   let msgTimer = null
+  let refreshing = false
   let switching = ''
   let uploading = ''
   let uploadOpId = null
@@ -128,7 +129,9 @@
   }
 
   async function loadBinary() {
-    loading = true; error = ''
+    if (!binData) loading = true
+    else refreshing = true
+    error = ''
     try {
       const [page, stats] = await Promise.all([GetBinaryPage(), GetBinaryStorage()])
       binData = page
@@ -136,6 +139,7 @@
     }
     catch (e) { error = e.message || String(e) }
     loading = false
+    refreshing = false
   }
 
   async function loadGitHubCache() {
@@ -226,11 +230,16 @@
   async function switchTo(version, source) {
     switching = version + '-' + source
     msg = ''; error = ''
+    if (source === 'remote') {
+      externalProgress = { operation: 'binary-switch', message: `正在从 WebDAV 下载版本 ${version}...`, percent: 0 }
+    }
     try {
       await SwitchBinaryVersion(version, source)
       showMsg(`已切换到 ${version}`)
+      externalProgress = null
       await loadBinary()
     } catch (e) {
+      externalProgress = null
       error = e.message || String(e)
     }
     switching = ''
@@ -434,7 +443,7 @@
   {:else if binData}
     <div class="card animate-fade-in stagger-1">
       <div class="section-label-row">
-        <span class="section-label">当前版本</span>
+        <span class="section-label">当前版本{#if refreshing}<span class="refreshing-dot"></span>{/if}</span>
         <span class="font-mono text-xs text-txt-muted">{binData.platform}</span>
       </div>
       <div class="current-row">
@@ -728,6 +737,15 @@
   .section-label {
     font-size: 11px; font-weight: 600; text-transform: uppercase;
     letter-spacing: 0.05em; color: rgb(var(--text-muted));
+  }
+  .refreshing-dot {
+    display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+    background: rgb(var(--accent)); margin-left: 6px; vertical-align: middle;
+    animation: pulse-dot 1s ease-in-out infinite;
+  }
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 1; }
   }
 
   .current-row {
