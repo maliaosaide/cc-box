@@ -620,6 +620,14 @@
         <div class="empty-compact">{sourceEmptyText()}</div>
       {/if}
     </div>
+  {:else}
+    <div class="card animate-fade-in">
+      <div class="text-center py-16">
+        <p class="text-txt-primary text-sm font-medium mt-2">无法加载二进制信息</p>
+        <p class="text-txt-muted text-xs mt-1">{error || '请检查 Claude 是否已安装'}</p>
+        <button class="btn-sm mt-3" on:click={loadBinary}>重试</button>
+      </div>
+    </div>
   {/if}
 </div>
 

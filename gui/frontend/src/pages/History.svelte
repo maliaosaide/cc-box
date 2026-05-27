@@ -11,6 +11,7 @@
   let loading = true
   let error = ''
   let msg = ''
+  let msgTimer = null
   let expandedId = ''
   let detail = null
   let detailLoading = false
@@ -84,6 +85,12 @@
     if (requestId === detailRequestId && expandedId === id) detailLoading = false
   }
 
+  function showMsg(text) {
+    clearTimeout(msgTimer)
+    msg = text
+    msgTimer = setTimeout(() => { msg = '' }, 4000)
+  }
+
   async function rollback(snap) {
     const id = snap.id
     const label = snap.shortId || id.slice(0, 12)
@@ -91,7 +98,7 @@
     msg = ''; error = ''
     try {
       await RevertToSnapshot(id)
-      msg = '已回滚到快照 ' + label
+      showMsg('已回滚到快照 ' + label)
       await refresh()
     } catch (e) {
       error = e.message || String(e)
@@ -117,7 +124,7 @@
   {#if msg}
     <div class="msg-bar animate-fade-in">
       <span>{msg}</span>
-      <button class="link-btn" on:click={() => msg = ''}>关闭</button>
+      <button class="link-btn" on:click={() => { clearTimeout(msgTimer); msg = '' }}>关闭</button>
     </div>
   {/if}
 

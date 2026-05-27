@@ -24,6 +24,8 @@
   let diffResult = null
   let conflictDetail = null
   let failureDetail = null
+  let conflictExpanded = false
+  let resolveLoading = false
   let conflictChoice = ''
   let view = 'content'
   let actionLoading = false
@@ -140,15 +142,23 @@
     }
   }
 
+  function conflictTruncated(text) {
+    if (!text) return ''
+    const max = conflictExpanded ? 500000 : 2000
+    if (text.length <= max) return text
+    return text.slice(0, max) + '\n\n... (文件过长，已截断，点击下方"显示全文"查看完整内容)'
+  }
+
   async function resolveConflict(choice) {
-    if (!selectedPath || !conflictDetail) return
-    conflictChoice = choice
+    if (!selectedPath || !conflictDetail || resolveLoading) return
+    resolveLoading = true
     try {
       if (choice === 'merged') await SaveMergedConflict(selectedPath, conflictDetail.merged || conflictDetail.local)
       else await ResolveConflict(selectedPath, choice)
       await refreshTree()
-      selectedPath = ''; conflictDetail = null; failureDetail = null; view = 'content'
+      selectedPath = ''; conflictDetail = null; failureDetail = null; view = 'content'; conflictChoice = ''
     } catch (e) { error = e.message || String(e) }
+    resolveLoading = false
   }
 
   async function confirmExclude() {
@@ -319,7 +329,7 @@
                   </button>
                   <span class="version-time">{conflictDetail.localExists ? (conflictDetail.localModified || '时间未知') : '本地已删除'}</span>
                 </div>
-                <pre class="conflict-code">{conflictDetail.localExists ? (conflictDetail.local || '(空)') : '(本地已删除)'}</pre>
+                <pre class="conflict-code">{conflictDetail.localExists ? conflictTruncated(conflictDetail.local || '(空)') : '(本地已删除)'}</pre>
               </div>
               <div class="conflict-col">
                 <div class="conflict-col-header">
@@ -328,13 +338,18 @@
                   </button>
                   <span class="version-time">{conflictDetail.remoteExists ? (conflictDetail.remoteModified || '时间未知') : '远程已删除'}</span>
                 </div>
-                <pre class="conflict-code">{conflictDetail.remoteExists ? (conflictDetail.remote || '(空)') : '(远程已删除)'}</pre>
+                <pre class="conflict-code">{conflictDetail.remoteExists ? conflictTruncated(conflictDetail.remote || '(空)') : '(远程已删除)'}</pre>
               </div>
             </div>
             <div class="conflict-actions">
-              <button class="btn-ghost" on:click={() => { selectedPath = ''; conflictDetail = null }}>取消</button>
-              <button class="btn-primary" disabled={!conflictChoice} on:click={() => resolveConflict(conflictChoice)}>
-                {conflictChoice ? `以${conflictChoice === 'local' ? '本地' : '远程'}为准` : '请选择版本'}
+              {#if (conflictDetail.local && conflictDetail.local.length > 2000) || (conflictDetail.remote && conflictDetail.remote.length > 2000)}
+                <button class="btn-ghost" on:click={() => conflictExpanded = !conflictExpanded}>
+                  {conflictExpanded ? '收起全文' : '显示全文'}
+                </button>
+              {/if}
+              <button class="btn-ghost" on:click={() => { selectedPath = ''; conflictDetail = null; conflictExpanded = false }}>取消</button>
+              <button class="btn-primary" disabled={!conflictChoice || resolveLoading} on:click={() => resolveConflict(conflictChoice)}>
+                {resolveLoading ? '处理中...' : conflictChoice ? `以${conflictChoice === 'local' ? '本地' : '远程'}为准` : '请选择版本'}
               </button>
             </div>
           </div>

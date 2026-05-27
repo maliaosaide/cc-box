@@ -61,7 +61,11 @@
       dashboard = await GetDashboardLocal()
       syncState = dashboard?.syncStatus || 'checking'
     } catch (e) {
-      syncState = 'error'
+      const msg = e?.message || String(e)
+      syncState = msg.includes('未初始化') ? 'local_error' : 'error'
+      if (syncState === 'local_error') {
+        dashboard = { syncStatus: 'local_error', syncHealth: { status: 'local_error', code: 'not_initialized', message: '尚未完成同步初始化，请先配置 WebDAV 和加密密码', canRepair: false }, conflicts: 0, devices: [], recentChanges: [], backups: [], binaries: [], claudeVersion: '-', claudeLatest: true, configStatus: null, lastSync: null }
+      }
     }
     loading = false
   }
@@ -124,7 +128,7 @@
     if (state === 'remote_incomplete') return '远程数据不完整'
     if (state === 'key_mismatch') return '加密密码不匹配'
     if (state === 'connection_error') return '连接异常'
-    if (state === 'local_error') return '本地配置异常'
+    if (state === 'local_error') return '尚未完成初始化'
     if (state === 'error') return '连接异常'
     if (state === 'synced') return '已同步'
     return '未同步'
