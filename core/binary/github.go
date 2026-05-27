@@ -259,13 +259,22 @@ func downloadJSON(ctx context.Context, url string) ([]byte, error) {
 	return data, nil
 }
 
+var githubHTTPClient = &http.Client{
+	Timeout: 10 * time.Minute,
+	Transport: &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		ResponseHeaderTimeout: 30 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
+	},
+}
+
 func downloadURL(ctx context.Context, url string, progress GitHubDownloadProgress) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "cc-box")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := githubHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -303,6 +312,16 @@ func readAllWithProgress(reader io.Reader, total int64, progress GitHubDownloadP
 			return nil, err
 		}
 	}
+}
+
+func formatBytes(n int64) string {
+	if n < 1024 {
+		return fmt.Sprintf("%d B", n)
+	}
+	if n < 1024*1024 {
+		return fmt.Sprintf("%.1f KB", float64(n)/1024)
+	}
+	return fmt.Sprintf("%.1f MB", float64(n)/(1024*1024))
 }
 
 func verifySHA256Line(data []byte, shasums, assetName string) error {
