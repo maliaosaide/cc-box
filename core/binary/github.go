@@ -23,10 +23,14 @@ import (
 const githubClaudeReleasesAPI = "https://api.github.com/repos/anthropics/claude-code/releases"
 const githubDefaultReleaseLimit = 30
 
+type GitHubDownloadProgress func(downloaded, total int64)
+
+type GitHubDownloader func(ctx context.Context, url string, progress GitHubDownloadProgress) ([]byte, error)
+
 var (
-	githubClaudeReleasesAPIURL = githubClaudeReleasesAPI
-	githubDownloadURL          = downloadURL
-	githubNowUTC               = func() time.Time { return time.Now().UTC() }
+	githubClaudeReleasesAPIURL                  = githubClaudeReleasesAPI
+	githubDownloadURL          GitHubDownloader = downloadURL
+	githubNowUTC                                = func() time.Time { return time.Now().UTC() }
 )
 
 type GitHubClaudeRelease struct {
@@ -232,9 +236,9 @@ func findGitHubAsset(assets []githubAPIAsset, name string) *githubAPIAsset {
 func githubSignatureVerificationText(status string) string {
 	switch status {
 	case "not_verified":
-		return "未执行签名校验"
+		return "签名校验未启用，安装时校验 SHA256"
 	case "unavailable":
-		return "未找到签名文件"
+		return "未找到签名文件，安装时校验 SHA256"
 	default:
 		return status
 	}
@@ -242,20 +246,20 @@ func githubSignatureVerificationText(status string) string {
 
 func githubSignatureWarning(release *GitHubClaudeRelease) string {
 	if release != nil && release.ShasumsSignatureURL == "" {
-		return "GitHub Release 已完成 SHA256 校验；未找到 SHASUMS256.txt.sig，未执行签名校验"
+		return "GitHub Release 已完成 SHA256 校验；未找到 SHASUMS256.txt.sig，跳过签名校验"
 	}
-	return "GitHub Release 已完成 SHA256 校验；未执行 SHASUMS256.txt.sig 签名校验"
+	return "GitHub Release 已完成 SHA256 校验；签名校验未启用"
 }
 
 func downloadJSON(ctx context.Context, url string) ([]byte, error) {
-	data, err := githubDownloadURL(ctx, url)
+	data, err := githubDownloadURL(ctx, url, nil)
 	if err != nil {
 		return nil, err
 	}
 	return data, nil
 }
 
-func downloadURL(ctx context.Context, url string) ([]byte, error) {
+func downloadURL(ctx context.Context, url string, progress GitHubDownloadProgress) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -270,7 +274,35 @@ func downloadURL(ctx context.Context, url string) ([]byte, error) {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return nil, fmt.Errorf("请求 %s 失败: HTTP %d %s", url, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
-	return io.ReadAll(resp.Body)
+	if progress == nil {
+		return io.ReadAll(resp.Body)
+	}
+	return readAllWithProgress(resp.Body, resp.ContentLength, progress)
+}
+
+func readAllWithProgress(reader io.Reader, total int64, progress GitHubDownloadProgress) ([]byte, error) {
+	var out bytes.Buffer
+	buf := make([]byte, 256*1024)
+	downloaded := int64(0)
+	lastEmit := time.Now()
+	for {
+		n, err := reader.Read(buf)
+		if n > 0 {
+			out.Write(buf[:n])
+			downloaded += int64(n)
+			if time.Since(lastEmit) >= 150*time.Millisecond || (total > 0 && downloaded >= total) {
+				progress(downloaded, total)
+				lastEmit = time.Now()
+			}
+		}
+		if err == io.EOF {
+			progress(downloaded, total)
+			return out.Bytes(), nil
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
 }
 
 func verifySHA256Line(data []byte, shasums, assetName string) error {

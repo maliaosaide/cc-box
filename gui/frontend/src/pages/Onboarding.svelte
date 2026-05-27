@@ -119,6 +119,10 @@
       webdav.url === request.url && webdav.username === request.username && webdav.password === request.webdavPassword && webdav.root === request.root
   }
 
+  function skipSetup() {
+    dispatch('complete', { skipped: true })
+  }
+
   async function submit() {
     if (!password) { errorMsg = '请输入加密密码'; return }
     if (mode === 'new' && password !== confirmPassword) { errorMsg = '两次加密密码不一致'; return }
@@ -153,6 +157,8 @@
         <p class="text-txt-secondary font-body text-sm mb-12">Claude Code 跨设备配置同步</p>
 
         <div class="space-y-3 max-w-sm mx-auto">
+          <button class="skip-setup-btn animate-fade-in" on:click={skipSetup}>跳过，先进入主界面</button>
+
           <button class="choice-card animate-fade-in stagger-1" on:click={() => selectMode('new')}>
             <div class="choice-icon">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -392,6 +398,19 @@
     color: rgb(var(--accent));
   }
   .onboard-logo svg { width: 32px; height: 32px; }
+
+  .skip-setup-btn {
+    width: 100%;
+    padding: 11px 14px;
+    border-radius: 10px;
+    border: 1px dashed rgb(var(--border));
+    background: transparent;
+    color: rgb(var(--text-muted));
+    cursor: pointer;
+    font-size: 13px;
+    font-family: inherit;
+  }
+  .skip-setup-btn:hover { color: rgb(var(--text-secondary)); background: rgb(var(--surface-1)); }
 
   .choice-card {
     width: 100%;

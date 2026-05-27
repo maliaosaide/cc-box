@@ -937,6 +937,9 @@ func (a *App) GetBinaryPage() (*BinaryPageData, error) {
 	platform := config.Platform()
 	verDir := config.VersionsDir()
 	resolution := binary.ResolveClaudeBinaryCached()
+	if resolution.Valid && resolution.Version == "" {
+		resolution = binary.ResolveClaudeBinary()
+	}
 
 	data := &BinaryPageData{
 		Platform:       platform,

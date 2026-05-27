@@ -24,7 +24,7 @@
     if (saved) theme = saved
     document.documentElement.dataset.theme = theme
     try {
-      initialized = await IsInitialized()
+      initialized = await IsInitialized() || localStorage.getItem('cc-box-skip-onboarding') === 'true'
     } catch (e) { console.error('init check failed:', e) }
     EventsOn('data:changed', (e) => markChanged(e?.domain || 'all'))
     loading = false
@@ -54,7 +54,12 @@
 
   $: if (!mountedPages[currentPage]) mountedPages = { ...mountedPages, [currentPage]: true }
 
-  function handleInitComplete() { initialized = true; currentPage = 'dashboard' }
+  function handleInitComplete(e) {
+    if (e.detail?.skipped) localStorage.setItem('cc-box-skip-onboarding', 'true')
+    else localStorage.removeItem('cc-box-skip-onboarding')
+    initialized = true
+    currentPage = 'dashboard'
+  }
   function navigate(e) { if (e.detail?.page) currentPage = e.detail.page }
 </script>
 

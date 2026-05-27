@@ -117,23 +117,32 @@ func InstallGitHubClaude(ctx context.Context, version string, progress InstallPr
 		return nil, fmt.Errorf("版本号不能为空")
 	}
 	if progress != nil {
-		progress(0, 6, "正在获取 GitHub Release 信息")
+		progress(0, 100, "正在获取 GitHub Release 信息")
 	}
 	release, err := FindGitHubClaudeRelease(ctx, version)
 	if err != nil {
 		return nil, err
 	}
 	if progress != nil {
-		progress(1, 6, "正在下载 GitHub Release 压缩包")
+		progress(10, 100, "正在下载 GitHub Release 压缩包")
 	}
-	archiveData, err := githubDownloadURL(ctx, release.AssetDownloadURL)
+	archiveData, err := githubDownloadURL(ctx, release.AssetDownloadURL, func(downloaded, total int64) {
+		if progress == nil || total <= 0 {
+			return
+		}
+		current := int64(10 + float64(downloaded)/float64(total)*55)
+		if current > 65 {
+			current = 65
+		}
+		progress(current, 100, "正在下载 GitHub Release 压缩包")
+	})
 	if err != nil {
 		return nil, fmt.Errorf("下载 %s 失败: %w", release.AssetName, err)
 	}
 	if progress != nil {
-		progress(2, 6, "正在下载校验文件")
+		progress(70, 100, "正在下载 SHA256 校验文件")
 	}
-	shasums, err := githubDownloadURL(ctx, release.ShasumsDownloadURL)
+	shasums, err := githubDownloadURL(ctx, release.ShasumsDownloadURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("下载 SHASUMS256.txt 失败: %w", err)
 	}
@@ -142,7 +151,7 @@ func InstallGitHubClaude(ctx context.Context, version string, progress InstallPr
 	}
 	warnings := []string{githubSignatureWarning(release)}
 	if progress != nil {
-		progress(3, 6, "SHA256 校验完成；SHASUMS256.txt.sig 签名校验未执行")
+		progress(78, 100, "SHA256 校验完成，准备解压")
 	}
 	binaryData, err := extractClaudeBinary(release.AssetName, archiveData)
 	if err != nil {
@@ -150,7 +159,7 @@ func InstallGitHubClaude(ctx context.Context, version string, progress InstallPr
 	}
 	targetPath := GetBinaryPath("claude")
 	if progress != nil {
-		progress(4, 6, "正在安装 Claude "+version)
+		progress(85, 100, "正在安装 Claude "+version)
 	}
 	detected, err := installClaudeBinaryDataContext(ctx, targetPath, binaryData, version)
 	if err != nil {
@@ -160,10 +169,10 @@ func InstallGitHubClaude(ctx context.Context, version string, progress InstallPr
 	_ = rememberClaudeBinarySourceForInstall(targetPath, "github", detected)
 	pathResult := configureClaudePathBestEffort(configureClaudePathForInstall, commandStateForInstall)
 	if progress != nil && pathResult != nil && pathResult.Error != "" {
-		progress(5, 6, pathResult.Message)
+		progress(95, 100, pathResult.Message)
 	}
 	if progress != nil {
-		progress(6, 6, "GitHub Release 安装完成")
+		progress(100, 100, "GitHub Release 安装完成")
 	}
 	return &ClaudeInstallResult{
 		Version:       detected,

@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { EventsOn } from '../../wailsjs/runtime/runtime.js'
-  import { GetBinaryPage, SwitchBinaryVersion, UploadBinaryVersion, UploadCurrentBinary, GetBinaryStorage, DeleteBinaryVersion, RedetectClaudeBinary, BrowseFile, SetConfigField, GetGitHubBinaryReleases, RefreshGitHubBinaryReleases, InstallOfficialClaude, InstallGitHubClaude } from '../../wailsjs/go/main/App.js'
+  import { GetBinaryPage, SwitchBinaryVersion, UploadBinaryVersion, UploadCurrentBinary, GetBinaryStorage, DeleteBinaryVersion, RedetectClaudeBinary, BrowseFile, SetConfigField, GetGitHubBinaryReleases, RefreshGitHubBinaryReleases, InstallOfficialClaude, InstallGitHubClaude, CancelOperation } from '../../wailsjs/go/main/App.js'
 
   export let active = false
   export let refreshToken = 0
@@ -25,7 +25,9 @@
   let githubRefreshing = false
   let githubOpId = null
   let githubInstallOpId = null
+  let githubInstallingVersion = ''
   let officialInstallOpId = null
+  let cancelledInstallOpIds = new Set()
   let externalProgress = null
   let githubError = ''
   let githubInitialized = false
@@ -54,6 +56,8 @@
   $: cloudVersions = binData?.allVersions ? binData.allVersions.filter(v => v.isRemote) : []
   $: visibleVersions = versionTab === 'local' ? localVersions : versionTab === 'cloud' ? cloudVersions : []
   $: githubVersions = githubData?.releases || []
+  $: activeInstallOpId = githubInstallOpId || officialInstallOpId
+  $: canCancelExternalInstall = !!activeInstallOpId && ['binary-github-install', 'binary-official-install'].includes(externalProgress?.operation)
   $: canLoadMoreGithub = githubVersions.length >= githubLimit
   $: versionTabs = [
     { id: 'local', label: '本地', count: localVersions.length },
@@ -88,19 +92,21 @@
         externalProgress = null
       }
       if (e?.operation === 'binary-github-install' && (!githubInstallOpId || e.opId === githubInstallOpId)) {
-        if (e.status === 'error') error = e.error || 'GitHub 安装失败'
-        else msg = 'GitHub Release 安装完成'
+        finishExternalInstall(e, 'GitHub Release 安装完成', 'GitHub 安装失败')
         githubInstallOpId = null
-        externalProgress = null
+        githubInstallingVersion = ''
         await loadBinary()
       }
       if (e?.operation === 'binary-official-install' && (!officialInstallOpId || e.opId === officialInstallOpId)) {
-        if (e.status === 'error') error = e.error || '官方安装失败'
-        else msg = '官方安装完成'
+        finishExternalInstall(e, '官方安装完成', '官方安装失败')
         officialInstallOpId = null
-        externalProgress = null
         await loadBinary()
       }
+    })
+    EventsOn('op:cancelled', (e) => {
+      if (!['binary-github-install', 'binary-official-install'].includes(e?.operation)) return
+      markInstallCancelled(e.opId)
+      if (e.opId === activeInstallOpId) externalProgress = { ...(externalProgress || {}), operation: e.operation, opId: e.opId, message: '正在取消安装...', percent: externalProgress?.percent || 0 }
     })
     EventsOn('data:changed', async (e) => {
       if (e?.domain !== 'binary') return
@@ -248,6 +254,34 @@
     }
   }
 
+  function markInstallCancelled(opId) {
+    cancelledInstallOpIds = new Set([...cancelledInstallOpIds, opId])
+  }
+
+  function finishExternalInstall(e, successText, errorText) {
+    const wasCancelled = cancelledInstallOpIds.has(e.opId)
+    if (wasCancelled) msg = '已取消安装'
+    else if (e.status === 'error') error = e.error || errorText
+    else msg = successText
+    if (wasCancelled) {
+      const next = new Set(cancelledInstallOpIds)
+      next.delete(e.opId)
+      cancelledInstallOpIds = next
+    }
+    externalProgress = null
+  }
+
+  async function cancelExternalInstall() {
+    if (!activeInstallOpId) return
+    markInstallCancelled(activeInstallOpId)
+    externalProgress = { ...(externalProgress || {}), message: '正在取消安装...', percent: externalProgress?.percent || 0 }
+    try {
+      await CancelOperation(activeInstallOpId)
+    } catch (e) {
+      error = e.message || String(e)
+    }
+  }
+
   async function installOfficial() {
     if (officialInstallOpId) return
     if (!confirm('安装官方最新版可能覆盖当前本地 Claude binary。安装前会尽量备份现有真实二进制，确认继续？')) return
@@ -266,11 +300,13 @@
     if (githubInstallOpId) return
     if (!confirm(`安装 GitHub Release ${version} 会替换当前受管 Claude binary。安装前会备份现有目标文件，确认继续？`)) return
     msg = ''; error = ''
+    githubInstallingVersion = version
     externalProgress = { operation: 'binary-github-install', message: `准备安装 ${version}`, percent: 0 }
     try {
       githubInstallOpId = await InstallGitHubClaude(version)
     } catch (e) {
       githubInstallOpId = null
+      githubInstallingVersion = ''
       externalProgress = null
       error = e.message || String(e)
     }
@@ -350,7 +386,12 @@
     <div class="progress-section animate-fade-in">
       <div class="progress-header">
         <span class="progress-msg font-mono">{externalProgress.message}</span>
-        <span class="progress-pct font-mono">{Math.round(externalProgress.percent || 0)}%</span>
+        <div class="progress-actions">
+          <span class="progress-pct font-mono">{Math.round(externalProgress.percent || 0)}%</span>
+          {#if canCancelExternalInstall}
+            <button class="progress-cancel" on:click={cancelExternalInstall}>取消</button>
+          {/if}
+        </div>
       </div>
       <div class="progress-bar">
         <div class="progress-bar-fill" style="width: {externalProgress.percent || 0}%"></div>
@@ -388,7 +429,7 @@
         <div class="item-badge accent">C</div>
         <div class="item-main">
           <span class="item-name">claude</span>
-          <span class="item-detail font-mono">{binData.currentVersion || '未安装'}</span>
+          <span class="item-detail font-mono">{binData.currentVersion || (binData.localExists ? '版本待检测' : '未安装')}</span>
         </div>
         <span class="version-tag" class:latest={binData.localExists} class:!latest={!binData.localExists}>
           {binData.localExists ? '已安装' : '未安装'}
@@ -466,7 +507,7 @@
         <div class="source-head">
           <div>
             <p class="text-txt-primary text-sm font-medium">GitHub Releases</p>
-            <p class="source-desc left">只显示当前平台可安装版本；安装时校验 SHASUMS256.txt 中的 SHA256，签名校验状态逐项显示。</p>
+            <p class="source-desc left">只显示当前平台可安装版本；安装时校验 SHASUMS256.txt 中的 SHA256，签名校验不阻塞安装。</p>
           </div>
           <button class="btn-sm" disabled={githubRefreshing} on:click={refreshGitHub}>{githubRefreshing ? '刷新中...' : '刷新版本列表'}</button>
         </div>
@@ -482,12 +523,12 @@
                 <div class="ver-dot"></div>
                 <div class="item-main">
                   <span class="item-name font-mono">{rel.version}</span>
-                  <span class="item-detail">{formatSize(rel.assetSize)} · {formatDate(rel.publishedAt)} · {rel.assetName} · {rel.signatureVerificationText || '未执行签名校验'}</span>
+                  <span class="item-detail">{formatSize(rel.assetSize)} · {formatDate(rel.publishedAt)} · {rel.assetName} · {rel.signatureVerificationText || '安装时校验 SHA256'}</span>
                 </div>
                 <div class="item-tags"><span class="cloud-tag">GitHub</span></div>
                 <div class="item-actions">
                   <button class="btn-sm" disabled={!!githubInstallOpId} on:click={() => installGitHub(rel.version)}>
-                    {githubInstallOpId ? '安装中...' : '安装此版本'}
+                    {githubInstallOpId && githubInstallingVersion === rel.version ? '安装中...' : '安装此版本'}
                   </button>
                 </div>
               </div>
@@ -646,7 +687,12 @@
     display: flex; justify-content: space-between; margin-bottom: 6px;
   }
   .progress-msg { font-size: 11px; color: rgb(var(--text-muted)); }
+  .progress-actions { display: flex; align-items: center; gap: 8px; }
   .progress-pct { font-size: 11px; color: rgb(var(--accent)); }
+  .progress-cancel {
+    font-size: 11px; color: rgb(var(--state-err)); background: transparent;
+    border: none; cursor: pointer; padding: 0; font-family: inherit;
+  }
   .progress-bar {
     height: 4px; border-radius: 2px; background: rgb(var(--surface-2)); overflow: hidden;
   }

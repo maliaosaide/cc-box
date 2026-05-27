@@ -70,7 +70,7 @@ func TestRefreshGitHubClaudeReleasesUsesInjectedDownloaderAndCache(t *testing.T)
 	githubClaudeReleasesAPIURL = "https://example.invalid/claude-code/releases"
 	githubNowUTC = func() time.Time { return time.Date(2026, 5, 24, 12, 0, 0, 0, time.UTC) }
 	var urls []string
-	githubDownloadURL = func(ctx context.Context, url string) ([]byte, error) {
+	githubDownloadURL = func(ctx context.Context, url string, progress GitHubDownloadProgress) ([]byte, error) {
 		urls = append(urls, url)
 		if !strings.HasPrefix(url, githubClaudeReleasesAPIURL) {
 			return nil, fmt.Errorf("unexpected external URL: %s", url)
@@ -160,7 +160,7 @@ func TestInstallGitHubClaudeUsesInjectedDownloadsAndTempTarget(t *testing.T) {
 	}
 
 	var downloaded []string
-	githubDownloadURL = func(ctx context.Context, url string) ([]byte, error) {
+	githubDownloadURL = func(ctx context.Context, url string, progress GitHubDownloadProgress) ([]byte, error) {
 		downloaded = append(downloaded, url)
 		switch url {
 		case "fake://asset":
@@ -264,7 +264,7 @@ func TestInstallGitHubClaudeReportsPathConfigureWarningWithoutFailing(t *testing
 	}); err != nil {
 		t.Fatal(err)
 	}
-	githubDownloadURL = func(ctx context.Context, url string) ([]byte, error) {
+	githubDownloadURL = func(ctx context.Context, url string, progress GitHubDownloadProgress) ([]byte, error) {
 		switch url {
 		case "fake://asset":
 			return archiveData, nil
