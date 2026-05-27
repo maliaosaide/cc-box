@@ -131,14 +131,14 @@ func InstallGitHubClaude(ctx context.Context, version string, progress InstallPr
 			return
 		}
 		if total <= 0 {
-			progress(15, 100, fmt.Sprintf("正在下载 GitHub Release 压缩包 (%s)", formatBytes(downloaded)))
+			progress(1500, 10000, fmt.Sprintf("正在下载 GitHub Release 压缩包 (%s)", formatBytes(downloaded)))
 			return
 		}
-		current := int64(15 + float64(downloaded)/float64(total)*50)
-		if current > 65 {
-			current = 65
+		current := int64(1500 + float64(downloaded)/float64(total)*5000)
+		if current > 6500 {
+			current = 6500
 		}
-		progress(current, 100, "正在下载 GitHub Release 压缩包")
+		progress(current, 10000, fmt.Sprintf("正在下载 GitHub Release 压缩包 %s/%s", formatBytes(downloaded), formatBytes(total)))
 	})
 	if err != nil {
 		return nil, fmt.Errorf("下载 %s 失败: %w", release.AssetName, err)
