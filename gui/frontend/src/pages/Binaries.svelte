@@ -13,6 +13,7 @@
   let loading = true
   let error = ''
   let msg = ''
+  let msgTimer = null
   let switching = ''
   let uploading = ''
   let uploadOpId = null
@@ -77,7 +78,7 @@
         if (e.status === 'error') {
           error = e.error || '上传失败'
         } else {
-          msg = '上传完成'
+          showMsg('上传完成')
           if (active) loadBinary()
         }
         uploadProgress = null
@@ -114,6 +115,17 @@
       else await loadBinary()
     })
   })
+
+  function showMsg(text) {
+    clearTimeout(msgTimer)
+    msg = text
+    msgTimer = setTimeout(() => { msg = '' }, 4000)
+  }
+
+  function showError(text) {
+    clearTimeout(msgTimer)
+    error = text
+  }
 
   async function loadBinary() {
     loading = true; error = ''
@@ -188,7 +200,7 @@
     try {
       await RedetectClaudeBinary()
       await loadBinary()
-      msg = '已重新检测 Claude 二进制'
+      showMsg('已重新检测 Claude 二进制')
       promptHidden = false
     } catch (e) {
       error = e.message || String(e)
@@ -203,7 +215,7 @@
       if (file) {
         await SetConfigField('binary', 'claude_path', file)
         await loadBinary()
-        msg = '已设置 Claude 可执行文件'
+        showMsg('已设置 Claude 可执行文件')
         promptHidden = false
       }
     } catch (e) {
@@ -216,7 +228,7 @@
     msg = ''; error = ''
     try {
       await SwitchBinaryVersion(version, source)
-      msg = `已切换到 ${version}`
+      showMsg(`已切换到 ${version}`)
       await loadBinary()
     } catch (e) {
       error = e.message || String(e)
@@ -260,9 +272,9 @@
 
   function finishExternalInstall(e, successText, errorText) {
     const wasCancelled = cancelledInstallOpIds.has(e.opId)
-    if (wasCancelled) msg = '已取消安装'
-    else if (e.status === 'error') error = e.error || errorText
-    else msg = successText
+    if (wasCancelled) showMsg('已取消安装')
+    else if (e.status === 'error') showError(e.error || errorText)
+    else showMsg(successText)
     if (wasCancelled) {
       const next = new Set(cancelledInstallOpIds)
       next.delete(e.opId)
@@ -317,7 +329,7 @@
     msg = ''; error = ''
     try {
       await DeleteBinaryVersion(version)
-      msg = `已删除版本 ${version}`
+      showMsg(`已删除版本 ${version}`)
       await loadBinary()
     } catch (e) {
       error = e.message || String(e)
@@ -359,7 +371,7 @@
   {#if msg}
     <div class="msg-bar animate-fade-in">
       <span>{msg}</span>
-      <button class="link-btn" on:click={() => msg = ''}>关闭</button>
+      <button class="link-btn" on:click={() => { clearTimeout(msgTimer); msg = '' }}>关闭</button>
     </div>
   {/if}
 
