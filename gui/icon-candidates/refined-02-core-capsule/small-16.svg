@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" role="img" aria-label="CC-Box refined core capsule 16px preview">
+  <rect width="16" height="16" rx="4" fill="#101828"/>
+  <path d="M8 1.4A6.6 6.6 0 1 1 2 5.3" fill="none" stroke="#C4B5FD" stroke-width="1.2" stroke-linecap="round"/>
+  <path d="M2 5.3L1.6 7.4L3.6 6.8" fill="none" stroke="#FDE68A" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="5" y="2.2" width="6" height="11.6" rx="3" fill="#EEF2FF"/>
+  <rect x="6" y="3.2" width="4" height="9.6" rx="2" fill="#1E1B4B"/>
+  <path d="M7 5.4H9" stroke="#FDE68A" stroke-width=".8" stroke-linecap="round"/>
+  <path d="M7 8H9" stroke="#C4B5FD" stroke-width=".8" stroke-linecap="round"/>
+  <path d="M7 10.6H9" stroke="#67E8F9" stroke-width=".8" stroke-linecap="round"/>
+</svg>

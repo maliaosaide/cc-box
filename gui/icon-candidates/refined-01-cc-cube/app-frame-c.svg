@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="CC-Box refined CC cube frame C">
+  <defs>
+    <linearGradient id="bg" x1="128" y1="80" x2="896" y2="944" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#07111F"/>
+      <stop offset="0.48" stop-color="#0B2E4A"/>
+      <stop offset="1" stop-color="#0F766E"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="44%" r="54%">
+      <stop offset="0" stop-color="#67E8F9" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#67E8F9" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="hex" x1="216" y1="168" x2="816" y2="856" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F8FAFC"/>
+      <stop offset="0.46" stop-color="#67E8F9"/>
+      <stop offset="1" stop-color="#2DD4BF"/>
+    </linearGradient>
+    <linearGradient id="hexSoft" x1="796" y1="172" x2="222" y2="846" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.48" stop-color="#CCFBF1"/>
+      <stop offset="1" stop-color="#5EEAD4"/>
+    </linearGradient>
+    <linearGradient id="cubeTop" x1="358" y1="330" x2="666" y2="450" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F8FAFC"/>
+      <stop offset="1" stop-color="#CFFAFE"/>
+    </linearGradient>
+    <filter id="softShadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="28" stdDeviation="26" flood-color="#020617" flood-opacity="0.42"/>
+    </filter>
+    <filter id="hexShadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#020617" flood-opacity="0.34"/>
+    </filter>
+  </defs>
+
+  <rect x="64" y="64" width="896" height="896" rx="216" fill="url(#bg)"/>
+  <rect x="104" y="104" width="816" height="816" rx="184" fill="url(#glow)"/>
+
+  <path d="M512 170L804 338V686L512 854L220 686V338L512 170Z" fill="none" stroke="url(#hex)" stroke-width="54" stroke-linejoin="round" filter="url(#hexShadow)"/>
+  <path d="M512 224L758 366V658L512 800L266 658V366L512 224Z" fill="none" stroke="url(#hexSoft)" stroke-width="18" stroke-linejoin="round" opacity="0.72"/>
+  <path d="M220 338L512 506L804 338" fill="none" stroke="#E0F2FE" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" opacity="0.32"/>
+  <path d="M512 506V854" fill="none" stroke="#99F6E4" stroke-width="22" stroke-linecap="round" opacity="0.28"/>
+  <circle cx="512" cy="170" r="22" fill="#F8FAFC" opacity="0.96"/>
+  <circle cx="220" cy="686" r="18" fill="#A7F3D0" opacity="0.94"/>
+  <circle cx="804" cy="686" r="18" fill="#67E8F9" opacity="0.94"/>
+
+  <g filter="url(#softShadow)">
+    <path d="M512 316L690 414L512 512L334 414L512 316Z" fill="url(#cubeTop)"/>
+    <path d="M334 414L512 512V716L334 618V414Z" fill="#99F6E4"/>
+    <path d="M690 414L512 512V716L690 618V414Z" fill="#22D3EE"/>
+    <path d="M512 512V716" stroke="#0F172A" stroke-width="14" stroke-linecap="round" opacity="0.22"/>
+    <path d="M334 414L512 512L690 414" fill="none" stroke="#0F172A" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" opacity="0.16"/>
+  </g>
+</svg>

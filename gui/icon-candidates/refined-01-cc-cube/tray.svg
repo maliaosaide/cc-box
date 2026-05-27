@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="CC-Box refined CC cube tray icon">
+  <path d="M49 17C45 12 39 9 32 9C19 9 9 19 9 32C9 45 19 55 32 55C39 55 45 52 49 47" fill="none" stroke="#2DD4BF" stroke-width="6.8" stroke-linecap="round"/>
+  <path d="M15 45C19 50 25 53 32 53C45 53 55 43 55 30C55 17 45 7 32 7C25 7 19 10 15 15" fill="none" stroke="#E0F2FE" stroke-width="4.6" stroke-linecap="round"/>
+  <path d="M32 18L45 25L32 32L19 25L32 18Z" fill="#F8FAFC"/>
+  <path d="M19 25L32 32V47L19 40V25Z" fill="#99F6E4"/>
+  <path d="M45 25L32 32V47L45 40V25Z" fill="#22D3EE"/>
+  <path d="M32 32V47" stroke="#0F172A" stroke-width="1.7" opacity="0.22"/>
+</svg>

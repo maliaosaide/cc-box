@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="CC-Box bridge box app icon">
+  <defs>
+    <radialGradient id="bg" cx="32%" cy="24%" r="85%">
+      <stop offset="0" stop-color="#38BDF8"/>
+      <stop offset="0.48" stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#312E81"/>
+    </radialGradient>
+    <linearGradient id="panel" x1="230" y1="234" x2="792" y2="790" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#DBEAFE"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="30" stdDeviation="32" flood-color="#020617" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="196" fill="url(#bg)"/>
+  <path d="M244 316H454C494 316 526 348 526 388V636C526 676 494 708 454 708H244C204 708 172 676 172 636V388C172 348 204 316 244 316Z" fill="url(#panel)" filter="url(#shadow)"/>
+  <path d="M570 316H780C820 316 852 348 852 388V636C852 676 820 708 780 708H570C530 708 498 676 498 636V388C498 348 530 316 570 316Z" fill="#E0E7FF" filter="url(#shadow)"/>
+  <path d="M314 512H710" stroke="#1E1B4B" stroke-width="54" stroke-linecap="round"/>
+  <path d="M670 454L732 512L670 570" fill="none" stroke="#1E1B4B" stroke-width="54" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M354 454L292 512L354 570" fill="none" stroke="#1E1B4B" stroke-width="54" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="322" cy="512" r="44" fill="#60A5FA"/>
+  <circle cx="702" cy="512" r="44" fill="#22D3EE"/>
+  <path d="M512 230L538 302L612 328L540 354L512 426L484 354L412 328L486 302L512 230Z" fill="#F8FAFC" opacity="0.95"/>
+  <path d="M512 598L548 704L656 740L550 778L512 884L474 778L368 740L476 704L512 598Z" fill="#BAE6FD" opacity="0.7"/>
+</svg>

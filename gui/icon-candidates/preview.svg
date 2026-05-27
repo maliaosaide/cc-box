@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1320 520" role="img" aria-label="CC-Box icon candidates preview">
+  <rect width="1320" height="520" rx="32" fill="#F8FAFC"/>
+  <text x="48" y="64" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="34" font-weight="700" fill="#0F172A">CC-Box 图标候选</text>
+  <text x="48" y="100" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="17" fill="#475569">每列包含应用图标和托盘图标。SVG 均为原创草案，选定后再导出 ico/png。</text>
+
+  <g transform="translate(48 142)">
+    <rect width="280" height="330" rx="28" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <image href="01-vault-sync/app.svg" x="44" y="28" width="192" height="192"/>
+    <rect x="104" y="232" width="72" height="72" rx="18" fill="#0F172A"/>
+    <image href="01-vault-sync/tray.svg" x="112" y="240" width="56" height="56"/>
+    <text x="140" y="322" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18" font-weight="700" fill="#0F172A">01 Vault Sync</text>
+  </g>
+
+  <g transform="translate(368 142)">
+    <rect width="280" height="330" rx="28" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <image href="02-bridge-box/app.svg" x="44" y="28" width="192" height="192"/>
+    <rect x="104" y="232" width="72" height="72" rx="18" fill="#1E3A8A"/>
+    <image href="02-bridge-box/tray.svg" x="112" y="240" width="56" height="56"/>
+    <text x="140" y="322" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18" font-weight="700" fill="#0F172A">02 Bridge Box</text>
+  </g>
+
+  <g transform="translate(688 142)">
+    <rect width="280" height="330" rx="28" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <image href="03-crystal-cube/app.svg" x="44" y="28" width="192" height="192"/>
+    <rect x="104" y="232" width="72" height="72" rx="18" fill="#581C87"/>
+    <image href="03-crystal-cube/tray.svg" x="112" y="240" width="56" height="56"/>
+    <text x="140" y="322" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18" font-weight="700" fill="#0F172A">03 Crystal Cube</text>
+  </g>
+
+  <g transform="translate(1008 142)">
+    <rect width="280" height="330" rx="28" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <image href="04-minimal-orbit/app.svg" x="44" y="28" width="192" height="192"/>
+    <rect x="104" y="232" width="72" height="72" rx="18" fill="#ECFDF5" stroke="#BBF7D0"/>
+    <image href="04-minimal-orbit/tray.svg" x="112" y="240" width="56" height="56"/>
+    <text x="140" y="322" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18" font-weight="700" fill="#0F172A">04 Minimal Orbit</text>
+  </g>
+</svg>

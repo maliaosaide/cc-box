@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="CC-Box minimal orbit app icon">
+  <defs>
+    <linearGradient id="bg" x1="120" y1="104" x2="904" y2="916" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F8FAFC"/>
+      <stop offset="1" stop-color="#D1FAE5"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="260" y1="246" x2="768" y2="778" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#064E3B"/>
+      <stop offset="1" stop-color="#0F766E"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="26" stdDeviation="30" flood-color="#064E3B" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="220" fill="url(#bg)"/>
+  <circle cx="512" cy="512" r="292" fill="none" stroke="url(#mark)" stroke-width="72" stroke-linecap="round" stroke-dasharray="980 260" transform="rotate(-36 512 512)"/>
+  <path d="M754 310L834 320L790 386" fill="none" stroke="#0F766E" stroke-width="72" stroke-linecap="round" stroke-linejoin="round"/>
+  <g filter="url(#shadow)">
+    <path d="M320 384L512 294L704 384L512 474L320 384Z" fill="#ECFDF5"/>
+    <path d="M320 384L512 474V692L320 602V384Z" fill="#6EE7B7"/>
+    <path d="M704 384L512 474V692L704 602V384Z" fill="#34D399"/>
+  </g>
+  <path d="M420 552H604" stroke="#064E3B" stroke-width="48" stroke-linecap="round"/>
+  <path d="M542 486L612 552L542 618" fill="none" stroke="#064E3B" stroke-width="48" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

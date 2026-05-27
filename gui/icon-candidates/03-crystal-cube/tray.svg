@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="CC-Box crystal cube tray icon">
+  <path d="M32 6L56 20L32 34L8 20L32 6Z" fill="#F5D0FE"/>
+  <path d="M8 20L32 34V58L8 44V20Z" fill="#C084FC"/>
+  <path d="M56 20L32 34V58L56 44V20Z" fill="#7DD3FC"/>
+  <rect x="22" y="32" width="20" height="18" rx="5" fill="#1E1B4B"/>
+  <path d="M26 33V29C26 25 29 22 32 22C35 22 38 25 38 29V33" fill="none" stroke="#1E1B4B" stroke-width="4" stroke-linecap="round"/>
+</svg>

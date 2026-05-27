@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 420" role="img" aria-label="CC-Box frame C tray icon preview">
+  <defs>
+    <linearGradient id="page" x1="0" y1="0" x2="1040" y2="420" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F8FAFC"/>
+      <stop offset="1" stop-color="#ECFEFF"/>
+    </linearGradient>
+  </defs>
+  <rect width="1040" height="420" rx="32" fill="url(#page)"/>
+  <text x="48" y="64" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="30" font-weight="800" fill="#0F172A">frame-c 配套托盘图标</text>
+  <text x="48" y="100" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" fill="#475569">与 app-frame-c 保持同一套渐变背景、内发光、六边容器和中心盒子。</text>
+
+  <g transform="translate(48 142)">
+    <rect width="128" height="170" rx="24" fill="#FFFFFF" stroke="#DDE7F3"/>
+    <image href="tray-frame-c.svg" x="28" y="24" width="72" height="72"/>
+    <text x="64" y="128" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="700" fill="#0F172A">base</text>
+    <text x="64" y="150" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="12" fill="#64748B">基础</text>
+  </g>
+
+  <g transform="translate(184 142)">
+    <rect width="128" height="170" rx="24" fill="#FFFFFF" stroke="#DDE7F3"/>
+    <rect x="28" y="24" width="72" height="72" rx="18" fill="#F8FAFC" stroke="#E2E8F0"/>
+    <image href="tray-frame-c-mono.svg" x="34" y="30" width="60" height="60"/>
+    <text x="64" y="128" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="700" fill="#0F172A">mono</text>
+    <text x="64" y="150" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="12" fill="#64748B">单色</text>
+  </g>
+
+  <g transform="translate(320 142)">
+    <rect width="128" height="170" rx="24" fill="#FFFFFF" stroke="#DDE7F3"/>
+    <image href="tray-frame-c-small-16.svg" x="48" y="42" width="32" height="32"/>
+    <text x="64" y="128" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="700" fill="#0F172A">16px</text>
+    <text x="64" y="150" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="12" fill="#64748B">小尺寸</text>
+  </g>
+
+  <g transform="translate(496 142)">
+    <rect width="128" height="170" rx="24" fill="#FFFFFF" stroke="#DDE7F3"/>
+    <image href="tray-frame-c-synced.svg" x="28" y="24" width="72" height="72"/>
+    <text x="64" y="128" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="700" fill="#0F172A">synced</text>
+    <text x="64" y="150" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="12" fill="#64748B">已同步</text>
+  </g>
+
+  <g transform="translate(632 142)">
+    <rect width="128" height="170" rx="24" fill="#FFFFFF" stroke="#DDE7F3"/>
+    <image href="tray-frame-c-pending.svg" x="28" y="24" width="72" height="72"/>
+    <text x="64" y="128" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="700" fill="#0F172A">pending</text>
+    <text x="64" y="150" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="12" fill="#64748B">待同步</text>
+  </g>
+
+  <g transform="translate(768 142)">
+    <rect width="128" height="170" rx="24" fill="#FFFFFF" stroke="#DDE7F3"/>
+    <image href="tray-frame-c-syncing.svg" x="28" y="24" width="72" height="72"/>
+    <text x="64" y="128" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="700" fill="#0F172A">syncing</text>
+    <text x="64" y="150" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="12" fill="#64748B">同步中</text>
+  </g>
+
+  <g transform="translate(904 142)">
+    <rect width="128" height="170" rx="24" fill="#FFFFFF" stroke="#DDE7F3"/>
+    <image href="tray-frame-c-conflict.svg" x="28" y="24" width="72" height="72"/>
+    <text x="64" y="128" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="700" fill="#0F172A">conflict</text>
+    <text x="64" y="150" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="12" fill="#64748B">冲突</text>
+  </g>
+</svg>

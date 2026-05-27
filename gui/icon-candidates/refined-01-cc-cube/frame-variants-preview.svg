@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 540" role="img" aria-label="CC-Box refined 01 outer frame variants preview">
+  <defs>
+    <linearGradient id="page" x1="0" y1="0" x2="1240" y2="540" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F8FAFC"/>
+      <stop offset="1" stop-color="#ECFEFF"/>
+    </linearGradient>
+  </defs>
+  <rect width="1240" height="540" rx="34" fill="url(#page)"/>
+  <text x="52" y="66" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="32" font-weight="800" fill="#0F172A">refined-01 外环重设计</text>
+  <text x="52" y="102" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" fill="#475569">保留原配色和中间盒子，只调整外部品牌结构。</text>
+
+  <g transform="translate(52 138)">
+    <rect width="344" height="350" rx="28" fill="#FFFFFF" stroke="#DDE7F3"/>
+    <image href="app-frame-a.svg" x="52" y="30" width="240" height="240"/>
+    <text x="172" y="302" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="20" font-weight="800" fill="#0F172A">A 护框结构</text>
+    <text x="172" y="330" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="14" fill="#64748B">更稳、更像桌面产品图标</text>
+  </g>
+
+  <g transform="translate(448 138)">
+    <rect width="344" height="350" rx="28" fill="#FFFFFF" stroke="#DDE7F3"/>
+    <image href="app-frame-b.svg" x="52" y="30" width="240" height="240"/>
+    <text x="172" y="302" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="20" font-weight="800" fill="#0F172A">B 流线同步</text>
+    <text x="172" y="330" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="14" fill="#64748B">更动态、更强调同步迁移</text>
+  </g>
+
+  <g transform="translate(844 138)">
+    <rect width="344" height="350" rx="28" fill="#FFFFFF" stroke="#DDE7F3"/>
+    <image href="app-frame-c.svg" x="52" y="30" width="240" height="240"/>
+    <text x="172" y="302" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="20" font-weight="800" fill="#0F172A">C 六边容器</text>
+    <text x="172" y="330" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="14" fill="#64748B">更整体、更像配置核心容器</text>
+  </g>
+</svg>

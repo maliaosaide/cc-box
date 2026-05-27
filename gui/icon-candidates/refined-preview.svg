@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 760" role="img" aria-label="CC-Box refined icon candidates preview">
+  <defs>
+    <linearGradient id="page" x1="0" y1="0" x2="1280" y2="760" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F8FAFC"/>
+      <stop offset="1" stop-color="#EEF2FF"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="760" rx="36" fill="url(#page)"/>
+  <text x="56" y="72" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="34" font-weight="800" fill="#0F172A">CC-Box 第二轮精细图标候选</text>
+  <text x="56" y="110" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="17" fill="#475569">每套包含应用主图标、托盘图标、单色版和 16×16 小尺寸预览。</text>
+
+  <g transform="translate(56 154)">
+    <rect width="560" height="544" rx="34" fill="#FFFFFF" stroke="#DDE7F3"/>
+    <text x="36" y="50" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="24" font-weight="800" fill="#0F172A">01 CC Cube</text>
+    <text x="36" y="80" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" fill="#64748B">双 C 环绕核心盒子：品牌字母 + 同步 + 工具箱。</text>
+    <image href="refined-01-cc-cube/app.svg" x="48" y="118" width="250" height="250"/>
+    <rect x="342" y="130" width="104" height="104" rx="24" fill="#07111F"/>
+    <image href="refined-01-cc-cube/tray.svg" x="354" y="142" width="80" height="80"/>
+    <text x="394" y="258" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="14" fill="#64748B">tray</text>
+    <rect x="342" y="288" width="104" height="104" rx="24" fill="#F8FAFC" stroke="#E2E8F0"/>
+    <image href="refined-01-cc-cube/mono.svg" x="354" y="300" width="80" height="80"/>
+    <text x="394" y="416" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="14" fill="#64748B">mono</text>
+    <rect x="462" y="130" width="56" height="56" rx="14" fill="#07111F"/>
+    <image href="refined-01-cc-cube/small-16.svg" x="474" y="142" width="32" height="32"/>
+    <text x="490" y="208" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="14" fill="#64748B">16px</text>
+    <text x="48" y="442" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="700" fill="#0F172A">适合：</text>
+    <text x="48" y="472" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" fill="#475569">更像正式应用 Logo；小图标仍能看出同步环和盒子。</text>
+    <text x="48" y="502" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" fill="#475569">风格偏科技、可靠、跨平台桌面工具。</text>
+  </g>
+
+  <g transform="translate(664 154)">
+    <rect width="560" height="544" rx="34" fill="#FFFFFF" stroke="#DDE7F3"/>
+    <text x="36" y="50" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="24" font-weight="800" fill="#0F172A">02 Core Capsule</text>
+    <text x="36" y="80" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" fill="#64748B">加密核心胶囊：配置层、同步回路和中心密钥感。</text>
+    <image href="refined-02-core-capsule/app.svg" x="48" y="118" width="250" height="250"/>
+    <rect x="342" y="130" width="104" height="104" rx="24" fill="#101828"/>
+    <image href="refined-02-core-capsule/tray.svg" x="354" y="142" width="80" height="80"/>
+    <text x="394" y="258" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="14" fill="#64748B">tray</text>
+    <rect x="342" y="288" width="104" height="104" rx="24" fill="#F8FAFC" stroke="#E2E8F0"/>
+    <image href="refined-02-core-capsule/mono.svg" x="354" y="300" width="80" height="80"/>
+    <text x="394" y="416" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="14" fill="#64748B">mono</text>
+    <rect x="462" y="130" width="56" height="56" rx="14" fill="#101828"/>
+    <image href="refined-02-core-capsule/small-16.svg" x="474" y="142" width="32" height="32"/>
+    <text x="490" y="208" text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="14" fill="#64748B">16px</text>
+    <text x="48" y="442" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="700" fill="#0F172A">适合：</text>
+    <text x="48" y="472" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" fill="#475569">更抽象、更高级；强调加密配置核心和稳定同步。</text>
+    <text x="48" y="502" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" fill="#475569">风格偏现代、专业、带一点 AI 工具感。</text>
+  </g>
+</svg>

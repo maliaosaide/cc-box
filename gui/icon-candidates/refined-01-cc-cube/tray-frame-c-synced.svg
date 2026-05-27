@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="CC-Box frame C tray synced icon">
+  <defs>
+    <linearGradient id="bg" x1="8" y1="5" x2="56" y2="60" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#07111F"/><stop offset="0.48" stop-color="#0B2E4A"/><stop offset="1" stop-color="#0F766E"/></linearGradient>
+    <radialGradient id="glow" cx="50%" cy="43%" r="56%"><stop offset="0" stop-color="#67E8F9" stop-opacity="0.34"/><stop offset="1" stop-color="#67E8F9" stop-opacity="0"/></radialGradient>
+    <linearGradient id="hex" x1="13" y1="9" x2="51" y2="56" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#F8FAFC"/><stop offset="0.46" stop-color="#67E8F9"/><stop offset="1" stop-color="#2DD4BF"/></linearGradient>
+    <linearGradient id="hexSoft" x1="50" y1="10" x2="14" y2="55" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#FFFFFF"/><stop offset="0.48" stop-color="#CCFBF1"/><stop offset="1" stop-color="#5EEAD4"/></linearGradient>
+    <linearGradient id="cubeTop" x1="22" y1="19" x2="42" y2="29" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#F8FAFC"/><stop offset="1" stop-color="#CFFAFE"/></linearGradient>
+  </defs>
+  <rect x="3" y="3" width="58" height="58" rx="15" fill="url(#bg)"/>
+  <rect x="6" y="6" width="52" height="52" rx="13" fill="url(#glow)"/>
+  <path d="M32 8.5L51 19.5V43.5L32 55.5L13 43.5V19.5L32 8.5Z" fill="none" stroke="url(#hex)" stroke-width="3.9" stroke-linejoin="round"/>
+  <path d="M32 12L48 21.4V41.7L32 52L16 41.7V21.4L32 12Z" fill="none" stroke="url(#hexSoft)" stroke-width="1.25" stroke-linejoin="round" opacity="0.72"/>
+  <path d="M13.8 20L32 30.5L50.2 20" fill="none" stroke="#E0F2FE" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round" opacity="0.32"/>
+  <path d="M32 18.2L44 24.8L32 31.5L20 24.8L32 18.2Z" fill="url(#cubeTop)"/>
+  <path d="M20 24.8L32 31.5V45.6L20 38.8V24.8Z" fill="#99F6E4"/>
+  <path d="M44 24.8L32 31.5V45.6L44 38.8V24.8Z" fill="#22D3EE"/>
+  <circle cx="48" cy="48" r="13" fill="#052E1A" stroke="#07111F" stroke-width="4"/>
+  <circle cx="48" cy="48" r="10" fill="#22C55E"/>
+  <path d="M43.5 48.2L46.8 51.4L53 44.8" fill="none" stroke="#F8FAFC" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

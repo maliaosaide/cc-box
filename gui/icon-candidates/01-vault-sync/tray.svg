@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="CC-Box vault sync tray icon">
+  <path d="M12 22L32 12L52 22L32 32L12 22Z" fill="#D9FFF7"/>
+  <path d="M12 22L32 32V54L12 44V22Z" fill="#5EEAD4"/>
+  <path d="M52 22L32 32V54L52 44V22Z" fill="#14B8A6"/>
+  <path d="M23 35C23 30 27 26 32 26C36 26 40 29 41 33" fill="none" stroke="#0F172A" stroke-width="4.8" stroke-linecap="round"/>
+  <path d="M39 31L42 34L45 31" fill="none" stroke="#0F172A" stroke-width="4.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="25" y="37" width="14" height="12" rx="3" fill="#0F172A"/>
+</svg>

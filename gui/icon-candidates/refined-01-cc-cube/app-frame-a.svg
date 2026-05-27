@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="CC-Box refined CC cube frame A">
+  <defs>
+    <linearGradient id="bg" x1="128" y1="80" x2="896" y2="944" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#07111F"/>
+      <stop offset="0.48" stop-color="#0B2E4A"/>
+      <stop offset="1" stop-color="#0F766E"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="44%" r="54%">
+      <stop offset="0" stop-color="#67E8F9" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#67E8F9" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="frame" x1="214" y1="190" x2="810" y2="834" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F8FAFC"/>
+      <stop offset="0.42" stop-color="#67E8F9"/>
+      <stop offset="1" stop-color="#2DD4BF"/>
+    </linearGradient>
+    <linearGradient id="frameSoft" x1="784" y1="182" x2="220" y2="842" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.55" stop-color="#CCFBF1"/>
+      <stop offset="1" stop-color="#5EEAD4"/>
+    </linearGradient>
+    <linearGradient id="cubeTop" x1="358" y1="330" x2="666" y2="450" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F8FAFC"/>
+      <stop offset="1" stop-color="#CFFAFE"/>
+    </linearGradient>
+    <filter id="softShadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="28" stdDeviation="26" flood-color="#020617" flood-opacity="0.42"/>
+    </filter>
+    <filter id="frameShadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#020617" flood-opacity="0.34"/>
+    </filter>
+  </defs>
+
+  <rect x="64" y="64" width="896" height="896" rx="216" fill="url(#bg)"/>
+  <rect x="104" y="104" width="816" height="816" rx="184" fill="url(#glow)"/>
+
+  <path d="M312 206H694C768 206 828 266 828 340V388" fill="none" stroke="url(#frame)" stroke-width="58" stroke-linecap="round" stroke-linejoin="round" filter="url(#frameShadow)"/>
+  <path d="M712 818H330C256 818 196 758 196 684V636" fill="none" stroke="url(#frame)" stroke-width="58" stroke-linecap="round" stroke-linejoin="round" filter="url(#frameShadow)"/>
+  <path d="M210 392V344C210 278 264 224 330 224" fill="none" stroke="url(#frameSoft)" stroke-width="34" stroke-linecap="round" opacity="0.9"/>
+  <path d="M814 632V680C814 746 760 800 694 800" fill="none" stroke="url(#frameSoft)" stroke-width="34" stroke-linecap="round" opacity="0.9"/>
+  <path d="M270 244L214 244L214 300" fill="none" stroke="#E0F2FE" stroke-width="28" stroke-linecap="round" stroke-linejoin="round" opacity="0.78"/>
+  <path d="M754 780L810 780L810 724" fill="none" stroke="#99F6E4" stroke-width="28" stroke-linecap="round" stroke-linejoin="round" opacity="0.78"/>
+
+  <g filter="url(#softShadow)">
+    <path d="M512 316L690 414L512 512L334 414L512 316Z" fill="url(#cubeTop)"/>
+    <path d="M334 414L512 512V716L334 618V414Z" fill="#99F6E4"/>
+    <path d="M690 414L512 512V716L690 618V414Z" fill="#22D3EE"/>
+    <path d="M512 512V716" stroke="#0F172A" stroke-width="14" stroke-linecap="round" opacity="0.22"/>
+    <path d="M334 414L512 512L690 414" fill="none" stroke="#0F172A" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" opacity="0.16"/>
+  </g>
+
+  <circle cx="828" cy="432" r="18" fill="#F8FAFC" opacity="0.92"/>
+  <circle cx="196" cy="592" r="18" fill="#A7F3D0" opacity="0.92"/>
+</svg>

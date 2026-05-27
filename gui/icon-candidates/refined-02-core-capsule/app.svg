@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="CC-Box refined core capsule app icon">
+  <defs>
+    <linearGradient id="bg" x1="120" y1="88" x2="904" y2="944" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#101828"/>
+      <stop offset="0.54" stop-color="#1E1B4B"/>
+      <stop offset="1" stop-color="#4C1D95"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="48%" cy="42%" r="58%">
+      <stop offset="0" stop-color="#FDE68A" stop-opacity="0.24"/>
+      <stop offset="0.55" stop-color="#A78BFA" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#A78BFA" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="capsule" x1="330" y1="190" x2="694" y2="834" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.42" stop-color="#EEF2FF"/>
+      <stop offset="1" stop-color="#C4B5FD"/>
+    </linearGradient>
+    <linearGradient id="core" x1="390" y1="260" x2="636" y2="746" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#312E81"/>
+      <stop offset="1" stop-color="#0F172A"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="350" y1="240" x2="690" y2="760" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FDE68A"/>
+      <stop offset="0.52" stop-color="#F0ABFC"/>
+      <stop offset="1" stop-color="#60A5FA"/>
+    </linearGradient>
+    <filter id="shadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="32" stdDeviation="30" flood-color="#020617" flood-opacity="0.45"/>
+    </filter>
+    <filter id="strokeShadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#020617" flood-opacity="0.34"/>
+    </filter>
+  </defs>
+
+  <rect x="64" y="64" width="896" height="896" rx="216" fill="url(#bg)"/>
+  <rect x="104" y="104" width="816" height="816" rx="184" fill="url(#halo)"/>
+
+  <path d="M512 166C696 166 846 316 846 500C846 684 696 834 512 834C328 834 178 684 178 500" fill="none" stroke="url(#accent)" stroke-width="42" stroke-linecap="round" stroke-dasharray="720 170" filter="url(#strokeShadow)"/>
+  <path d="M198 500L170 576L248 560" fill="none" stroke="#FDE68A" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <g filter="url(#shadow)">
+    <rect x="336" y="196" width="352" height="632" rx="176" fill="url(#capsule)"/>
+    <rect x="392" y="252" width="240" height="520" rx="120" fill="url(#core)"/>
+    <path d="M430 382H594" stroke="#FDE68A" stroke-width="38" stroke-linecap="round"/>
+    <path d="M430 512H594" stroke="#C4B5FD" stroke-width="38" stroke-linecap="round"/>
+    <path d="M430 642H594" stroke="#67E8F9" stroke-width="38" stroke-linecap="round"/>
+    <circle cx="512" cy="512" r="42" fill="#F8FAFC"/>
+    <circle cx="512" cy="512" r="18" fill="#312E81"/>
+  </g>
+
+  <path d="M352 274C392 216 452 184 512 184C572 184 632 216 672 274" fill="none" stroke="#FFFFFF" stroke-width="18" stroke-linecap="round" opacity="0.62"/>
+</svg>
