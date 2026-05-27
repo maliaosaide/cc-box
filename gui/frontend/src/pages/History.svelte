@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { EventsOn } from '../../wailsjs/runtime/runtime.js'
   import { GetSnapshotList, GetSnapshotDetail, RevertToSnapshot } from '../../wailsjs/go/main/App.js'
+  import { formatSize } from '../lib/utils.js'
 
   export let active = false
   export let refreshToken = 0
@@ -105,12 +106,6 @@
     }
   }
 
-  function formatSize(b) {
-    if (!b) return '-'
-    if (b < 1024) return b + ' B'
-    if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB'
-    return (b / 1024 / 1024).toFixed(1) + ' MB'
-  }
 </script>
 
 <div class="history-page">

@@ -7,6 +7,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"path"
@@ -25,6 +26,11 @@ type Client struct {
 
 // NewClient 创建 WebDAV 客户端
 func NewClient(rawURL, username, password string) *Client {
+	return NewClientWithProxy(rawURL, username, password, "")
+}
+
+// NewClientWithProxy 创建带代理配置的 WebDAV 客户端
+func NewClientWithProxy(rawURL, username, password, proxyURL string) *Client {
 	// 确保 URL 以 / 结尾
 	if !strings.HasSuffix(rawURL, "/") {
 		rawURL += "/"
@@ -33,15 +39,37 @@ func NewClient(rawURL, username, password string) *Client {
 	parsed, _ := url.Parse(rawURL)
 	basePath := parsed.Path
 
+	transport := &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		ResponseHeaderTimeout: 30 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
+		DialContext: (&net.Dialer{
+			Timeout:   15 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+	}
+
+	if proxyURL != "" {
+		if u, err := url.Parse(proxyURL); err == nil {
+			transport.Proxy = http.ProxyURL(u)
+		}
+	}
+
 	return &Client{
 		baseURL:     rawURL,
 		baseURLPath: basePath,
 		username:    username,
 		password:    password,
 		http: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout:   60 * time.Second,
+			Transport: transport,
 		},
 	}
+}
+
+// SetLongTimeout 为大文件传输设置长超时
+func (c *Client) SetLongTimeout() {
+	c.http.Timeout = 10 * time.Minute
 }
 
 // SetTimeout 设置 HTTP 超时

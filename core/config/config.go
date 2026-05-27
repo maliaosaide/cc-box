@@ -28,6 +28,7 @@ type WebDAVConfig struct {
 	URL      string `mapstructure:"url"`
 	Username string `mapstructure:"username"`
 	Root     string `mapstructure:"root"`
+	ProxyURL string `mapstructure:"proxy_url"`
 }
 
 type EncryptionConfig struct {
@@ -58,8 +59,9 @@ type BinaryConfig struct {
 	ChunkThresholdMB  int    `mapstructure:"chunk_threshold_mb"`
 	AutoUpload        bool   `mapstructure:"auto_upload"`
 	SyncEnabled       bool   `mapstructure:"sync_enabled"`
-	AutoConfigurePath bool   `mapstructure:"auto_configure_path"`
-	BinDir            string `mapstructure:"bin_dir"`
+	AutoConfigurePath       bool   `mapstructure:"auto_configure_path"`
+	VerifySignature         bool   `mapstructure:"verify_signature"`
+	BinDir                  string `mapstructure:"bin_dir"`
 	VersionsDir       string `mapstructure:"versions_dir"`
 	ClaudePath        string `mapstructure:"claude_path"`
 }

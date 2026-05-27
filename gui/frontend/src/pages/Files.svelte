@@ -6,6 +6,7 @@
     GetConflictDetail, ResolveConflict, ExcludeFile,
     BulkSync, SaveMergedConflict
   } from '../../wailsjs/go/main/App.js'
+  import { formatSize } from '../lib/utils.js'
   import TreeNode from '../lib/components/TreeNode.svelte'
 
   export let syncState = 'idle'
@@ -16,6 +17,8 @@
   let tree = null
   let loading = true
   let error = ''
+  let msg = ''
+  let msgTimer = null
   let remoteError = ''
   let filter = 'all'
   let selectedPath = ''
@@ -149,6 +152,12 @@
     return text.slice(0, max) + '\n\n... (文件过长，已截断，点击下方"显示全文"查看完整内容)'
   }
 
+  function showMsg(text) {
+    clearTimeout(msgTimer)
+    msg = text
+    msgTimer = setTimeout(() => { msg = '' }, 4000)
+  }
+
   async function resolveConflict(choice) {
     if (!selectedPath || !conflictDetail || resolveLoading) return
     resolveLoading = true
@@ -156,6 +165,7 @@
       if (choice === 'merged') await SaveMergedConflict(selectedPath, conflictDetail.merged || conflictDetail.local)
       else await ResolveConflict(selectedPath, choice)
       await refreshTree()
+      showMsg('已解决冲突')
       selectedPath = ''; conflictDetail = null; failureDetail = null; view = 'content'; conflictChoice = ''
     } catch (e) { error = e.message || String(e) }
     resolveLoading = false
@@ -163,7 +173,7 @@
 
   async function confirmExclude() {
     if (!excludeConfirm) return
-    try { await ExcludeFile(excludeConfirm); excludeConfirm = ''; await refreshTree() }
+    try { await ExcludeFile(excludeConfirm); excludeConfirm = ''; await refreshTree(); showMsg('已添加到排除规则') }
     catch (e) { error = e.message || String(e) }
   }
 
@@ -187,13 +197,6 @@
     const map = { synced: 'st-ok', modified: 'st-mod', added: 'st-add', deleted: 'st-del', conflict: 'st-conflict', failed: 'st-failed', checking: 'st-checking' }
     return map[s] || ''
   }
-  function formatSize(b) {
-    if (!b) return '-'
-    if (b < 1024) return b + ' B'
-    if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB'
-    return (b / 1024 / 1024).toFixed(1) + ' MB'
-  }
-
   function isChangedStatus(status) {
     return ['modified', 'added', 'deleted', 'conflict'].includes(status)
   }
@@ -230,6 +233,13 @@
       </div>
     </div>
   </div>
+
+  {#if msg}
+    <div class="msg-bar animate-fade-in">
+      <span>{msg}</span>
+      <button class="link-btn" on:click={() => { clearTimeout(msgTimer); msg = '' }}>关闭</button>
+    </div>
+  {/if}
 
   {#if error}
     <div class="error-bar animate-fade-in">
@@ -472,6 +482,12 @@
   .action-btn:hover { border-color: rgba(196,112,78,0.4); color: rgb(var(--accent)); background: rgba(196,112,78,0.05); }
   .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+  .msg-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px; border-radius: 6px;
+    background: rgba(107,144,128,0.08); border: 1px solid rgba(107,144,128,0.15);
+    font-size: 12px; color: rgb(var(--state-ok));
+  }
   .error-bar {
     display: flex; align-items: center; justify-content: space-between;
     padding: 8px 12px; border-radius: 6px;

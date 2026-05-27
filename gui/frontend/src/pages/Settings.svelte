@@ -25,6 +25,7 @@
   let webdavUrl = ''
   let webdavUser = ''
   let webdavRoot = ''
+  let webdavProxyUrl = ''
   let webdavPassNew = ''
   let deviceName = ''
   let encryptionEnabled = false
@@ -33,6 +34,7 @@
   let chunkSizeMB = 10
   let chunkThresholdMB = 50
   let binarySyncEnabled = false
+  let binaryVerifySignature = false
   let autoConfigurePath = false
   let snapshotLimit = 50
   let conflictStrategy = 'ask'
@@ -87,6 +89,7 @@
         webdavUrl = cfg.webdav.url || ''
         webdavUser = cfg.webdav.username || ''
         webdavRoot = cfg.webdav.root || ''
+        webdavProxyUrl = cfg.webdav.proxyUrl || ''
         deviceName = cfg.device.name || ''
         encryptionEnabled = cfg.encryption.enabled
         binaryEncrypt = cfg.binary.encrypt
@@ -95,6 +98,7 @@
         chunkThresholdMB = cfg.binary.chunkThresholdMB || 50
         binarySyncEnabled = cfg.binary.syncEnabled ?? cfg.binary.autoUpload
         autoConfigurePath = cfg.binary.autoConfigurePath || false
+        binaryVerifySignature = cfg.binary.verifySignature || false
         snapshotLimit = cfg.sync.snapshotLimit || 50
         conflictStrategy = cfg.sync.conflictStrategy || 'ask'
         mergeRetryMax = cfg.sync.mergeRetryMax || 3
@@ -141,6 +145,7 @@
   async function saveWebdavUrl() { if (await saveField('webdav', 'url', webdavUrl)) await loadConfig() }
   async function saveWebdavUser() { await saveField('webdav', 'username', webdavUser) }
   async function saveWebdavRoot() { if (await saveField('webdav', 'root', webdavRoot)) await loadConfig() }
+  async function saveWebdavProxyUrl() { if (await saveField('webdav', 'proxy_url', webdavProxyUrl)) await loadConfig() }
   async function saveDeviceName() { await saveField('device', 'name', deviceName) }
 
   async function savePassword() {
@@ -175,6 +180,10 @@
     await saveField('binary', 'auto_configure_path', String(autoConfigurePath))
   }
 
+  async function toggleVerifySignature() {
+    binaryVerifySignature = !binaryVerifySignature
+    await saveField('binary', 'verify_signature', String(binaryVerifySignature))
+  }
   async function saveChunkMode() { await saveField('binary', 'chunk_mode', chunkMode) }
   async function saveChunkSize() { await saveField('binary', 'chunk_size_mb', String(chunkSizeMB)) }
   async function saveChunkThreshold() { await saveField('binary', 'chunk_threshold_mb', String(chunkThresholdMB)) }
@@ -379,7 +388,7 @@
       inputEncPass = ''; inputEncPreview = null
       encStatus = await GetEncryptionStatus()
       verifyResult = await VerifyEncryptionKey()
-      setTimeout(() => saved = '', 2000)
+      clearTimeout(savedTimer); savedTimer = setTimeout(() => saved = '', 2000)
     } catch (e) {
       error = e.message || String(e)
     }
@@ -397,7 +406,7 @@
       oldEncPass = ''; oldEncPreview = null; newEncPass = ''; confirmEncPass = ''
       encStatus = await GetEncryptionStatus()
       verifyResult = await VerifyEncryptionKey()
-      setTimeout(() => saved = '', 2000)
+      clearTimeout(savedTimer); savedTimer = setTimeout(() => saved = '', 2000)
     } catch (e) {
       error = e.message || String(e)
     }
@@ -414,9 +423,11 @@
     testLoading = false
   }
 
+  let savedTimer = null
   function showSaved() {
+    clearTimeout(savedTimer)
     saved = '已保存'
-    setTimeout(() => saved = '', 1500)
+    savedTimer = setTimeout(() => saved = '', 2000)
   }
 
   function isDefaultPattern(p) {
@@ -485,6 +496,16 @@
             <button class="btn-sm" on:click={saveWebdavRoot}>保存</button>
           </div>
           <div class="hint">可填写 cc-box、/cc-box/；留空时直接使用 WebDAV 服务地址当前目录。</div>
+        </div>
+        <div class="form-group">
+          <label class="label" for="webdav-proxy">代理地址（可选）</label>
+          <div class="input-row">
+            <input id="webdav-proxy" class="input" type="text" bind:value={webdavProxyUrl} placeholder="例如 http://127.0.0.1:7890" />
+            <button class="btn-sm" on:click={saveWebdavProxyUrl}>保存</button>
+          </div>
+          <div class="hint">仅 WebDAV 连接使用代理；留空使用系统默认代理设置</div>
+        </div>
+        <div>
           {#if webdavPathDirty}
             <div class="hint warn">当前 WebDAV 地址或存储目录有未保存修改，保存后下方路径会更新。</div>
           {/if}
@@ -653,6 +674,15 @@
             <span class="info-desc">默认关闭；开启后，后续可由 CC-Box 配置用户级 PATH</span>
           </div>
           <button class="toggle-btn" class:on={autoConfigurePath} on:click={toggleAutoConfigurePath}>
+            <span class="toggle-knob"></span>
+          </button>
+        </div>
+        <div class="toggle-row">
+          <div class="toggle-info">
+            <span class="info-label">GitHub 签名校验</span>
+            <span class="info-desc">默认关闭；开启后安装时校验 SHASUMS256.txt.sig GPG 签名（可能因网络问题安装失败）</span>
+          </div>
+          <button class="toggle-btn" class:on={binaryVerifySignature} on:click={toggleVerifySignature}>
             <span class="toggle-knob"></span>
           </button>
         </div>

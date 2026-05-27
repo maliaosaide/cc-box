@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { EventsOn } from '../../wailsjs/runtime/runtime.js'
   import { GetBinaryPage, SwitchBinaryVersion, UploadBinaryVersion, UploadCurrentBinary, GetBinaryStorage, DeleteBinaryVersion, RedetectClaudeBinary, BrowseFile, SetConfigField, GetGitHubBinaryReleases, RefreshGitHubBinaryReleases, InstallOfficialClaude, InstallGitHubClaude, CancelOperation } from '../../wailsjs/go/main/App.js'
+  import { formatSize } from '../lib/utils.js'
 
   export let active = false
   export let refreshToken = 0
@@ -59,7 +60,7 @@
   $: visibleVersions = versionTab === 'local' ? localVersions : versionTab === 'cloud' ? cloudVersions : []
   $: githubVersions = githubData?.releases || []
   $: activeInstallOpId = githubInstallOpId || officialInstallOpId
-  $: canCancelExternalInstall = !!activeInstallOpId && ['binary-github-install', 'binary-official-install'].includes(externalProgress?.operation)
+  $: canCancelExternalInstall = !!activeInstallOpId && ['binary-github-install', 'binary-official-install', 'binary-switch'].includes(externalProgress?.operation)
   $: canLoadMoreGithub = githubVersions.length >= githubLimit
   $: versionTabs = [
     { id: 'local', label: '本地', count: localVersions.length },
@@ -177,13 +178,6 @@
       await loadGitHubCache()
       await refreshGitHub()
     }
-  }
-
-  function formatSize(b) {
-    if (!b) return '-'
-    if (b < 1024) return b + ' B'
-    if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB'
-    return (b / 1024 / 1024).toFixed(1) + ' MB'
   }
 
   function sourceLabel(source) {

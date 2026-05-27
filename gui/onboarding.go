@@ -314,7 +314,7 @@ func registerDeviceInfo(client *webdav.Client, cfg *config.Config) {
 }
 
 func newConfiguredWebDAVClient(cfg *config.Config, password string) *webdav.Client {
-	return webdav.NewClient(config.ConfiguredWebDAVURL(cfg), cfg.WebDAV.Username, password)
+	return webdav.NewClientWithProxy(config.ConfiguredWebDAVURL(cfg), cfg.WebDAV.Username, password, cfg.WebDAV.ProxyURL)
 }
 
 // buildWebDAVURL 拼接完整的 WebDAV 地址（URL + root path）

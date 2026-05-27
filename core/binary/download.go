@@ -51,7 +51,7 @@ func DownloadData(client *webdav.Client, key []byte, name string, version string
 	if v.Chunked {
 		data, err = downloadChunked(client, key, v.Hash, v.Size, v.Encrypted, progress)
 	} else {
-		data, err = downloadWhole(client, key, name, version, platform, v.Encrypted)
+		data, err = downloadWhole(client, key, name, version, platform, v.Encrypted, progress)
 	}
 	if err != nil {
 		return nil, err
@@ -201,13 +201,17 @@ func downloadChunked(client *webdav.Client, key []byte, hash string, totalSize i
 	return result, nil
 }
 
-func downloadWhole(client *webdav.Client, key []byte, name string, version string, platform string, encrypted bool) ([]byte, error) {
+func downloadWhole(client *webdav.Client, key []byte, name string, version string, platform string, encrypted bool, progress DownloadProgress) ([]byte, error) {
 	ext := extForEncrypted(encrypted)
 	path := fmt.Sprintf("binaries/%s/%s-%s%s", platform, name, version, ext)
 
 	payload, _, err := client.GET(path)
 	if err != nil {
 		return nil, fmt.Errorf("下载失败: %w", err)
+	}
+
+	if progress != nil {
+		progress(int64(len(payload)), int64(len(payload)), 1, 1)
 	}
 
 	if encrypted {

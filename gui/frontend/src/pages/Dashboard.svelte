@@ -152,7 +152,7 @@
     installed: !!data.claudeVersion && data.claudeVersion !== '-', statusLabel: data.claudeLatest ? '已是最新' : '可更新'
   }
   $: configStatus = data.configStatus || {
-    ok: true, webdavConfigured: true, passwordAvailable: true, claudeDirExists: true, message: '配置正常'
+    ok: false, webdavConfigured: false, passwordAvailable: false, claudeDirExists: false, message: '尚未完成初始化'
   }
   $: hasDevices = data.devices && data.devices.length > 1
 </script>
@@ -206,7 +206,10 @@
     </div>
 
     {#if actionError}
-      <div class="error-banner animate-fade-in">{actionError}</div>
+      <div class="error-banner animate-fade-in">
+        <span>{actionError}</span>
+        <button class="link-btn" on:click={() => actionError = ''}>关闭</button>
+      </div>
     {/if}
 
     {#if progress}
@@ -457,6 +460,7 @@
   }
   .loading-dot { width: 6px; height: 6px; border-radius: 50%; background: rgb(var(--accent)); }
   .error-banner {
+    display: flex; align-items: center; justify-content: space-between;
     padding: 8px 10px; border-radius: 8px;
     background: rgba(184,92,92,0.08); color: rgb(var(--state-err));
     font-size: 12px;

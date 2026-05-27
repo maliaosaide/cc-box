@@ -1129,7 +1129,8 @@ func (a *App) SwitchBinaryVersion(version string, source string) error {
 		if err != nil {
 			switchErr = err
 		} else {
-			data, err := binary.DownloadData(client, key, "claude", version, nil)
+			client.SetLongTimeout()
+				data, err := binary.DownloadData(client, key, "claude", version, nil)
 			if err != nil {
 				switchErr = fmt.Errorf("下载版本 %s 失败: %w", version, err)
 			} else if _, err := binary.InstallClaudeBinaryData(binPath, data, version); err != nil {
