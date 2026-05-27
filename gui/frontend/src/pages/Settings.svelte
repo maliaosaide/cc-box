@@ -1013,6 +1013,7 @@
   }
   .info-row:last-child { border-bottom: none; }
   .info-label { font-size: 12px; color: rgb(var(--text-secondary)); }
+  .info-desc { font-size: 11px; color: rgb(var(--text-muted)); opacity: 0.7; }
   .info-value { font-size: 12px; color: rgb(var(--text-primary)); }
   .status-pill {
     font-size: 11px; font-family: 'DM Mono', monospace;
