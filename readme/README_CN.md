@@ -129,6 +129,16 @@ CC-Box 不信任 WebDAV 服务器能保护你的明文配置。
   <br/><i>Claude 二进制管理 — WebDAV 备份、GitHub Releases、官方安装器</i>
 </p>
 
+<p align="center">
+  <img src="../docs/screenshots/04-history.png" alt="历史" width="800" />
+  <br/><i>快照历史 — 时间线视图、每个快照的文件列表、回滚</i>
+</p>
+
+<p align="center">
+  <img src="../docs/screenshots/05-settings.png" alt="设置" width="800" />
+  <br/><i>设置 — WebDAV 连接、加密密码、同步策略、排除规则</i>
+</p>
+
 ## Claude 二进制管理
 
 除了配置文件，CC-Box 还能管理 Claude 二进制——安装、备份、切换和回滚——全部写入 Claude 官方 native install 布局。

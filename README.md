@@ -129,6 +129,16 @@ User Password ──→ Argon2id ──→ 256-bit Key
   <br/><i>Claude binary management — WebDAV backups, GitHub Releases, official installer</i>
 </p>
 
+<p align="center">
+  <img src="./docs/screenshots/04-history.png" alt="History" width="800" />
+  <br/><i>Snapshot history — timeline view, file lists per snapshot, rollback</i>
+</p>
+
+<p align="center">
+  <img src="./docs/screenshots/05-settings.png" alt="Settings" width="800" />
+  <br/><i>Settings — WebDAV connection, encryption password, sync strategy, exclude patterns</i>
+</p>
+
 ## Claude Binary Management
 
 Beyond config files, CC-Box manages the Claude binary itself — install, backup, switch, and rollback — all targeting the official Claude native install layout.
