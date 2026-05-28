@@ -186,7 +186,7 @@ func runInit(cmd *cobra.Command, args []string) (err error) {
 
 	// 6. 扫描并创建首次快照
 	fmt.Print("扫描配置文件... ")
-	scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
+	scanner := newClaudeScanner(cfg.Exclude.Patterns)
 	scanResult, err := scanner.Scan()
 	if err != nil {
 		return fmt.Errorf("扫描失败: %w", err)

@@ -12,10 +12,17 @@ import (
 	"github.com/user/cc-box/core/object"
 )
 
+// ExtraFile 扫描根目录外的额外文件
+type ExtraFile struct {
+	RelPath  string // 快照中的相对路径
+	RealPath string // 磁盘上的绝对路径
+}
+
 // Scanner 文件扫描器
 type Scanner struct {
-	root    string
-	exclude []string
+	root       string
+	exclude    []string
+	extraFiles []ExtraFile
 }
 
 // NewScanner 创建扫描器
@@ -24,6 +31,11 @@ func NewScanner(root string, excludePatterns []string) *Scanner {
 		root:    root,
 		exclude: excludePatterns,
 	}
+}
+
+// SetExtraFiles 设置扫描根目录外的额外文件
+func (s *Scanner) SetExtraFiles(files []ExtraFile) {
+	s.extraFiles = files
 }
 
 // ScanResult 扫描结果
@@ -161,6 +173,33 @@ func (s *Scanner) ScanPartial() (*ScanResult, error) {
 
 	if err != nil {
 		return nil, fmt.Errorf("扫描目录失败: %w", err)
+	}
+
+	for _, ef := range s.extraFiles {
+		info, err := os.Stat(ef.RealPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			result.addFailure(s.root, ef.RealPath, err)
+			continue
+		}
+		if !info.Mode().IsRegular() {
+			result.addFailure(s.root, ef.RealPath, fmt.Errorf("不是普通文件"))
+			continue
+		}
+		data, err := os.ReadFile(ef.RealPath)
+		if err != nil {
+			result.addFailure(s.root, ef.RealPath, err)
+			continue
+		}
+		result.Files[ef.RelPath] = FileEntry{
+			Hash:     object.ComputeHash(data),
+			Size:     info.Size(),
+			Modified: info.ModTime().UTC(),
+		}
+		result.Stats.TotalFiles++
+		result.Stats.TotalSize += info.Size()
 	}
 
 	return result, nil

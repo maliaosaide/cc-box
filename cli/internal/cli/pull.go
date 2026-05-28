@@ -188,7 +188,7 @@ func pullThreeWay(client *webdav.Client, key []byte, localSnap, remoteSnap *snap
 	store := object.NewStore(client, key, "")
 
 	// 扫描本地文件内容
-	scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
+	scanner := newClaudeScanner(cfg.Exclude.Patterns)
 	scanResult, err := scanner.Scan()
 	if err != nil {
 		return fmt.Errorf("扫描本地文件失败: %w", err)
@@ -376,7 +376,7 @@ func pullThreeWay(client *webdav.Client, key []byte, localSnap, remoteSnap *snap
 func pullDegraded(client *webdav.Client, key []byte, remoteSnap *snapshot.Snapshot, cfg *config.Config, force, dryRun bool, remoteHead, remoteHeadETag string) error {
 	store := object.NewStore(client, key, "")
 
-	scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
+	scanner := newClaudeScanner(cfg.Exclude.Patterns)
 	scanResult, err := scanner.Scan()
 	if err != nil {
 		return fmt.Errorf("扫描本地文件失败: %w", err)

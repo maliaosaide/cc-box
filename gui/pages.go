@@ -1342,7 +1342,7 @@ func (a *App) RevertToSnapshot(snapID string) error {
 		return fmt.Errorf("加载快照失败: %w", err)
 	}
 
-	scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
+	scanner := newClaudeScanner(cfg.Exclude.Patterns)
 	scanResult, err := scanner.ScanPartial()
 	if err != nil {
 		return fmt.Errorf("扫描失败: %w", err)

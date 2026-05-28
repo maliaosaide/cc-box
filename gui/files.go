@@ -133,7 +133,42 @@ func safeJoin(root, relPath string) (string, error) {
 }
 
 func safeClaudePath(relPath string) (string, error) {
+	if relPath == ".claude.json" {
+		return config.ClaudeJSONPath(), nil
+	}
 	return pathutil.SafeJoin(config.ClaudeDir(), relPath)
+}
+
+func claudeExtraFiles() []snapshot.ExtraFile {
+	jsonPath := config.ClaudeJSONPath()
+	if _, err := os.Stat(jsonPath); err == nil {
+		return []snapshot.ExtraFile{{RelPath: ".claude.json", RealPath: jsonPath}}
+	}
+	return nil
+}
+
+func newClaudeScanner(excludePatterns []string) *snapshot.Scanner {
+	s := snapshot.NewScanner(config.ClaudeDir(), excludePatterns)
+	s.SetExtraFiles(claudeExtraFiles())
+	return s
+}
+
+func addClaudeJSONToFiles(files map[string]snapshot.FileEntry) {
+	jsonPath := config.ClaudeJSONPath()
+	info, err := os.Stat(jsonPath)
+	if err != nil {
+		return
+	}
+	if !info.Mode().IsRegular() {
+		return
+	}
+	if _, exists := files[".claude.json"]; exists {
+		return
+	}
+	files[".claude.json"] = snapshot.FileEntry{
+		Size:     info.Size(),
+		Modified: info.ModTime().UTC(),
+	}
 }
 
 func validateSnapshotID(id string) error {
@@ -260,6 +295,7 @@ func (a *App) GetFileTreeLocal() (*FileTreeResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("扫描失败: %w", err)
 	}
+	addClaudeJSONToFiles(files)
 	var localSnap *snapshot.Snapshot
 	if headID, err := readLocalHeadID(); err == nil && headID != "" {
 		localSnap, _ = a.loadLocalSnapByID(headID)
@@ -356,6 +392,7 @@ func (a *App) ensureRemoteSnapshotObjects(ctx context.Context, opID int64, opera
 	sort.Strings(paths)
 
 	store := object.NewStore(client, key, config.CCBoxDir()+"/cache/objects")
+	total := int64(len(paths))
 	uploaded := 0
 	for i, path := range paths {
 		select {
@@ -370,6 +407,9 @@ func (a *App) ensureRemoteSnapshotObjects(ctx context.Context, opID int64, opera
 			return uploaded, fmt.Errorf("检查远程 object %s 失败: %w", path, err)
 		}
 		if exists {
+			if opID != 0 {
+				a.emitProgress(opID, operation, int64(i+1), total, i+1, int(total), "检查已有文件")
+			}
 			continue
 		}
 
@@ -391,7 +431,7 @@ func (a *App) ensureRemoteSnapshotObjects(ctx context.Context, opID int64, opera
 		}
 		uploaded++
 		if opID != 0 {
-			a.emitProgress(opID, operation, int64(i+1), int64(len(paths)), i+1, len(paths), fmt.Sprintf("补传 %s", path))
+			a.emitProgress(opID, operation, int64(i+1), total, i+1, int(total), fmt.Sprintf("补传 %s", path))
 		}
 	}
 	return uploaded, nil
@@ -444,7 +484,7 @@ func (a *App) GetFileTree() (*FileTreeResult, error) {
 	}
 	client.SetTimeout(8 * time.Second)
 
-	scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
+	scanner := newClaudeScanner(cfg.Exclude.Patterns)
 	scanResult, err := scanner.ScanPartial()
 	if err != nil {
 		return nil, fmt.Errorf("扫描失败: %w", err)
@@ -497,7 +537,9 @@ func buildFileTreeNodes(files map[string]snapshot.FileEntry, failures []FileFail
 	}
 
 	conflictFiles := listConflicts()
-	root := &FileNode{Name: ".claude", Path: "", IsDir: true, Expanded: true}
+	wrapperRoot := &FileNode{Name: "", Path: "", IsDir: true, Expanded: true}
+	claudeDir := &FileNode{Name: ".claude", Path: "", IsDir: true, Expanded: true}
+	wrapperRoot.Children = append(wrapperRoot.Children, claudeDir)
 	changed := 0
 	conflicts := 0
 	failed := 0
@@ -521,22 +563,43 @@ func buildFileTreeNodes(files map[string]snapshot.FileEntry, failures []FileFail
 		failure := failureMap[path]
 		entry, hasEntry := files[path]
 		if hasEntry {
-			insertNodeWithMeta(root, path, status, entry.Size, entry.Modified, failure.Error, failure.FullPath)
+			insertNodeWithMeta(claudeDir, path, status, entry.Size, entry.Modified, failure.Error, failure.FullPath)
 			continue
 		}
 		if localSnap != nil {
 			if old, ok := localSnap.Files[path]; ok {
-				insertNodeWithMeta(root, path, status, old.Size, old.Modified, failure.Error, failure.FullPath)
+				insertNodeWithMeta(claudeDir, path, status, old.Size, old.Modified, failure.Error, failure.FullPath)
 				continue
 			}
 		}
 		if status == "failed" {
-			insertNodeWithMeta(root, path, status, 0, time.Time{}, failure.Error, failure.FullPath)
+			insertNodeWithMeta(claudeDir, path, status, 0, time.Time{}, failure.Error, failure.FullPath)
 		}
 	}
 
-	sortNodes(root)
-	return &FileTreeResult{Root: root, Total: len(statusMap), Changed: changed, Conflicts: conflicts, Failed: failed, Failures: failures, Checking: checking}
+	// 从目录内移除 walk 找到的 .claude.json，统一作为同级外部文件展示
+	removeChild(claudeDir, ".claude.json")
+	if entry, ok := files[".claude.json"]; ok {
+		jsonStatus := statusFor(".claude.json")
+		if _, isConflict := conflictFiles[".claude.json"]; isConflict {
+			jsonStatus = "conflict"
+		}
+		jsonNode := &FileNode{
+			Name:     ".claude.json",
+			Path:     ".claude.json",
+			IsDir:    false,
+			Status:   jsonStatus,
+			Size:     entry.Size,
+			Modified: formatTime(entry.Modified),
+		}
+		wrapperRoot.Children = append(wrapperRoot.Children, jsonNode)
+		total := len(statusMap) + 1
+		sortNodes(claudeDir)
+		return &FileTreeResult{Root: wrapperRoot, Total: total, Changed: changed, Conflicts: conflicts, Failed: failed, Failures: failures, Checking: checking}
+	}
+
+	sortNodes(claudeDir)
+	return &FileTreeResult{Root: wrapperRoot, Total: len(statusMap), Changed: changed, Conflicts: conflicts, Failed: failed, Failures: failures, Checking: checking}
 }
 
 func isChangedFileStatus(status string) bool {
@@ -664,6 +727,16 @@ func findChild(node *FileNode, name string) *FileNode {
 		}
 	}
 	return nil
+}
+
+func removeChild(node *FileNode, name string) {
+	filtered := node.Children[:0]
+	for _, child := range node.Children {
+		if child.Name != name {
+			filtered = append(filtered, child)
+		}
+	}
+	node.Children = filtered
 }
 
 func sortNodes(node *FileNode) {
@@ -942,7 +1015,7 @@ func (a *App) BulkSync(action string) int64 {
 }
 
 func (a *App) doBulkPush(ctx context.Context, opID int64, cfg *config.Config, client *webdav.Client, key []byte) error {
-	scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
+	scanner := newClaudeScanner(cfg.Exclude.Patterns)
 	scanResult, err := scanner.ScanPartial()
 	if err != nil {
 		return fmt.Errorf("扫描失败: %w", err)
@@ -1116,7 +1189,7 @@ type pullMergeResult struct {
 }
 
 func (a *App) applyRemoteSnapshot(ctx context.Context, opID int64, operation string, cfg *config.Config, client *webdav.Client, key []byte, remoteHead string, remoteSnap *snapshot.Snapshot) (*pullMergeResult, error) {
-	scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
+	scanner := newClaudeScanner(cfg.Exclude.Patterns)
 	scanResult, err := scanner.ScanPartial()
 	if err != nil {
 		return nil, fmt.Errorf("扫描失败: %w", err)

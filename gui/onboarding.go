@@ -101,7 +101,7 @@ func (a *App) InitNewDevice(url, username, password, root, encPassword, deviceNa
 	createdRemote = append(createdRemote, "salt.bin")
 
 	// 扫描配置文件
-	scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
+	scanner := newClaudeScanner(cfg.Exclude.Patterns)
 	scanResult, err := scanner.ScanPartial()
 	if err != nil {
 		return fmt.Errorf("扫描配置文件失败: %w", err)

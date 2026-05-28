@@ -30,6 +30,7 @@
   let conflictExpanded = false
   let resolveLoading = false
   let conflictChoice = ''
+  let conflictViewMode = 'side'
   let view = 'content'
   let actionLoading = false
   let progress = null
@@ -210,6 +211,10 @@
     return true
   }
 
+  $: mergedContent = (conflictDetail && conflictDetail.local && conflictDetail.remote)
+    ? `<<<<<<< 本地版本\n${conflictDetail.local}\n=======\n${conflictDetail.remote}\n>>>>>>> 远程版本`
+    : ''
+
   $: rootChildren = tree?.root?.children ? tree.root.children.filter(node => matchesFilter(node, filter)) : []
 </script>
 
@@ -327,37 +332,47 @@
                 <span class="status-badge st-conflict">C</span>
                 <span class="font-mono text-sm text-txt-primary">{selectedPath}</span>
               </div>
-              <span class="conflict-label">
-                冲突 — {conflictDetail.recommended === 'local' ? '本地较新' : conflictDetail.recommended === 'remote' ? '远程较新' : '请比较两边'}，请选择以哪边为准
-              </span>
-            </div>
-            <div class="conflict-panels">
-              <div class="conflict-col">
-                <div class="conflict-col-header">
-                  <button class="choice-btn" class:chosen={conflictChoice === 'local'} on:click={() => conflictChoice = 'local'}>
-                    本地版本{#if conflictDetail.recommended === 'local'}<span class="newer-tag">较新</span>{/if}
-                  </button>
-                  <span class="version-time">{conflictDetail.localExists ? (conflictDetail.localModified || '时间未知') : '本地已删除'}</span>
-                </div>
-                <pre class="conflict-code">{conflictDetail.localExists ? conflictTruncated(conflictDetail.local || '(空)') : '(本地已删除)'}</pre>
-              </div>
-              <div class="conflict-col">
-                <div class="conflict-col-header">
-                  <button class="choice-btn" class:chosen={conflictChoice === 'remote'} on:click={() => conflictChoice = 'remote'}>
-                    远程版本{#if conflictDetail.recommended === 'remote'}<span class="newer-tag">较新</span>{/if}
-                  </button>
-                  <span class="version-time">{conflictDetail.remoteExists ? (conflictDetail.remoteModified || '时间未知') : '远程已删除'}</span>
-                </div>
-                <pre class="conflict-code">{conflictDetail.remoteExists ? conflictTruncated(conflictDetail.remote || '(空)') : '(远程已删除)'}</pre>
+              <div class="detail-actions">
+                <span class="conflict-label">
+                  冲突 — {conflictDetail.recommended === 'local' ? '本地较新' : conflictDetail.recommended === 'remote' ? '远程较新' : '请比较两边'}
+                </span>
+                <button class="view-toggle-btn" class:active={conflictViewMode === 'side'} on:click={() => conflictViewMode = 'side'}>并排</button>
+                <button class="view-toggle-btn" class:active={conflictViewMode === 'inline'} on:click={() => conflictViewMode = 'inline'}>合并</button>
               </div>
             </div>
+            {#if conflictViewMode === 'side'}
+              <div class="conflict-panels">
+                <div class="conflict-col">
+                  <div class="conflict-col-header">
+                    <button class="choice-btn" class:chosen={conflictChoice === 'local'} on:click={() => conflictChoice = 'local'}>
+                      本地版本{#if conflictDetail.recommended === 'local'}<span class="newer-tag">较新</span>{/if}
+                    </button>
+                    <span class="version-time">{conflictDetail.localExists ? (conflictDetail.localModified || '时间未知') : '本地已删除'}</span>
+                  </div>
+                  <pre class="conflict-code">{conflictDetail.localExists ? conflictTruncated(conflictDetail.local || '(空)') : '(本地已删除)'}</pre>
+                </div>
+                <div class="conflict-col">
+                  <div class="conflict-col-header">
+                    <button class="choice-btn" class:chosen={conflictChoice === 'remote'} on:click={() => conflictChoice = 'remote'}>
+                      远程版本{#if conflictDetail.recommended === 'remote'}<span class="newer-tag">较新</span>{/if}
+                    </button>
+                    <span class="version-time">{conflictDetail.remoteExists ? (conflictDetail.remoteModified || '时间未知') : '远程已删除'}</span>
+                  </div>
+                  <pre class="conflict-code">{conflictDetail.remoteExists ? conflictTruncated(conflictDetail.remote || '(空)') : '(远程已删除)'}</pre>
+                </div>
+              </div>
+            {:else}
+              <div class="conflict-merged-view">
+                <pre class="conflict-code merged-code">{conflictTruncated(mergedContent)}</pre>
+              </div>
+            {/if}
             <div class="conflict-actions">
               {#if (conflictDetail.local && conflictDetail.local.length > 2000) || (conflictDetail.remote && conflictDetail.remote.length > 2000)}
                 <button class="btn-ghost" on:click={() => conflictExpanded = !conflictExpanded}>
                   {conflictExpanded ? '收起全文' : '显示全文'}
                 </button>
               {/if}
-              <button class="btn-ghost" on:click={() => { selectedPath = ''; conflictDetail = null; conflictExpanded = false }}>取消</button>
+              <button class="btn-ghost" on:click={() => { selectedPath = ''; conflictDetail = null; conflictExpanded = false; conflictViewMode = 'side' }}>取消</button>
               <button class="btn-primary" disabled={!conflictChoice || resolveLoading} on:click={() => resolveConflict(conflictChoice)}>
                 {resolveLoading ? '处理中...' : conflictChoice ? `以${conflictChoice === 'local' ? '本地' : '远程'}为准` : '请选择版本'}
               </button>
@@ -583,6 +598,9 @@
   .failed-row code { color: rgb(var(--text-primary)); font-family: 'DM Mono', monospace; word-break: break-all; }
   .failed-actions { display: flex; gap: 8px; }
 
+  .content-view {
+    display: flex; flex-direction: column; flex: 1; min-height: 0;
+  }
   .file-content {
     flex: 1; overflow: auto; padding: 12px 14px; margin: 0;
     font-size: 12px; font-family: 'DM Mono', monospace;
@@ -590,6 +608,9 @@
     background: transparent; white-space: pre-wrap; word-break: break-all;
   }
 
+  .diff-view {
+    display: flex; flex-direction: column; flex: 1; min-height: 0;
+  }
   .diff-meta { display: flex; align-items: center; gap: 8px; }
   .diff-label { font-size: 11px; font-family: 'DM Mono', monospace; color: rgb(var(--accent)); }
   .diff-content { flex: 1; overflow: auto; font-family: 'DM Mono', monospace; font-size: 12px; }
@@ -624,6 +645,24 @@
     font-size: 12px; font-family: 'DM Mono', monospace;
     line-height: 1.6; color: rgb(var(--text-primary));
     background: transparent; white-space: pre-wrap; margin: 0;
+  }
+  .view-toggle-btn {
+    font-size: 10px; font-weight: 600;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    color: rgb(var(--text-muted)); background: rgb(var(--surface-2));
+    border: 1px solid rgb(var(--border));
+    padding: 3px 10px; border-radius: 4px; cursor: pointer;
+    transition: all 0.2s;
+  }
+  .view-toggle-btn.active {
+    background: rgba(196,112,78,0.12); color: rgb(var(--accent));
+    border-color: rgba(196,112,78,0.35);
+  }
+  .conflict-merged-view {
+    flex: 1; min-height: 0; display: flex; flex-direction: column;
+  }
+  .merged-code {
+    white-space: pre-wrap; word-break: break-all;
   }
   .conflict-actions {
     display: flex; justify-content: flex-end; gap: 8px;

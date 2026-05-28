@@ -10,7 +10,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/user/cc-box/core/binary"
-	"github.com/user/cc-box/core/config"
 	"github.com/user/cc-box/core/object"
 	"github.com/user/cc-box/core/snapshot"
 )
@@ -49,7 +48,7 @@ func runRevert(cmd *cobra.Command, args []string) error {
 	}
 
 	// 扫描当前文件
-	scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
+	scanner := newClaudeScanner(cfg.Exclude.Patterns)
 	scanResult, err := scanner.Scan()
 	if err != nil {
 		return fmt.Errorf("扫描失败: %w", err)

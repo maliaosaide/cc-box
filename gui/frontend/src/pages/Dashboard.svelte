@@ -123,7 +123,6 @@
     if (state === 'checking') return '正在检查远程...'
     if (state === 'syncing') return '同步中'
     if (state === 'conflict') return `${data.conflicts} 个冲突`
-    if (state === 'pending') return '待同步'
     if (state === 'remote_uninitialized') return '远程未初始化'
     if (state === 'remote_incomplete') return '远程数据不完整'
     if (state === 'key_mismatch') return '加密密码不匹配'
@@ -131,7 +130,18 @@
     if (state === 'local_error') return '尚未完成初始化'
     if (state === 'error') return '连接异常'
     if (state === 'synced') return '已同步'
+    if (state === 'pending') {
+      if (health && health.code === 'local_uncommitted') return '本地有未同步变更'
+      return '待同步'
+    }
     return '未同步'
+  }
+
+  function pendingDetail(state) {
+    if (state !== 'pending') return ''
+    if (health && health.code === 'local_uncommitted') return '请推送'
+    if (health && health.code === 'head_mismatch') return '请拉取'
+    return ''
   }
 
   $: data = dashboard || {
@@ -142,6 +152,7 @@
   $: health = data.syncHealth
   $: hasConflicts = data.conflicts !== 0
   $: displaySyncState = hasConflicts ? 'conflict' : (syncState || data.syncStatus || 'idle')
+  $: connectionOk = health && !['connection_error', 'error', 'remote_uninitialized', 'remote_incomplete', 'local_error'].includes(health.status)
   $: isCheckingState = displaySyncState === 'checking'
   $: isWarnState = displaySyncState === 'pending' || displaySyncState === 'remote_uninitialized' || displaySyncState === 'idle'
   $: isErrorState = displaySyncState === 'error' || displaySyncState === 'connection_error' || displaySyncState === 'remote_incomplete' || displaySyncState === 'key_mismatch' || displaySyncState === 'local_error'
@@ -178,12 +189,22 @@
         </button>
         <div class="status-pill" class:conflict={displaySyncState === 'conflict'} class:warn={isWarnState} class:err={isErrorState} class:syncing={displaySyncState === 'syncing' || isCheckingState}>
           <div class="status-dot" class:ok={displaySyncState === 'synced'} class:warn={isWarnState} class:err={isErrorState || displaySyncState === 'conflict'} class:syncing={displaySyncState === 'syncing' || isCheckingState}></div>
+          <span class="status-label">同步</span>
           <span class="status-text">{statusLabel(displaySyncState)}</span>
+          {#if pendingDetail(displaySyncState)}
+            <span class="status-hint">{pendingDetail(displaySyncState)}</span>
+          {/if}
           {#if displaySyncState === 'conflict'}
             <button class="status-link danger" on:click={() => navigateTo('files')}>解决</button>
           {/if}
           <button class="status-link" disabled={remoteChecking || !!actionLoading} on:click={refreshRemote}>重新检查</button>
         </div>
+        {#if !isCheckingState}
+          <div class="conn-pill" class:conn-ok={connectionOk} class:conn-err={!connectionOk}>
+            <div class="conn-dot"></div>
+            <span class="conn-text">{connectionOk ? '已连接' : '未连接'}</span>
+          </div>
+        {/if}
         <div class="toolbar-divider"></div>
         <div class="action-group">
           <button class="action-btn" disabled={!!actionLoading} on:click={() => doAction('push')}>
@@ -401,7 +422,9 @@
   .status-dot.warn { background: rgb(var(--state-warn)); }
   .status-dot.err { background: rgb(var(--state-err)); }
   .status-dot.syncing { background: rgb(var(--state-sync)); }
+  .status-label { font-size: 10px; color: rgb(var(--text-muted)); opacity: 0.6; text-transform: uppercase; letter-spacing: 0.04em; }
   .status-text { font-size: 12px; font-family: 'DM Mono', monospace; color: rgb(var(--text-secondary)); }
+  .status-hint { font-size: 10px; color: rgb(var(--accent)); font-family: 'DM Mono', monospace; }
   .status-link {
     font-size: 11px; color: rgb(var(--text-muted)); background: none;
     border: none; cursor: pointer; margin-left: 4px; transition: color 0.2s;
@@ -409,6 +432,20 @@
   .status-link.danger { color: rgb(var(--state-err)); }
   .status-link:hover { color: rgb(var(--accent)); }
   .status-link:disabled { opacity: 0.45; cursor: not-allowed; }
+  .conn-pill {
+    display: flex; align-items: center; gap: 4px;
+    padding: 3px 8px; border-radius: 6px;
+    background: rgb(var(--surface-2));
+  }
+  .conn-pill.conn-ok { background: rgba(107,144,128,0.06); }
+  .conn-pill.conn-err { background: rgba(184,92,92,0.06); }
+  .conn-dot { width: 5px; height: 5px; border-radius: 50%; }
+  .conn-pill.conn-ok .conn-dot { background: rgb(var(--state-ok)); }
+  .conn-pill.conn-err .conn-dot { background: rgb(var(--state-err)); }
+  .conn-text {
+    font-size: 10px; font-family: 'DM Mono', monospace;
+    color: rgb(var(--text-muted));
+  }
   .toolbar-divider { width: 1px; height: 20px; background: rgb(var(--border)); }
   .action-group { display: flex; gap: 4px; }
   .action-btn {

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/user/cc-box/core/binary"
 	"github.com/user/cc-box/core/config"
 	"github.com/user/cc-box/core/crypto"
+	"github.com/user/cc-box/core/normalize"
 	"github.com/user/cc-box/core/object"
 	"github.com/user/cc-box/core/snapshot"
 	"github.com/user/cc-box/core/webdav"
@@ -272,7 +274,12 @@ func (a *App) fillDashboardFromSnapshots(data *DashboardData, cfg *config.Config
 	if localHeadStr != headID {
 		data.setSyncHealth("pending", "head_mismatch", "本地与远程 HEAD 不一致，需要同步。", false, localHeadStr, headID)
 	} else {
-		data.setSyncHealth("synced", "synced", "本地与远程一致。", false, localHeadStr, headID)
+		uncommitted := detectUncommittedChanges(cfg.Exclude.Patterns, snap)
+		if uncommitted {
+			data.setSyncHealth("pending", "local_uncommitted", "本地有未同步的变更，请推送。", false, localHeadStr, headID)
+		} else {
+			data.setSyncHealth("synced", "synced", "本地与远程一致。", false, localHeadStr, headID)
+		}
 	}
 
 	// 上次同步时间
@@ -366,7 +373,7 @@ func (a *App) QuickPush() int64 {
 			return err
 		}
 
-		scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
+		scanner := newClaudeScanner(cfg.Exclude.Patterns)
 		scanResult, err := scanner.ScanPartial()
 		if err != nil {
 			return fmt.Errorf("扫描失败: %w", err)
@@ -563,6 +570,30 @@ func (a *App) QuickPull() int64 {
 // QuickSync pull + push 一步完成
 func (a *App) QuickSync() int64 {
 	return a.StartAsync("quick-sync", func(ctx context.Context, opID int64) error {
+		cfg, client, key, err := a.loadClients()
+		if err != nil {
+			return err
+		}
+		client.SetTimeout(5 * time.Second)
+
+		// 快速检查：HEAD 一致且无未提交变更 → 跳过
+		localHeadStr, _ := readLocalHeadID()
+		if localHeadStr != "" {
+			remoteHeadData, _, headErr := getDashboardRemoteHead(client)
+			if headErr == nil {
+				remoteHead := strings.TrimSpace(string(remoteHeadData))
+				if localHeadStr == remoteHead {
+					if snap, snapErr := a.loadSnapByID(client, key, localHeadStr); snapErr == nil && snap != nil {
+						if !detectUncommittedChanges(cfg.Exclude.Patterns, snap) {
+							UpdateTrayState(TraySynced)
+							a.emitProgress(opID, "quick-sync", 1, 1, 1, 1, "已是最新，无需同步")
+							return nil
+						}
+					}
+				}
+			}
+		}
+
 		UpdateTrayState(TraySyncing)
 		a.emitProgress(opID, "quick-sync", 0, 2, 0, 2, "正在拉取...")
 
@@ -651,7 +682,7 @@ func (a *App) RepairRemoteFromLocal() int64 {
 			return err
 		}
 
-		scanner := snapshot.NewScanner(config.ClaudeDir(), cfg.Exclude.Patterns)
+		scanner := newClaudeScanner(cfg.Exclude.Patterns)
 		scanResult, err := scanner.ScanPartial()
 		if err != nil {
 			return fmt.Errorf("扫描失败: %w", err)
@@ -1069,4 +1100,106 @@ func formatTimeAgo(t time.Time) string {
 	default:
 		return t.Format("2006-01-02")
 	}
+}
+
+// detectUncommittedChanges 轻量级检测本地是否有未提交的变更
+// 比较文件 metadata（size + modtime）与快照，不计算 hash
+func detectUncommittedChanges(excludePatterns []string, localSnap *snapshot.Snapshot) bool {
+	root := config.ClaudeDir()
+	snapFiles := localSnap.Files
+	seen := make(map[string]bool)
+	changed := false
+
+	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil || changed {
+			return nil
+		}
+		if info.IsDir() {
+			relPath := normalize.RelativePath(root, path)
+			if relPath == "." {
+				return nil
+			}
+			if isDashboardExcluded(relPath, true, excludePatterns) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+
+		relPath := normalize.RelativePath(root, path)
+		if isDashboardExcluded(relPath, false, excludePatterns) {
+			return nil
+		}
+
+		seen[relPath] = true
+		entry, exists := snapFiles[relPath]
+		if !exists || info.Size() != entry.Size || !info.ModTime().UTC().Equal(entry.Modified) {
+			changed = true
+		}
+		return nil
+	})
+
+	if changed {
+		return true
+	}
+
+	// 检查外部 ~/.claude.json
+	jsonPath := config.ClaudeJSONPath()
+	if info, err := os.Stat(jsonPath); err == nil && info.Mode().IsRegular() {
+		seen[".claude.json"] = true
+		if entry, exists := snapFiles[".claude.json"]; !exists {
+			return true
+		} else if info.Size() != entry.Size || !info.ModTime().UTC().Equal(entry.Modified) {
+			return true
+		}
+	}
+
+	// 检查快照中有但本地已删除的文件
+	for path := range snapFiles {
+		if !seen[path] {
+			return true
+		}
+	}
+
+	return false
+}
+
+// isDashboardExcluded 与 files.go 中的 isFileTreeExcluded 逻辑一致
+func isDashboardExcluded(relPath string, isDir bool, patterns []string) bool {
+	for _, p := range patterns {
+		if strings.HasSuffix(p, "/") {
+			dirName := strings.TrimSuffix(p, "/")
+			for _, part := range strings.Split(relPath, "/") {
+				if matchDashboardGlob(part, dirName) {
+					return true
+				}
+			}
+			continue
+		}
+		if strings.Contains(p, "*") {
+			if matchDashboardGlob(filepath.Base(relPath), p) {
+				return true
+			}
+			continue
+		}
+		if relPath == p || strings.HasPrefix(relPath, p+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func matchDashboardGlob(name, pattern string) bool {
+	if pattern == "*" {
+		return true
+	}
+	if strings.HasPrefix(pattern, "*") {
+		return strings.HasSuffix(name, pattern[1:])
+	}
+	if strings.HasSuffix(pattern, "*") {
+		return strings.HasPrefix(name, pattern[:len(pattern)-1])
+	}
+	return name == pattern
 }
