@@ -1,0 +1,13 @@
+- generic [active] [ref=e1]:
+  - img [ref=e5]
+  - generic [ref=e11]:
+    - generic [ref=e12]: joinBinarySync is not declared
+    - generic [ref=e13]: at error (file:///C:/Users/a/Desktop/%E9%A1%B9%E7%9B%AE%E5%BC%80%E5%8F%91/cc-box/gui/frontend/node_modules/svelte/compiler.mjs:13207:19) at Component.error (file:///C:/Users/a/Desktop/%E9%A1%B9%E7%9B%AE%E5%BC%80%E5%8F%91/cc-box/gui/frontend/node_modules/svelte/compiler.mjs:42947:13) at new Binding (file:///C:/Users/a/Desktop/%E9%A1%B9%E7%9B%AE%E5%BC%80%E5%8F%91/cc-box/gui/frontend/node_modules/svelte/compiler.mjs:15564:27) at file:///C:/Users/a/Desktop/%E9%A1%B9%E7%9B%AE%E5%BC%80%E5%8F%91/cc-box/gui/frontend/node_modules/svelte/compiler.mjs:30569:40 at Array.forEach (<anonymous>) at new Element (file:///C:/Users/a/Desktop/%E9%A1%B9%E7%9B%AE%E5%BC%80%E5%8F%91/cc-box/gui/frontend/node_modules/svelte/compiler.mjs:30556:25) at file:///C:/Users/a/Desktop/%E9%A1%B9%E7%9B%AE%E5%BC%80%E5%8F%91/cc-box/gui/frontend/node_modules/svelte/compiler.mjs:31662:22 at Array.map (<anonymous>) at map_children (file:///C:/Users/a/Desktop/%E9%A1%B9%E7%9B%AE%E5%BC%80%E5%8F%91/cc-box/gui/frontend/node_modules/svelte/compiler.mjs:31657:21) at new Element (file:///C:/Users/a/Desktop/%E9%A1%B9%E7%9B%AE%E5%BC%80%E5%8F%91/cc-box/gui/frontend/node_modules/svelte/compiler.mjs:30606:25
+    - generic [ref=e14]:
+      - text: Click outside or fix the code to dismiss.
+      - text: You can also disable this overlay by setting
+      - code [ref=e15]: server.hmr.overlay
+      - text: to
+      - code [ref=e16]: "false"
+      - text: in
+      - code [ref=e17]: vite.config.js.

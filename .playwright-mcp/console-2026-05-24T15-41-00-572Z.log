@@ -1,0 +1,23 @@
+[    2334ms] [ERROR] init check failed: TypeError: Cannot read properties of undefined (reading 'main')
+    at IsInitialized (http://127.0.0.1:5173/wailsjs/go/main/App.js:150:22)
+    at http://127.0.0.1:5173/src/App.svelte:965:40
+    at run (http://127.0.0.1:5173/node_modules/.vite/deps/chunk-2SWUXKJS.js?v=d06ba55b:19:10)
+    at Array.map (<anonymous>)
+    at http://127.0.0.1:5173/node_modules/.vite/deps/chunk-2SWUXKJS.js?v=d06ba55b:1823:52
+    at flush (http://127.0.0.1:5173/node_modules/.vite/deps/chunk-2SWUXKJS.js?v=d06ba55b:1113:9)
+    at init (http://127.0.0.1:5173/node_modules/.vite/deps/chunk-2SWUXKJS.js?v=d06ba55b:1902:5)
+    at new App (http://127.0.0.1:5173/src/App.svelte:1084:3)
+    at createProxiedComponent (http://127.0.0.1:5173/node_modules/svelte-hmr/runtime/svelte-hooks.js?v=d06ba55b:341:9)
+    at new ProxyComponent (http://127.0.0.1:5173/node_modules/svelte-hmr/runtime/proxy.js?v=d06ba55b:242:7) @ http://127.0.0.1:5173/src/App.svelte:966
+[    2347ms] TypeError: Cannot read properties of undefined (reading 'EventsOnMultiple')
+    at EventsOnMultiple (http://127.0.0.1:5173/wailsjs/runtime/runtime.js:40:27)
+    at EventsOn (http://127.0.0.1:5173/wailsjs/runtime/runtime.js:44:12)
+    at http://127.0.0.1:5173/src/App.svelte:970:3
+    at run (http://127.0.0.1:5173/node_modules/.vite/deps/chunk-2SWUXKJS.js?v=d06ba55b:19:10)
+    at Array.map (<anonymous>)
+    at http://127.0.0.1:5173/node_modules/.vite/deps/chunk-2SWUXKJS.js?v=d06ba55b:1823:52
+    at flush (http://127.0.0.1:5173/node_modules/.vite/deps/chunk-2SWUXKJS.js?v=d06ba55b:1113:9)
+    at init (http://127.0.0.1:5173/node_modules/.vite/deps/chunk-2SWUXKJS.js?v=d06ba55b:1902:5)
+    at new App (http://127.0.0.1:5173/src/App.svelte:1084:3)
+    at createProxiedComponent (http://127.0.0.1:5173/node_modules/svelte-hmr/runtime/svelte-hooks.js?v=d06ba55b:341:9)
+[    2359ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5173/favicon.ico:0

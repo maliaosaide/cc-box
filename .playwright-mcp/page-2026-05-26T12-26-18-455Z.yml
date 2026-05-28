@@ -1,0 +1,27 @@
+- generic [ref=e184]:
+  - generic [ref=e185]:
+    - button "返回" [ref=e186] [cursor=pointer]:
+      - img [ref=e187]
+      - text: 返回
+    - button "更换初始化方式" [ref=e189] [cursor=pointer]
+  - heading "输入已有加密密码" [level=2] [ref=e190]
+  - paragraph [ref=e191]: 加密密码将用于解密云端已有数据。
+  - generic [ref=e192]:
+    - generic [ref=e193]:
+      - generic [ref=e194]: 加密密码
+      - textbox "加密密码" [ref=e195]:
+        - /placeholder: 输入已有加密密码
+    - generic [ref=e196]:
+      - generic [ref=e197]: 设备名称
+      - textbox "设备名称" [ref=e198]: windows-amd64
+    - generic [ref=e199] [cursor=pointer]:
+      - checkbox "同时恢复 Claude binary 开启后会按最新快照记录恢复当前平台 Claude binary；云端缺失时会停止初始化。" [ref=e200]
+      - generic [ref=e201]:
+        - strong [ref=e202]: 同时恢复 Claude binary
+        - emphasis [ref=e203]: 开启后会按最新快照记录恢复当前平台 Claude binary；云端缺失时会停止初始化。
+    - generic [ref=e204]:
+      - img [ref=e205]
+      - generic [ref=e207]: 加密密码验证通过后将自动拉取最新配置；Claude binary 可稍后在二进制页面恢复
+    - button "完成" [disabled] [ref=e209] [cursor=pointer]:
+      - text: 完成
+      - img [ref=e210]

@@ -1,0 +1,43 @@
+- generic [ref=e49]:
+  - button "返回" [ref=e50] [cursor=pointer]:
+    - img [ref=e51]
+    - text: 返回
+  - heading "连接 WebDAV 存储" [level=2] [ref=e53]
+  - paragraph [ref=e54]: 配置云端同步的存储后端
+  - generic [ref=e55]:
+    - generic [ref=e56]:
+      - generic [ref=e57]: 常用预设
+      - generic [ref=e58]:
+        - button "坚果云" [ref=e59] [cursor=pointer]
+        - button "NextCloud" [ref=e60] [cursor=pointer]
+        - button "Synology" [ref=e61] [cursor=pointer]
+        - button "Alist" [ref=e62] [cursor=pointer]
+        - button "自定义" [ref=e63] [cursor=pointer]
+    - generic [ref=e64]:
+      - generic [ref=e65]: 服务地址
+      - textbox "服务地址" [ref=e66]:
+        - /placeholder: https://dav.example.com/dav/
+        - text: https://example.invalid/dav/
+    - generic [ref=e67]:
+      - generic [ref=e68]: 用户名
+      - textbox "用户名" [ref=e69]:
+        - /placeholder: user@example.com
+        - text: user
+    - generic [ref=e70]:
+      - generic [ref=e71]: WebDAV 密码
+      - textbox "WebDAV 密码" [ref=e72]:
+        - /placeholder: 应用密码
+        - text: pass
+    - generic [ref=e73]:
+      - generic [ref=e74]: 自定义 WebDAV 存储目录
+      - textbox "自定义 WebDAV 存储目录" [ref=e75]:
+        - /placeholder: 例如 cc-box，可留空
+        - text: cc-box
+    - generic [ref=e81]:
+      - img [ref=e82]
+      - generic [ref=e84]: 连接成功
+    - generic [ref=e76]:
+      - button "测试连接" [ref=e77] [cursor=pointer]
+      - button "下一步" [ref=e78] [cursor=pointer]:
+        - text: 下一步
+        - img [ref=e79]
