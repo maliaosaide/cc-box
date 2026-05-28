@@ -112,6 +112,23 @@ User Password ──→ Argon2id ──→ 256-bit Key
 
 **Important**: You choose and remember the encryption password. CC-Box does not store it, cannot recover it, and cannot decrypt your data without it. If you lose the password, the data is unrecoverable.
 
+## Screenshots
+
+<p align="center">
+  <img src="./docs/screenshots/01-dashboard.png" alt="Dashboard" width="800" />
+  <br/><i>Dashboard — sync health, connection status, pending changes, conflict count, device list</i>
+</p>
+
+<p align="center">
+  <img src="./docs/screenshots/02-files.png" alt="Files" width="800" />
+  <br/><i>Config file browser — tree view with status badges, file content, diff viewer, conflict resolution</i>
+</p>
+
+<p align="center">
+  <img src="./docs/screenshots/03-binaries.png" alt="Binaries" width="800" />
+  <br/><i>Claude binary management — WebDAV backups, GitHub Releases, official installer</i>
+</p>
+
 ## Claude Binary Management
 
 Beyond config files, CC-Box manages the Claude binary itself — install, backup, switch, and rollback — all targeting the official Claude native install layout.

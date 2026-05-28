@@ -112,6 +112,23 @@ CC-Box 不信任 WebDAV 服务器能保护你的明文配置。
 
 **重要**：加密密码由你选择和记忆。CC-Box 不存储它、无法恢复它、没有它也无法解密你的数据。如果你丢了密码，数据无法恢复。
 
+## 界面截图
+
+<p align="center">
+  <img src="../docs/screenshots/01-dashboard.png" alt="概览" width="800" />
+  <br/><i>概览页 — 同步健康状态、连接状态、待同步变更、冲突计数、设备列表</i>
+</p>
+
+<p align="center">
+  <img src="../docs/screenshots/02-files.png" alt="配置文件" width="800" />
+  <br/><i>配置文件浏览器 — 树状视图含状态标识、文件内容、Diff 查看器、冲突解决</i>
+</p>
+
+<p align="center">
+  <img src="../docs/screenshots/03-binaries.png" alt="二进制管理" width="800" />
+  <br/><i>Claude 二进制管理 — WebDAV 备份、GitHub Releases、官方安装器</i>
+</p>
+
 ## Claude 二进制管理
 
 除了配置文件，CC-Box 还能管理 Claude 二进制——安装、备份、切换和回滚——全部写入 Claude 官方 native install 布局。
