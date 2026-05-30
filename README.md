@@ -427,6 +427,12 @@ MIT
 
 ---
 
+## Friendly Links
+
+- [Linux Do](https://linux.do/) — A friendly community for developers and tech enthusiasts.
+
+---
+
 ## Star History
 
 <p align="center">

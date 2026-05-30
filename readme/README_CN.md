@@ -427,6 +427,12 @@ MIT
 
 ---
 
+## 友情链接
+
+- [Linux Do](https://linux.do/) — 一个友好的开发者与技术爱好者社区。
+
+---
+
 ## Star History
 
 <p align="center">
