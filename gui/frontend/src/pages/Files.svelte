@@ -561,7 +561,7 @@
 
   .detail-panel {
     flex: 1; background: rgb(var(--surface-0));
-    display: flex; flex-direction: column; min-width: 0; overflow: hidden;
+    display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden;
   }
   .empty-detail {
     flex: 1; display: flex; flex-direction: column;
@@ -590,7 +590,7 @@
   .st-failed { color: rgb(var(--state-err)); background: rgba(184,92,92,0.08); }
   .st-conflict { color: rgb(var(--state-err)); background: rgba(184,92,92,0.08); }
 
-  .failed-view { display: flex; flex-direction: column; flex: 1; }
+  .failed-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
   .failed-label { font-size: 11px; color: rgb(var(--state-err)); font-family: 'DM Mono', monospace; }
   .failed-body { padding: 14px; display: flex; flex-direction: column; gap: 12px; font-size: 12px; color: rgb(var(--text-secondary)); }
   .failed-row { display: flex; flex-direction: column; gap: 4px; }
@@ -624,10 +624,10 @@
   .diff-del .diff-prefix { color: rgb(var(--state-err)); }
   .diff-raw { padding: 12px 14px; font-size: 12px; font-family: 'DM Mono', monospace; color: rgb(var(--text-muted)); }
 
-  .conflict-view { display: flex; flex-direction: column; flex: 1; }
+  .conflict-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
   .conflict-label { font-size: 11px; color: rgb(var(--state-err)); font-family: 'DM Mono', monospace; }
   .conflict-panels { display: flex; flex: 1; min-height: 0; overflow: hidden; }
-  .conflict-col { flex: 1; display: flex; flex-direction: column; border-right: 1px solid rgb(var(--border)); min-width: 0; }
+  .conflict-col { flex: 1; display: flex; flex-direction: column; border-right: 1px solid rgb(var(--border)); min-width: 0; min-height: 0; }
   .conflict-col:last-child { border-right: none; }
   .conflict-col-header { padding: 6px 10px; border-bottom: 1px solid rgb(var(--border)); background: rgb(var(--surface-1)); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .choice-btn {
@@ -667,7 +667,7 @@
   .conflict-actions {
     display: flex; justify-content: flex-end; gap: 8px;
     padding: 8px 14px; border-top: 1px solid rgb(var(--border));
-    background: rgb(var(--surface-1));
+    background: rgb(var(--surface-1)); flex-shrink: 0;
   }
 
   .modal-overlay {
