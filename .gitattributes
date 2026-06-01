@@ -1,0 +1,20 @@
+# Wails auto-generated bindings — must stay LF
+gui/frontend/wailsjs/** text eol=lf
+
+# Go source and modules — LF per Go convention
+*.go text eol=lf
+go.mod text eol=lf
+go.sum text eol=lf
+
+# Frontend source — LF for cross-platform consistency
+*.svelte text eol=lf
+*.js text eol=lf
+*.ts text eol=lf
+*.css text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+
+# Binary / generated / vendor — no conversion
+*.exe binary
+*.png binary
+*.ico binary
