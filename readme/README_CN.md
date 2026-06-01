@@ -38,7 +38,7 @@ Claude Code 越用越顺手，配置也越来越多：
 换一台电脑，每一样都变成一个手动迁移步骤。两台机器同时改配置，你面临静默覆盖的风险。CC-Box 端到端解决这个问题。
 
 | 能力 | 没有 CC-Box | 有了 CC-Box |
-|------|------------|-----------|
+| --- | --- | --- |
 | 迁移配置到新机器 | 手动复制 `~/.claude/`，容易遗漏 | 一个 `pull` 命令或 GUI 点击 |
 | 历史和回滚 | 无。覆盖了就没了。 | 每次推送生成快照。可回滚到任意时间点。 |
 | 多机冲突 | 手动合并，祈祷不出错 | 并排对比，选本地/远程，或 Git 风格内联合并 |
@@ -50,7 +50,7 @@ Claude Code 越用越顺手，配置也越来越多：
 
 CC-Box 不只是上传文件。它构建一个**内容寻址的快照**，涵盖整个 `~/.claude/` 目录和 `~/.claude.json`，加密后推送到你的 WebDAV 服务器。
 
-```
+```text
 机器 A                                       WebDAV 服务器                          机器 B
 ──────                                     ────────────                         ──────
 ~/.claude/                                 snapshots/                            ~/.claude/
@@ -97,7 +97,7 @@ CLI 和 GUI 都会展示冲突。GUI 显示并排对比视图，带有元数据�
 
 CC-Box 不信任 WebDAV 服务器能保护你的明文配置。
 
-```
+```text
 用户密码 ──→ Argon2id ──→ 256 位密钥
                               │
                 ┌─────────────┴─────────────┐
@@ -121,7 +121,7 @@ CC-Box 不信任 WebDAV 服务器能保护你的明文配置。
 所有安装路径遵循 Claude 官方约定：
 
 | 平台 | 二进制路径 |
-|------|----------|
+| --- | --- |
 | Windows | `~/.local/bin/claude.exe` |
 | macOS | `~/.local/bin/claude` |
 | Linux | `~/.local/bin/claude` |
@@ -131,7 +131,7 @@ CC-Box 不信任 WebDAV 服务器能保护你的明文配置。
 ### 三种安装来源
 
 | 来源 | 适用场景 | 说明 |
-|------|---------|------|
+| --- | --- | --- |
 | **官方安装器** | 安装最新版 | 执行 Claude 官方安装命令。最快的获取最新稳定版方式。 |
 | **GitHub Releases** | 固定指定版本 | 从 Claude 官方 GitHub Release 下载。适用于任意已发布版本。SHA256 校验。适合回退、测试、锁定版本。 |
 | **WebDAV 备份** | 离线/无网恢复 | 恢复你之前上传过的版本。不依赖 GitHub 或官方安装源。 |
@@ -139,7 +139,7 @@ CC-Box 不信任 WebDAV 服务器能保护你的明文配置。
 ### GitHub Release 平台映射
 
 | 当前平台 | GitHub 资源 |
-|---------|-----------|
+| --- | --- |
 | Windows x64 | `claude-win32-x64.zip` |
 | macOS Apple Silicon | `claude-darwin-arm64.tar.gz` |
 | Linux x64 | `claude-linux-x64.tar.gz` |
@@ -182,7 +182,7 @@ CC-Box 扫描 `~/.claude/projects/`（Claude Code 存储项目数据的位置）
 拉取项目 `.claude.json` 时，CC-Box 采用合并而非覆盖：
 
 | 字段 | 策略 |
-|------|------|
+| --- | --- |
 | `mcpServers` | 远程优先，但仅存在于本地的服务器会保留 |
 | `allowedTools` | 并集（两边合并） |
 | `permissions` | 远程优先，但仅存在于本地的键会保留 |
@@ -199,7 +199,7 @@ cc-box project add <路径>     # 手动跟踪一个项目
 ## 功能对比：CLI vs GUI
 
 | 功能 | CLI | GUI |
-|------|-----|-----|
+| --- | --- | --- |
 | 初始化同步组 | ✓ (`cc-box init`) | ✓（引导向导） |
 | 推送 / 拉取 / 同步 | ✓ | ✓（工具栏 + 批量操作） |
 | 快照历史 | ✓ (`cc-box log`) | ✓（历史页面，时间线） |
@@ -225,7 +225,7 @@ CLI 和 GUI 共享同一 `core/` 模块——同步语义、加密、快照格�
 预编译二进制可在 [Releases](https://github.com/maliaosaide/cc-box/releases) 下载：
 
 | 文件 | 说明 |
-|------|------|
+| --- | --- |
 | `cc-box.exe` | CLI 命令行工具 |
 | `cc-box-gui.exe` | Windows 桌面应用（需要 WebView2） |
 
@@ -285,7 +285,7 @@ GUI 通过引导向导带你完成：WebDAV 连接 → 加密密码 → 设备�
 ### 前置依赖
 
 | 依赖 | 版本 | 说明 |
-|------|------|------|
+| --- | --- | --- |
 | Go | 1.25+ | 构建 CLI 和 GUI 后端 |
 | Wails CLI | v2.x | `go install github.com/wailsapp/wails/v2/cmd/wails@latest` |
 | Node.js + npm | LTS | 前端依赖和构建 |
@@ -319,7 +319,7 @@ npm --prefix gui/frontend run build     # 前端类型检查 + 构建
 ## 技术栈
 
 | 层级 | 技术 |
-|------|------|
+| --- | --- |
 | 语言 | Go 1.25+ |
 | CLI 框架 | [Cobra](https://github.com/spf13/cobra) + [Viper](https://github.com/spf13/viper) |
 | GUI 框架 | [Wails v2](https://wails.io) |
@@ -331,7 +331,7 @@ npm --prefix gui/frontend run build     # 前端类型检查 + 构建
 
 ## 项目结构
 
-```
+```text
 cc-box/
 ├── core/                        # 共享模块——不依赖 CLI 或 GUI
 │   ├── binary/                  # Claude binary 安装、上传、下载、索引、平台检测
@@ -371,7 +371,7 @@ CLI 和 GUI 是**独立的应用**，共享 `core/` 模块。这意味着：
 CC-Box 使用标准 WebDAV 方法和头部。任意兼容的服务商均可使用：
 
 | 服务商 | 状态 | 说明 |
-|--------|------|------|
+| --- | --- | --- |
 | **Alist** | ✓ | 完全支持 |
 | **坚果云** | ✓ | 完全支持 |
 | **NextCloud** | ✓ | 完全支持 |
@@ -398,7 +398,7 @@ CC-Box 使用标准 WebDAV 方法和头部。任意兼容的服务商均可使�
 
 从 GitHub Releases 安装 Claude 时，CC-Box 需要访问 GitHub API、Release 资源和下载跳转域名。如果在防火墙或代理后面，请添加这些域名：
 
-```
+```text
 github.com
 githubusercontent.com
 githubassets.com
@@ -417,7 +417,7 @@ Clash 规则示例：
 ## 环境变量
 
 | 变量 | 说明 |
-|------|------|
+| --- | --- |
 | `CC_BOX_WEBDAV_PASSWORD` | WebDAV 密码。设置后可跳过 CLI 自动化的交互式密码输入。 |
 | `HTTP_PROXY` / `HTTPS_PROXY` | HTTP/HTTPS 代理，用于 WebDAV 请求和 GitHub 下载。 |
 
