@@ -38,7 +38,7 @@ The more you use Claude Code, the more your configuration grows. Soon you have:
 When you switch computers, every one of these becomes a manual migration step. When two machines both make changes, you risk silent overwrites. CC-Box solves this end-to-end.
 
 | Capability | Without CC-Box | With CC-Box |
-|---|---|---|
+| --- | --- | --- |
 | Moving configs to a new machine | Copy `~/.claude/` manually, forget something | One `pull` command or GUI click |
 | History & rollback | None. Overwrite is forever. | Every push creates a snapshot. Revert to any point. |
 | Multi-machine conflict | Manual merge, hope nothing breaks | Side-by-side diff, pick local/remote, or Git-style inline merge |
@@ -50,7 +50,7 @@ When you switch computers, every one of these becomes a manual migration step. W
 
 CC-Box doesn't just upload files. It builds a **content-addressed snapshot** of your entire `~/.claude/` directory and `~/.claude.json`, encrypts it, and pushes it to your WebDAV server.
 
-```
+```text
 Machine A                                    WebDAV Server                          Machine B
 ─────────                                   ──────────────                         ─────────
 ~/.claude/                                  snapshots/                             ~/.claude/
@@ -97,7 +97,7 @@ Every file is content-addressed. Two snapshots that both contain the same file (
 
 CC-Box does not trust the WebDAV server with your plaintext configs.
 
-```
+```text
 User Password ──→ Argon2id ──→ 256-bit Key
                                   │
                     ┌─────────────┴─────────────┐
@@ -121,7 +121,7 @@ Beyond config files, CC-Box manages the Claude binary itself — install, backup
 All install paths follow Claude's official convention:
 
 | Platform | Binary Path |
-|----------|------------|
+| ---------- | ------------ |
 | Windows | `~/.local/bin/claude.exe` |
 | macOS | `~/.local/bin/claude` |
 | Linux | `~/.local/bin/claude` |
@@ -131,7 +131,7 @@ This means `claude` on your `PATH` is the version CC-Box manages. No private dir
 ### Three Install Sources
 
 | Source | Best For | Details |
-|--------|----------|---------|
+| --- | --- | --- |
 | **Official Installer** | Getting the latest | Executes Claude's official install command. Quickest path to the newest stable release. |
 | **GitHub Releases** | Pinning a specific version | Downloads from Claude's GitHub Release assets. Works for any published version. SHA256 verified against the release's `SHASUMS256.txt`. Good for testing, rollback, or locking a known-good version. |
 | **WebDAV Backup** | Offline / air-gapped restore | Restores a version you previously uploaded. Does not depend on GitHub or official installer availability. |
@@ -139,7 +139,7 @@ This means `claude` on your `PATH` is the version CC-Box manages. No private dir
 ### GitHub Release Platform Mapping
 
 | Current Platform | GitHub Asset |
-|-----------------|-------------|
+| --- | --- |
 | Windows x64 | `claude-win32-x64.zip` |
 | macOS Apple Silicon | `claude-darwin-arm64.tar.gz` |
 | Linux x64 | `claude-linux-x64.tar.gz` |
@@ -182,7 +182,7 @@ CC-Box scans `~/.claude/projects/` (where Claude Code stores per-project data), 
 When pulling a project `.claude.json`, CC-Box merges rather than overwrites:
 
 | Field | Strategy |
-|-------|----------|
+| --- | --- |
 | `mcpServers` | Remote wins, but servers that only exist locally are preserved |
 | `allowedTools` | Union (both sets combined) |
 | `permissions` | Remote wins, but keys only present locally are kept |
@@ -199,7 +199,7 @@ cc-box project add <path>     # Manually track a project
 ## Feature Comparison: CLI vs GUI
 
 | Feature | CLI | GUI |
-|---------|-----|-----|
+| --- | --- | --- |
 | Initialize sync group | ✓ | ✓ (onboarding wizard) |
 | Push / Pull / Sync | ✓ | ✓ (toolbar + bulk actions) |
 | Snapshot history | ✓ (`cc-box log`) | ✓ (History page with timeline) |
@@ -225,7 +225,7 @@ Both CLI and GUI share the same `core/` module — sync semantics, encryption, s
 Pre-built binaries are available on [Releases](https://github.com/maliaosaide/cc-box/releases):
 
 | File | Description |
-|------|------------|
+| --- | --- |
 | `cc-box.exe` | CLI tool (command-line) |
 | `cc-box-gui.exe` | Desktop app (Windows, WebView2 required) |
 
@@ -285,7 +285,7 @@ The GUI guides you through an onboarding wizard: WebDAV connection → encryptio
 ### Prerequisites
 
 | Dependency | Version | Notes |
-|------------|---------|-------|
+| --- | --- | --- |
 | Go | 1.25+ | Builds CLI and GUI backend |
 | Wails CLI | v2.x | `go install github.com/wailsapp/wails/v2/cmd/wails@latest` |
 | Node.js + npm | LTS | Frontend dependencies and build |
@@ -319,7 +319,7 @@ npm --prefix gui/frontend run build     # Frontend type-check + build
 ## Tech Stack
 
 | Layer | Technology |
-|-------|------------|
+| --- | --- |
 | Language | Go 1.25+ |
 | CLI Framework | [Cobra](https://github.com/spf13/cobra) + [Viper](https://github.com/spf13/viper) |
 | GUI Framework | [Wails v2](https://wails.io) |
@@ -331,7 +331,7 @@ npm --prefix gui/frontend run build     # Frontend type-check + build
 
 ## Project Structure
 
-```
+```text
 cc-box/
 ├── core/                        # Shared module — no CLI/GUI dependencies
 │   ├── binary/                  # Claude binary install, upload, download, index, platform detection
@@ -371,7 +371,7 @@ Changing a core behavior (sync, encryption, snapshot, WebDAV, binary) requires u
 CC-Box uses standard WebDAV methods and headers. Any compliant provider should work:
 
 | Provider | Status | Notes |
-|----------|--------|-------|
+| --- | --- | --- |
 | **Alist** | ✓ | Full support |
 | **坚果云 (JianGuoYun)** | ✓ | Full support |
 | **NextCloud** | ✓ | Full support |
@@ -398,7 +398,7 @@ Without proper ETag support, single-device sync still works fine. Multi-device s
 
 When installing Claude from GitHub Releases, CC-Box accesses GitHub API, Release assets, and download redirect domains. If you're behind a proxy or firewall, add these domains:
 
-```
+```text
 github.com
 githubusercontent.com
 githubassets.com
@@ -417,7 +417,7 @@ Clash rule example:
 ## Environment Variables
 
 | Variable | Purpose |
-|----------|---------|
+| --- | --- |
 | `CC_BOX_WEBDAV_PASSWORD` | WebDAV password. Set to skip interactive password prompts in CLI automation. |
 | `HTTP_PROXY` / `HTTPS_PROXY` | HTTP/HTTPS proxy for WebDAV requests and GitHub downloads. |
 
