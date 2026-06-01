@@ -6,6 +6,7 @@
 /gui/frontend/dist/
 /gui/frontend/node_modules/
 /gui/frontend/.svelte-kit/
+/gui/frontend/package.json.md5
 
 # 敏感文件
 *.key
