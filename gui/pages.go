@@ -21,6 +21,12 @@ import (
 	"github.com/user/cc-box/gui/internal/project"
 )
 
+// configFileMissing 检查 config.toml 是否确实不存在，用于区分"文件不存在"和"读取失败"
+func configFileMissing() bool {
+	_, err := os.Stat(filepath.Join(config.CCBoxDir(), "config.toml"))
+	return os.IsNotExist(err)
+}
+
 // SnapshotEntry 快照历史条目
 type SnapshotEntry struct {
 	ID        string `json:"id"`
@@ -246,7 +252,12 @@ func decryptRemoteData(data, key []byte) ([]byte, error) {
 func (a *App) GetConfig() (*ConfigView, error) {
 	cfg, err := config.Load()
 	if err != nil {
-		return nil, err
+		// 配置文件不存在时返回默认值，允许用户在设置页创建配置
+		if configFileMissing() {
+			cfg = config.DefaultConfig()
+		} else {
+			return nil, err
+		}
 	}
 
 	hasPassword := false
@@ -334,7 +345,12 @@ func (a *App) GetConfig() (*ConfigView, error) {
 func (a *App) SetConfigField(section, key, value string) error {
 	cfg, err := config.Load()
 	if err != nil {
-		return err
+		// 配置文件不存在时从默认配置开始，保存时会自动创建
+		if configFileMissing() {
+			cfg = config.DefaultConfig()
+		} else {
+			return err
+		}
 	}
 	clearClaudeCache := false
 
@@ -462,7 +478,11 @@ func claudeBinaryPlaceholderPath(res binary.ClaudeResolution) string {
 func (a *App) GetClaudeDirectories() ([]ClaudeDirectoryInfo, error) {
 	cfg, err := config.Load()
 	if err != nil {
-		return nil, err
+		if configFileMissing() {
+			cfg = config.DefaultConfig()
+		} else {
+			return nil, err
+		}
 	}
 	excluded := make(map[string]bool, len(cfg.Exclude.Patterns))
 	for _, pattern := range cfg.Exclude.Patterns {
@@ -502,7 +522,11 @@ func (a *App) GetClaudeDirectories() ([]ClaudeDirectoryInfo, error) {
 func (a *App) GetClaudeExcludeFiles() ([]ClaudeFileInfo, error) {
 	cfg, err := config.Load()
 	if err != nil {
-		return nil, err
+		if configFileMissing() {
+			cfg = config.DefaultConfig()
+		} else {
+			return nil, err
+		}
 	}
 	excluded := make(map[string]bool, len(cfg.Exclude.Patterns))
 	for _, pattern := range cfg.Exclude.Patterns {
@@ -522,7 +546,11 @@ func (a *App) GetClaudeExcludeFiles() ([]ClaudeFileInfo, error) {
 func (a *App) AddExcludePattern(pattern string) error {
 	cfg, err := config.Load()
 	if err != nil {
-		return err
+		if configFileMissing() {
+			cfg = config.DefaultConfig()
+		} else {
+			return err
+		}
 	}
 	for _, p := range cfg.Exclude.Patterns {
 		if p == pattern {
@@ -537,7 +565,11 @@ func (a *App) AddExcludePattern(pattern string) error {
 func (a *App) RemoveExcludePattern(pattern string) error {
 	cfg, err := config.Load()
 	if err != nil {
-		return err
+		if configFileMissing() {
+			cfg = config.DefaultConfig()
+		} else {
+			return err
+		}
 	}
 	filtered := make([]string, 0, len(cfg.Exclude.Patterns))
 	for _, p := range cfg.Exclude.Patterns {
