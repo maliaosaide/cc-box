@@ -251,14 +251,28 @@ func Platform() string {
 	return fmt.Sprintf("%s-%s", runtime.GOOS, runtime.GOARCH)
 }
 
-// Load 从 ~/.cc-box/config.toml 加载配置
+// ErrNotInitialized 表示 .cc-box 目录或 config.toml 不存在，需要先运行初始化
+var ErrNotInitialized = fmt.Errorf("未初始化，请先运行初始化向导")
+
+// Load 从 ~/.cc-box/config.toml 加载配置。
+// 如果目录或配置文件不存在，返回 ErrNotInitialized，调用方可据此引导用户初始化。
 func Load() (*Config, error) {
+	configDir := CCBoxDir()
+
+	// 快速检查：目录不存在 → 未初始化
+	if _, err := os.Stat(configDir); os.IsNotExist(err) {
+		return nil, ErrNotInitialized
+	}
+
 	v := viper.New()
 	v.SetConfigName("config")
 	v.SetConfigType("toml")
-	v.AddConfigPath(CCBoxDir())
+	v.AddConfigPath(configDir)
 
 	if err := v.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			return nil, ErrNotInitialized
+		}
 		return nil, fmt.Errorf("读取配置失败: %w", err)
 	}
 
@@ -356,6 +370,57 @@ func IsInitialized() bool {
 	configPath := filepath.Join(CCBoxDir(), "config.toml")
 	_, err := os.Stat(configPath)
 	return err == nil
+}
+
+// WriteFileEnsureDir 写入文件前自动创建所需目录。
+// 参考 cc-switch 的 write_json_file 模式：写入即创建目录，无需预先调用 InitCCBoxDir。
+// 使用原子写入（写临时文件 → rename），防止崩溃导致半截文件。
+func WriteFileEnsureDir(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("创建目录 %s 失败: %w", dir, err)
+	}
+	return atomicWriteFile(path, data, perm)
+}
+
+// atomicWriteFile 原子写入：先写入同目录临时文件，再 rename 替换目标。
+// 参考 cc-switch 的 atomic_write 实现。rename 在同一文件系统上是原子操作，
+// 即使写入中途崩溃也只会留下临时文件，不会损坏目标文件。
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	name := filepath.Base(path)
+	tmp, err := os.CreateTemp(dir, name+".tmp.*")
+	if err != nil {
+		return fmt.Errorf("创建临时文件失败: %w", err)
+	}
+	tmpPath := tmp.Name()
+
+	// 清理函数：出错时删除临时文件
+	cleanup := func() { os.Remove(tmpPath) }
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		cleanup()
+		return fmt.Errorf("写入临时文件失败: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		cleanup()
+		return fmt.Errorf("同步临时文件失败: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return fmt.Errorf("关闭临时文件失败: %w", err)
+	}
+	if err := os.Chmod(tmpPath, perm); err != nil {
+		cleanup()
+		return fmt.Errorf("设置文件权限失败: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		cleanup()
+		return fmt.Errorf("重命名临时文件失败: %w", err)
+	}
+	return nil
 }
 
 // LoadWebDAVPassword 从环境变量或共享密码存储读取 WebDAV 密码

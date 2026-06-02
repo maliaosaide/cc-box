@@ -177,7 +177,7 @@ func runInit(cmd *cobra.Command, args []string) (err error) {
 	}
 
 	// 保存密钥
-	if err := os.WriteFile(config.CCBoxDir()+"/salt.bin", salt, 0600); err != nil {
+	if err := config.WriteFileEnsureDir(config.CCBoxDir()+"/salt.bin", salt, 0600); err != nil {
 		return fmt.Errorf("保存 salt 失败: %w", err)
 	}
 	if err := crypto.SaveKey(key, config.KeyPath()); err != nil {
@@ -337,8 +337,7 @@ func updateRemoteHEAD(client *webdav.Client, newID string, expectedETag string) 
 
 // updateLocalHEAD 更新本地 HEAD
 func updateLocalHEAD(id string) error {
-	dir := config.CCBoxDir()
-	return os.WriteFile(dir+"/HEAD", []byte(id), 0600)
+	return config.WriteFileEnsureDir(config.CCBoxDir()+"/HEAD", []byte(id), 0600)
 }
 
 // saveLocalSnapshot 保存快照到本地缓存
@@ -348,10 +347,7 @@ func saveLocalSnapshot(snap *snapshot.Snapshot) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir+"/snapshots", 0700); err != nil {
-		return err
-	}
-	return os.WriteFile(dir+"/snapshots/"+snap.ID+".json", data, 0600)
+	return config.WriteFileEnsureDir(dir+"/snapshots/"+snap.ID+".json", data, 0600)
 }
 
 // loadLocalHEAD 读取本地 HEAD

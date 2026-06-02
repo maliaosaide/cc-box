@@ -107,7 +107,7 @@ type FileTreeResult struct {
 func (a *App) loadClients() (*config.Config, *webdav.Client, []byte, error) {
 	cfg, err := config.Load()
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("请先运行初始化")
+		return nil, nil, nil, fmt.Errorf("请先运行初始化: %w", err)
 	}
 
 	key, err := crypto.LoadKey(config.KeyPath())
@@ -1133,10 +1133,10 @@ func (a *App) doBulkPush(ctx context.Context, opID int64, cfg *config.Config, cl
 	if !res.Success {
 		return fmt.Errorf("远程 HEAD 已变化，请先拉取")
 	}
-	if err := os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(newSnap.ID), 0600); err != nil {
+	if err := config.WriteFileEnsureDir(config.CCBoxDir()+"/HEAD", []byte(newSnap.ID), 0600); err != nil {
 		return fmt.Errorf("更新本地 HEAD 失败: %w", err)
 	}
-	if err := os.WriteFile(config.CCBoxDir()+"/snapshots/"+newSnap.ID+".json", snapData, 0600); err != nil {
+	if err := config.WriteFileEnsureDir(config.CCBoxDir()+"/snapshots/"+newSnap.ID+".json", snapData, 0600); err != nil {
 		return fmt.Errorf("缓存快照失败: %w", err)
 	}
 	return nil
@@ -1217,7 +1217,7 @@ func (a *App) applyRemoteSnapshot(ctx context.Context, opID int64, operation str
 		if err := cachePulledSnapshot(remoteHead, remoteSnap); err != nil {
 			return nil, err
 		}
-		if err := os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(remoteHead), 0600); err != nil {
+		if err := config.WriteFileEnsureDir(config.CCBoxDir()+"/HEAD", []byte(remoteHead), 0600); err != nil {
 			return nil, err
 		}
 		return result, nil
@@ -1270,7 +1270,7 @@ func (a *App) applyRemoteSnapshot(ctx context.Context, opID int64, operation str
 		return nil, err
 	}
 	if result.Conflicts == 0 {
-		if err := os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(remoteHead), 0600); err != nil {
+		if err := config.WriteFileEnsureDir(config.CCBoxDir()+"/HEAD", []byte(remoteHead), 0600); err != nil {
 			return nil, err
 		}
 	}
@@ -1425,20 +1425,18 @@ func saveConflictFiles(relPath string, localData, remoteData []byte, meta confli
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(localFile), 0700); err != nil {
+		// WriteFileEnsureDir 内部已包含 MkdirAll，无需显式创建目录
+	if err := config.WriteFileEnsureDir(localFile, localData, 0600); err != nil {
 		return err
 	}
-	if err := os.WriteFile(localFile, localData, 0600); err != nil {
-		return err
-	}
-	if err := os.WriteFile(remoteFile, remoteData, 0600); err != nil {
+	if err := config.WriteFileEnsureDir(remoteFile, remoteData, 0600); err != nil {
 		return err
 	}
 	metaData, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(metaFile, metaData, 0600)
+	return config.WriteFileEnsureDir(metaFile, metaData, 0600)
 }
 
 func conflictFilePaths(relPath string) (string, string, string, error) {
@@ -1474,7 +1472,7 @@ func cachePulledSnapshot(remoteHead string, remoteSnap *snapshot.Snapshot) error
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(config.CCBoxDir()+"/snapshots/"+remoteHead+".json", snapData, 0600)
+	return config.WriteFileEnsureDir(config.CCBoxDir()+"/snapshots/"+remoteHead+".json", snapData, 0600)
 }
 
 // isTextFile 判断是否为文本文件

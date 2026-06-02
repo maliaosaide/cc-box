@@ -134,7 +134,7 @@ func runConfigRekey(cmd *cobra.Command, args []string) error {
 		_, _ = rotateRemoteEncryptedData(client, newKey, oldKey)
 		return fmt.Errorf("上传新 salt 失败: %w", err)
 	}
-	if err := os.WriteFile(config.CCBoxDir()+"/salt.bin", newSalt, 0600); err != nil {
+	if err := config.WriteFileEnsureDir(config.CCBoxDir()+"/salt.bin", newSalt, 0600); err != nil {
 		_, _ = rotateRemoteEncryptedData(client, newKey, oldKey)
 		_, _ = client.PUT("salt.bin", salt, "")
 		return fmt.Errorf("保存新 salt 失败: %w", err)

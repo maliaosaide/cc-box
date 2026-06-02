@@ -495,10 +495,10 @@ func (a *App) QuickPush() int64 {
 		}
 
 		// 更新本地
-		if err := os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(newSnap.ID), 0600); err != nil {
+		if err := config.WriteFileEnsureDir(config.CCBoxDir()+"/HEAD", []byte(newSnap.ID), 0600); err != nil {
 			return fmt.Errorf("更新本地 HEAD 失败: %w", err)
 		}
-		if err := os.WriteFile(config.CCBoxDir()+"/snapshots/"+newSnap.ID+".json", snapData, 0600); err != nil {
+		if err := config.WriteFileEnsureDir(config.CCBoxDir()+"/snapshots/"+newSnap.ID+".json", snapData, 0600); err != nil {
 			return fmt.Errorf("缓存快照失败: %w", err)
 		}
 
@@ -752,10 +752,10 @@ func (a *App) RepairRemoteFromLocal() int64 {
 			}
 			return fmt.Errorf("写入远程 HEAD 失败: %w", err)
 		}
-		if err := os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(snap.ID), 0600); err != nil {
+		if err := config.WriteFileEnsureDir(config.CCBoxDir()+"/HEAD", []byte(snap.ID), 0600); err != nil {
 			return fmt.Errorf("更新本地 HEAD 失败: %w", err)
 		}
-		if err := os.WriteFile(config.CCBoxDir()+"/snapshots/"+snap.ID+".json", snapData, 0600); err != nil {
+		if err := config.WriteFileEnsureDir(config.CCBoxDir()+"/snapshots/"+snap.ID+".json", snapData, 0600); err != nil {
 			return fmt.Errorf("缓存快照失败: %w", err)
 		}
 		registerDeviceInfo(client, cfg)

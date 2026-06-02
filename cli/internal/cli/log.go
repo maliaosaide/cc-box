@@ -140,7 +140,7 @@ func truncate(s string, max int) string {
 func loadClientAndKey() (*config.Config, *webdav.Client, []byte, error) {
 	cfg, err := config.Load()
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("请先运行 cc-box init")
+		return nil, nil, nil, fmt.Errorf("请先运行 cc-box init: %w", err)
 	}
 
 	key, err := crypto.LoadKey(config.KeyPath())
