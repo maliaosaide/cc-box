@@ -222,7 +222,7 @@ func (a *App) loadSnapByID(client *webdav.Client, key []byte, id string) (*snaps
 	}
 	// 缓存到本地
 	snapData, _ := snap.Serialize()
-	os.WriteFile(config.CCBoxDir()+"/snapshots/"+id+".json", snapData, 0600)
+	config.WriteFileEnsureDir(config.CCBoxDir()+"/snapshots/"+id+".json", snapData, 0600)
 	return snap, nil
 }
 
@@ -1540,10 +1540,10 @@ func (a *App) RevertToSnapshot(snapID string) error {
 		return fail(fmt.Errorf("远程 HEAD 已变化，请先拉取后再回滚"))
 	}
 
-	if err := os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(newSnap.ID), 0600); err != nil {
+	if err := config.WriteFileEnsureDir(config.CCBoxDir()+"/HEAD", []byte(newSnap.ID), 0600); err != nil {
 		return fmt.Errorf("更新本地 HEAD 失败: %w", err)
 	}
-	if err := os.WriteFile(config.CCBoxDir()+"/snapshots/"+newSnap.ID+".json", snapData, 0600); err != nil {
+	if err := config.WriteFileEnsureDir(config.CCBoxDir()+"/snapshots/"+newSnap.ID+".json", snapData, 0600); err != nil {
 		return fmt.Errorf("缓存恢复快照失败: %w", err)
 	}
 
@@ -1642,7 +1642,7 @@ func (a *App) SaveEncryptionPassword(password string) error {
 	if preview.Status != "success" {
 		return fmt.Errorf("%s", preview.Message)
 	}
-	if err := os.WriteFile(filepath.Join(config.CCBoxDir(), "salt.bin"), salt, 0600); err != nil {
+	if err := config.WriteFileEnsureDir(filepath.Join(config.CCBoxDir(), "salt.bin"), salt, 0600); err != nil {
 		return fmt.Errorf("保存 salt 失败: %w", err)
 	}
 	if err := crypto.SaveKey(key, config.KeyPath()); err != nil {

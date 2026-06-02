@@ -35,7 +35,7 @@ func runPush(cmd *cobra.Command, args []string) error {
 
 	cfg, err := config.Load()
 	if err != nil {
-		return fmt.Errorf("请先运行 cc-box init")
+		return fmt.Errorf("请先运行 cc-box init: %w", err)
 	}
 
 	key, err := crypto.LoadKey(config.KeyPath())

@@ -27,7 +27,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	// 加载配置
 	cfg, err := config.Load()
 	if err != nil {
-		return fmt.Errorf("请先运行 cc-box init")
+		return fmt.Errorf("请先运行 cc-box init: %w", err)
 	}
 
 	// 加载密钥

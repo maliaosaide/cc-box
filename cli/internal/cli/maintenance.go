@@ -64,19 +64,19 @@ func runBackup(cmd *cobra.Command, args []string) error {
 	// 备份 config.toml
 	configData, err := os.ReadFile(config.CCBoxDir() + "/config.toml")
 	if err == nil {
-		os.WriteFile(filepath.Join(backupPath, "config.toml"), configData, 0600)
+		config.WriteFileEnsureDir(filepath.Join(backupPath, "config.toml"), configData, 0600)
 	}
 
 	// 备份 HEAD
 	headData, err := os.ReadFile(config.CCBoxDir() + "/HEAD")
 	if err == nil {
-		os.WriteFile(filepath.Join(backupPath, "HEAD"), headData, 0600)
+		config.WriteFileEnsureDir(filepath.Join(backupPath, "HEAD"), headData, 0600)
 	}
 
 	// 备份 key.bin
 	keyData, err := os.ReadFile(config.KeyPath())
 	if err == nil {
-		os.WriteFile(filepath.Join(backupPath, "key.bin"), keyData, 0600)
+		config.WriteFileEnsureDir(filepath.Join(backupPath, "key.bin"), keyData, 0600)
 	}
 
 	// 备份快照缓存
@@ -86,7 +86,7 @@ func runBackup(cmd *cobra.Command, args []string) error {
 			if !entry.IsDir() {
 				data, err := os.ReadFile(filepath.Join(snapDir, entry.Name()))
 				if err == nil {
-					os.WriteFile(filepath.Join(backupPath, entry.Name()), data, 0600)
+					config.WriteFileEnsureDir(filepath.Join(backupPath, entry.Name()), data, 0600)
 				}
 			}
 		}
@@ -124,7 +124,7 @@ func runRestore(cmd *cobra.Command, args []string) error {
 			continue
 		}
 		targetPath := filepath.Join(config.CCBoxDir(), f)
-		os.WriteFile(targetPath, data, 0600)
+		config.WriteFileEnsureDir(targetPath, data, 0600)
 		fmt.Printf("  已恢复 %s\n", f)
 	}
 
@@ -137,7 +137,7 @@ func runRestore(cmd *cobra.Command, args []string) error {
 			}
 			data, err := os.ReadFile(filepath.Join(backupPath, entry.Name()))
 			if err == nil {
-				os.WriteFile(filepath.Join(targetSnapDir, entry.Name()), data, 0600)
+				config.WriteFileEnsureDir(filepath.Join(targetSnapDir, entry.Name()), data, 0600)
 			}
 		}
 	}

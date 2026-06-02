@@ -5,7 +5,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -163,16 +162,16 @@ func (a *App) InitNewDevice(url, username, password, root, encPassword, deviceNa
 	}
 	createdRemote = append(createdRemote, "HEAD")
 	cleanupRemote = false
-	if err := os.WriteFile(config.CCBoxDir()+"/salt.bin", salt, 0600); err != nil {
+	if err := config.WriteFileEnsureDir(config.CCBoxDir()+"/salt.bin", salt, 0600); err != nil {
 		return fmt.Errorf("保存 salt 失败: %w", err)
 	}
 	if err := crypto.SaveKey(key, config.KeyPath()); err != nil {
 		return fmt.Errorf("保存密钥失败: %w", err)
 	}
-	if err := os.WriteFile(config.CCBoxDir()+"/HEAD", []byte(snap.ID), 0600); err != nil {
+	if err := config.WriteFileEnsureDir(config.CCBoxDir()+"/HEAD", []byte(snap.ID), 0600); err != nil {
 		return fmt.Errorf("保存本地 HEAD 失败: %w", err)
 	}
-	if err := os.WriteFile(config.CCBoxDir()+"/snapshots/"+snap.ID+".json", snapData, 0600); err != nil {
+	if err := config.WriteFileEnsureDir(config.CCBoxDir()+"/snapshots/"+snap.ID+".json", snapData, 0600); err != nil {
 		return fmt.Errorf("缓存快照失败: %w", err)
 	}
 	registerDeviceInfo(client, cfg)
@@ -219,7 +218,7 @@ func (a *App) initJoinExisting(url, username, password, root, encPassword, devic
 	if err != nil {
 		return fmt.Errorf("下载远程 salt 失败: %w", err)
 	}
-	if err := os.WriteFile(config.CCBoxDir()+"/salt.bin", remoteSalt, 0600); err != nil {
+	if err := config.WriteFileEnsureDir(config.CCBoxDir()+"/salt.bin", remoteSalt, 0600); err != nil {
 		return fmt.Errorf("保存 salt 失败: %w", err)
 	}
 
@@ -252,7 +251,7 @@ func (a *App) initJoinExisting(url, username, password, root, encPassword, devic
 	if err := crypto.SaveKey(key, config.KeyPath()); err != nil {
 		return fmt.Errorf("保存密钥失败: %w", err)
 	}
-	if err := os.WriteFile(config.CCBoxDir()+"/snapshots/"+remoteHead+".json", decrypted, 0600); err != nil {
+	if err := config.WriteFileEnsureDir(config.CCBoxDir()+"/snapshots/"+remoteHead+".json", decrypted, 0600); err != nil {
 		return fmt.Errorf("缓存快照失败: %w", err)
 	}
 
